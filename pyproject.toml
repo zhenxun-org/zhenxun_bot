@@ -45,6 +45,7 @@ nonebot-plugin-alconna = "^0.54.0"
 tenacity = "^9.0.0"
 nonebot-plugin-uninfo = ">0.4.1"
 nonebot-plugin-waiter = "^0.8.1"
+multidict = ">=6.0.0,!=6.3.2"
 
 [tool.poetry.group.dev.dependencies]
 nonebug = "^0.4"
