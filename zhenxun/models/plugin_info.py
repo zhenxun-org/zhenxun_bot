@@ -74,7 +74,7 @@ class PluginInfo(Model):
         """
         if filter_parent:
             return await cls.get_or_none(
-                load_status=load_status, parent__isnull=True, **kwargs
+                load_status=load_status, plugin_type__not=PluginType.PARENT, **kwargs
             )
         return await cls.get_or_none(load_status=load_status, **kwargs)
 
@@ -93,7 +93,7 @@ class PluginInfo(Model):
         """
         if filter_parent:
             return await cls.filter(
-                load_status=load_status, parent__isnull=True, **kwargs
+                load_status=load_status, plugin_type__not=PluginType.PARENT, **kwargs
             ).all()
         return await cls.filter(load_status=load_status, **kwargs).all()
 
