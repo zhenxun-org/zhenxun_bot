@@ -128,6 +128,11 @@ class PluginDetail(PluginInfo):
     config_list: list[PluginConfig]
 
 
+class RenameMenuTypePayload(BaseModel):
+    old_name: str = Field(..., description="旧菜单类型名称")
+    new_name: str = Field(..., description="新菜单类型名称")
+
+
 class PluginIr(BaseModel):
     id: int
     """插件id"""

@@ -15,6 +15,7 @@ from .model import (
     PluginSwitch,
     UpdatePlugin,
     BatchUpdatePlugins,
+    RenameMenuTypePayload,
 )
 
 router = APIRouter(prefix="/plugin")
@@ -167,3 +168,28 @@ async def batch_update_plugin_config_api(params: BatchUpdatePlugins):
         # raise HTTPException(status_code=400, detail={"message": "部分插件更新失败", "errors": result["errors"]})
         pass # 暂时只返回结果字典
     return result
+
+
+# 新增：重命名菜单类型路由
+@router.put(
+    "/menu_type/rename", 
+    dependencies=[authentication()], 
+    response_model=Result,
+    summary="重命名菜单类型"
+)
+async def rename_menu_type_api(payload: RenameMenuTypePayload) -> Result:
+    try:
+        result = await ApiDataSource.rename_menu_type(old_name=payload.old_name, new_name=payload.new_name)
+        if result.get("success"):
+            return Result.ok(info=result.get("info", f"成功将 {result.get('updated_count', 0)} 个插件的菜单类型从 '{payload.old_name}' 修改为 '{payload.new_name}'"))
+        else:
+             # 这种情况理论上不会发生，因为 rename_menu_type 失败会抛异常
+            return Result.fail(info=result.get("info", "重命名失败"))
+    except ValueError as ve:
+        return Result.fail(info=str(ve))
+    except RuntimeError as re:
+        logger.error(f"{router.prefix}/menu_type/rename 调用错误", "WebUi", e=re)
+        return Result.fail(info=str(re))
+    except Exception as e:
+        logger.error(f"{router.prefix}/menu_type/rename 调用错误", "WebUi", e=e)
+        return Result.fail(info=f"发生未知错误: {type(e).__name__}")
