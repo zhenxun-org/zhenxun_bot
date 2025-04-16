@@ -139,26 +139,28 @@ async def _():
             create_list.append(plugin)
         else:
             plugin.id = module2id[plugin.module_path]
-            # 确保menu_type字段包含在更新列表中
+            # 确保只更新应该来自插件元数据的字段
             await plugin.save(
                 update_fields=[
                     "name",
                     "author",
                     "version",
-                    "admin_level",
                     "plugin_type",
+                    "admin_level",
                     "is_show",
-                    "menu_type",  # 添加menu_type到更新列表
+                    "ignore_prompt",
+                    # 移除了 menu_type
+                    # 确保 level, default_status, limit_superuser, cost_gold, impression, status, block_type 等用户配置不在此列表
                 ]
             )
             
-            # 验证更新是否成功
-            updated_plugin = await PluginInfo.get(id=plugin.id)
-            if updated_plugin.menu_type != plugin.menu_type:
-                logger.warning(f"插件 {plugin.name} 的menu_type更新失败: 期望值 '{plugin.menu_type}', 实际值 '{updated_plugin.menu_type}'")
-                # 尝试单独更新menu_type
-                updated_plugin.menu_type = plugin.menu_type
-                await updated_plugin.save(update_fields=["menu_type"])
+            # # 验证更新是否成功
+            # updated_plugin = await PluginInfo.get(id=plugin.id)
+            # if updated_plugin.menu_type != plugin.menu_type:
+            #     logger.warning(f"插件 {plugin.name} 的menu_type更新失败: 期望值 '{plugin.menu_type}', 实际值 '{updated_plugin.menu_type}'")
+            #     # 尝试单独更新menu_type
+            #     updated_plugin.menu_type = plugin.menu_type
+            #     await updated_plugin.save(update_fields=["menu_type"])
             
             update_list.append(plugin)
     
