@@ -534,10 +534,9 @@ class ConfigsManager:
 
     def reload(self):
         """重新加载配置文件"""
+        # 先备份当前配置
+        backup_data = copy.deepcopy(self._data)
         try:
-            # 先备份当前配置
-            backup_data = copy.deepcopy(self._data)
-            
             if self._simple_file.exists():
                 with open(self._simple_file, encoding="utf8") as f:
                     self._simple_data = _yaml.load(f)
@@ -553,10 +552,10 @@ class ConfigsManager:
                     if key in self._data and k in self._data[key].configs:
                         self._data[key].configs[k].value = self._simple_data[key][k]
             
-            # 保存更新后的配置
             self.save()
         except ScannerError as e:
             logger.error(f"配置文件解析失败: {str(e)}，保留现有配置")
+            self._data = backup_data
         except Exception as e:
             logger.error(f"重新加载配置失败: {str(e)}")
             # 发生错误时恢复到备份配置
