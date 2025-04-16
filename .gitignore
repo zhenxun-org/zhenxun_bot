@@ -154,11 +154,10 @@ plugins_/
 /zhenxun/plugins
 zhenxun_bot_webui/
 /debug
-/.env
 /.pytest_cache
 /docs_image
 /.github
 **/.vscode/
-
+/.vscode
 # 确保所有 .env 文件都被忽略
 .env*

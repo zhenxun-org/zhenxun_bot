@@ -14,6 +14,7 @@ from .model import (
     PluginInfo,
     PluginSwitch,
     UpdatePlugin,
+    BatchUpdatePlugins,
 )
 
 router = APIRouter(prefix="/plugin")
@@ -152,3 +153,17 @@ async def _(module: str) -> Result[PluginDetail]:
     except Exception as e:
         logger.error(f"{router.prefix}/get_plugin 调用错误", "WebUi", e=e)
         return Result.fail(f"{type(e)}: {e}")
+
+
+@router.put("/plugins/batch_update", summary="批量更新插件配置")
+async def batch_update_plugin_config_api(params: BatchUpdatePlugins):
+    """批量更新插件配置，如开关、类型等"""
+    result = await ApiDataSource.batch_update_plugins(params=params)
+    if result["errors"]:
+        # 可以根据需要返回更详细的错误信息，或者只返回一个笼统的失败信息
+        # 这里我们返回包含错误详情的 200 OK，让前端处理
+        # 或者可以抛出 HTTPException
+        # from fastapi import HTTPException
+        # raise HTTPException(status_code=400, detail={"message": "部分插件更新失败", "errors": result["errors"]})
+        pass # 暂时只返回结果字典
+    return result
