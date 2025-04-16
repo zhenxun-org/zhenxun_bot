@@ -204,6 +204,35 @@ class ApiDataSource:
         )
 
     @classmethod
+    async def rename_menu_type(cls, old_name: str, new_name: str) -> dict:
+        """重命名菜单类型，并更新所有相关插件
+
+        参数:
+            old_name: 旧菜单类型名称
+            new_name: 新菜单类型名称
+
+        返回:
+            dict: 更新结果, 例如 {'success': True, 'updated_count': 3}
+        """
+        if not old_name or not new_name:
+            raise ValueError("旧名称和新名称都不能为空")
+        if old_name == new_name:
+            return {"success": True, "updated_count": 0, "info": "新旧名称相同，无需更新"}
+        
+        # 检查新名称是否已存在（理论上前端会校验，后端再保险一次）
+        exists = await DbPluginInfo.filter(menu_type=new_name).exists()
+        if exists:
+             raise ValueError(f"新的菜单类型名称 '{new_name}' 已被其他插件使用")
+
+        try:
+            # 使用 filter().update() 进行批量更新
+            updated_count = await DbPluginInfo.filter(menu_type=old_name).update(menu_type=new_name)
+            return {"success": True, "updated_count": updated_count}
+        except Exception as e:
+            # 可以添加更详细的日志记录
+            raise RuntimeError(f"数据库更新菜单类型失败: {str(e)}")
+
+    @classmethod
     async def get_plugin_detail(cls, module: str) -> PluginDetail:
         """获取插件详情
 
