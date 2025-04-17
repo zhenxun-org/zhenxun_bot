@@ -366,24 +366,42 @@ class ConfigsManager:
 
         if not module or not key:
             raise ValueError("add_plugin_config: module和key不能为为空")
+        
+        key_upper = key.upper()
         self.add_module.append(f"{module}:{key}".lower())
-        if module in self._data and (config := self._data[module].configs.get(key)):
-            config.help = help
-            config.arg_parser = arg_parser
-            config.type = type
+        
+        # 检查配置是否已存在
+        config_exists = module in self._data and key_upper in self._data[module].configs
+        
+        # 如果配置已存在，仅更新元数据，保留原始值
+        if config_exists:
+            config = self._data[module].configs[key_upper]
+            # 只更新元数据
+            if help is not None:
+                config.help = help
+            if arg_parser is not None:
+                config.arg_parser = arg_parser
+            if type is not None:
+                config.type = type
+            # 只在强制覆盖模式下才更新值
             if _override:
                 config.value = value
                 config.default_value = default_value
         else:
-            key = key.upper()
+            # 配置不存在，创建新配置
             if not self._data.get(module):
                 self._data[module] = ConfigGroup(module=module)
-            self._data[module].configs[key] = ConfigModel(
+            self._data[module].configs[key_upper] = ConfigModel(
                 value=value,
                 help=help,
                 default_value=default_value,
                 type=type,
             )
+            
+            # 同时更新simple_data
+            if module not in self._simple_data:
+                self._simple_data[module] = {}
+            self._simple_data[module][key_upper] = value
 
     def set_config(
         self,
@@ -486,30 +504,63 @@ class ConfigsManager:
             path: 路径.
             save_simple_data: 同时保存至config.yaml.
         """
-        if save_simple_data:
-            with open(self._simple_file, "w", encoding="utf8") as f:
-                _yaml.dump(self._simple_data, f)
-        path = path or self.file
-        data = {}
-        for module in self._data:
-            data[module] = {}
-            for config in self._data[module].configs:
-                value = self._data[module].configs[config].dict()
-                del value["type"]
-                del value["arg_parser"]
-                data[module][config] = value
-        with open(path, "w", encoding="utf8") as f:
-            _yaml.dump(data, f)
+        try:
+            if save_simple_data:
+                # 使用临时文件进行原子写入
+                temp_simple_file = self._simple_file.with_suffix(".yaml.tmp")
+                with open(temp_simple_file, "w", encoding="utf8") as f:
+                    _yaml.dump(self._simple_data, f)
+                # 原子替换
+                temp_simple_file.replace(self._simple_file)
+                
+            path = path or self.file
+            data = {}
+            for module in self._data:
+                data[module] = {}
+                for config in self._data[module].configs:
+                    value = self._data[module].configs[config].dict()
+                    del value["type"]
+                    del value["arg_parser"]
+                    data[module][config] = value
+                    
+            # 使用临时文件进行原子写入
+            temp_file = Path(str(path) + ".tmp")
+            with open(temp_file, "w", encoding="utf8") as f:
+                _yaml.dump(data, f)
+            # 原子替换
+            temp_file.replace(path)
+        except Exception as e:
+            logger.error(f"保存配置文件失败: {str(e)}")
 
     def reload(self):
         """重新加载配置文件"""
-        if self._simple_file.exists():
-            with open(self._simple_file, encoding="utf8") as f:
-                self._simple_data = _yaml.load(f)
-        for key in self._simple_data.keys():
-            for k in self._simple_data[key].keys():
-                self._data[key].configs[k].value = self._simple_data[key][k]
-        self.save()
+        try:
+            # 先备份当前配置
+            backup_data = copy.deepcopy(self._data)
+            
+            if self._simple_file.exists():
+                with open(self._simple_file, encoding="utf8") as f:
+                    self._simple_data = _yaml.load(f)
+                    
+            # 检查加载的数据是否为None
+            if self._simple_data is None:
+                logger.error("配置文件为空或格式错误，保留原有配置")
+                self._simple_data = {}
+                
+            # 更新配置值
+            for key in self._simple_data.keys():
+                for k in self._simple_data[key].keys():
+                    if key in self._data and k in self._data[key].configs:
+                        self._data[key].configs[k].value = self._simple_data[key][k]
+            
+            # 保存更新后的配置
+            self.save()
+        except ScannerError as e:
+            logger.error(f"配置文件解析失败: {str(e)}，保留现有配置")
+        except Exception as e:
+            logger.error(f"重新加载配置失败: {str(e)}")
+            # 发生错误时恢复到备份配置
+            self._data = backup_data
 
     def load_data(self):
         """加载数据
