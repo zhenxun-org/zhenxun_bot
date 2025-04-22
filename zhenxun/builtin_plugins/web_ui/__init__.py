@@ -92,6 +92,8 @@ WsApiRouter.include_router(chat_routes)
 @driver.on_startup
 async def _():
     try:
+        # 存储任务引用的列表，防止任务被垃圾回收
+        _tasks = []
 
         async def log_sink(message: str):
             loop = None
@@ -102,7 +104,8 @@ async def _():
                     logger.warning("Web Ui log_sink", e=e)
             if not loop:
                 loop = asyncio.new_event_loop()
-            loop.create_task(LOG_STORAGE.add(message.rstrip("\n")))
+            # 存储任务引用到外部列表中
+            _tasks.append(loop.create_task(LOG_STORAGE.add(message.rstrip("\n"))))
 
         logger_.add(
             log_sink, colorize=True, filter=default_filter, format=default_format

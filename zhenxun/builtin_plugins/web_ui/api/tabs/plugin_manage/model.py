@@ -113,11 +113,15 @@ class BatchUpdatePluginItem(BaseModel):
     module: str = Field(..., description="插件模块名")
     default_status: bool | None = Field(None, description="默认状态(开关)")
     menu_type: str | None = Field(None, description="菜单类型")
-    block_type: BlockType | None = Field(None, description="插件禁用状态 (None: 启用, ALL: 禁用)")
+    block_type: BlockType | None = Field(
+        None, description="插件禁用状态 (None: 启用, ALL: 禁用)"
+    )
 
 
 class BatchUpdatePlugins(BaseModel):
-    updates: list[BatchUpdatePluginItem] = Field(..., description="要批量更新的插件列表")
+    updates: list[BatchUpdatePluginItem] = Field(
+        ..., description="要批量更新的插件列表"
+    )
 
 
 class PluginDetail(PluginInfo):
@@ -136,3 +140,18 @@ class RenameMenuTypePayload(BaseModel):
 class PluginIr(BaseModel):
     id: int
     """插件id"""
+
+
+class BatchUpdateResult(BaseModel):
+    """
+    批量更新插件结果
+    """
+
+    success: bool = Field(..., description="是否全部成功")
+    """是否全部成功"""
+    updated_count: int = Field(..., description="更新成功的数量")
+    """更新成功的数量"""
+    errors: list[dict[str, str]] = Field(
+        default_factory=list, description="错误信息列表"
+    )
+    """错误信息列表"""

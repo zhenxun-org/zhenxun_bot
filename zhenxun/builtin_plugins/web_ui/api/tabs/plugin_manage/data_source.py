@@ -2,12 +2,12 @@ import re
 
 import cattrs
 from fastapi import Query
+from tortoise.exceptions import DoesNotExist
 
 from zhenxun.configs.config import Config
 from zhenxun.configs.utils import ConfigGroup
 from zhenxun.models.plugin_info import PluginInfo as DbPluginInfo
 from zhenxun.utils.enum import BlockType, PluginType
-from tortoise.exceptions import DoesNotExist
 
 from .model import (
     BatchUpdatePlugins,
@@ -134,7 +134,7 @@ class ApiDataSource:
                         errors.append(
                             {
                                 "module": item.module,
-                                "error": f"Save block_type failed: {str(e_save)}",
+                                "error": f"Save block_type failed: {e_save!s}",
                             }
                         )
                         plugin_changed_other = False
@@ -158,7 +158,7 @@ class ApiDataSource:
                 errors.append(
                     {
                         "module": "batch_update_other",
-                        "error": f"Bulk update failed: {str(e_bulk)}",
+                        "error": f"Bulk update failed: {e_bulk!s}",
                     }
                 )
 
@@ -217,20 +217,26 @@ class ApiDataSource:
         if not old_name or not new_name:
             raise ValueError("旧名称和新名称都不能为空")
         if old_name == new_name:
-            return {"success": True, "updated_count": 0, "info": "新旧名称相同，无需更新"}
-        
+            return {
+                "success": True,
+                "updated_count": 0,
+                "info": "新旧名称相同，无需更新",
+            }
+
         # 检查新名称是否已存在（理论上前端会校验，后端再保险一次）
         exists = await DbPluginInfo.filter(menu_type=new_name).exists()
         if exists:
-             raise ValueError(f"新的菜单类型名称 '{new_name}' 已被其他插件使用")
+            raise ValueError(f"新的菜单类型名称 '{new_name}' 已被其他插件使用")
 
         try:
             # 使用 filter().update() 进行批量更新
-            updated_count = await DbPluginInfo.filter(menu_type=old_name).update(menu_type=new_name)
+            updated_count = await DbPluginInfo.filter(menu_type=old_name).update(
+                menu_type=new_name
+            )
             return {"success": True, "updated_count": updated_count}
         except Exception as e:
             # 可以添加更详细的日志记录
-            raise RuntimeError(f"数据库更新菜单类型失败: {str(e)}")
+            raise RuntimeError(f"数据库更新菜单类型失败: {e!s}")
 
     @classmethod
     async def get_plugin_detail(cls, module: str) -> PluginDetail:
