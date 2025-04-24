@@ -143,6 +143,37 @@ poetry install          # 安装依赖
 poetry run python bot.py
 ```
 
+## 🛠️ Docker-Compose部署（以SqlLite为例）
+
+```bash
+# 获取代码
+git clone https://github.com/HibiKier/zhenxun_bot.git
+
+# 修改.env.dev配置文件
+DB_URL = "sqlite:data/db/zhenxun.db"  # 根据自行需求配置地址
+HOST = 0.0.0.0
+
+# 进入目录
+cd zhenxun_bot
+
+# 启动容器
+docker-compose -f docker-compose-sqllite.yml up -d
+# docker-compose -f docker-compose-sqllite.yml up -d --build（这个是重新构建镜像）
+
+# 等待容器创建完成(中间可能由于后面的操作没有完成会一直自动重启)
+
+# 容器创建成功后会在当前目录下创建一个DockerData目录
+# 创建目录/DockerData/data/db
+# 将/data/config.yaml文件复制到/DockerData/data/config.yaml
+# 配置/DockerData/data/config.yaml中的WebUI账号密码
+web-ui:
+  USERNAME: admin
+  PASSWORD: 
+
+# 重启容器等一下资源文件下载完成就可以打开WebUI了
+# 如果资源文件下载失败，可以手动下载到/DockerData/resources目录下
+```
+
 ## 📝 简单配置
 
 > [!TIP]

@@ -1,0 +1,15 @@
+services:
+  zhenxun:
+    image: zhenxun
+    build: .
+    container_name: zhenxun
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "8080:8080"
+    volumes:
+      - $PWD/DockerData/data:/app/zhenxun/data
+      - $PWD/DockerData/resources:/app/zhenxun/resources
+      - $PWD/DockerData/log:/app/zhenxun/log
+    tty: true
+    stdin_open: true

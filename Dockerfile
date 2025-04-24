@@ -4,8 +4,11 @@ WORKDIR /tmp
 
 ENV POETRY_HOME="/opt/poetry" PATH="${PATH}:/opt/poetry/bin"
 
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/ && \
+    pip install --upgrade pip
+
 RUN curl -sSL https://install.python-poetry.org | python - -y && \
-  poetry self add poetry-plugin-export
+    poetry self add poetry-plugin-export
 
 COPY ./pyproject.toml ./poetry.lock* /tmp/
 
@@ -22,6 +25,8 @@ WORKDIR /wheel
 COPY --from=requirements-stage /tmp/requirements.txt /wheel/requirements.txt
 
 # RUN python3 -m pip config set global.index-url https://mirrors.aliyun.com/pypi/simple
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/ && \
+    pip install --upgrade pip
 
 RUN pip wheel --wheel-dir=/wheel --no-cache-dir --requirement /wheel/requirements.txt
 
@@ -44,12 +49,17 @@ ENV TZ=Asia/Shanghai PYTHONUNBUFFERED=1
 
 EXPOSE 8080
 
-RUN apt update && \
-    apt install -y --no-install-recommends curl fontconfig fonts-noto-color-emoji \
-    && apt clean \
-    && fc-cache -fv \
-    && apt-get purge -y --auto-remove curl \
-    && rm -rf /var/lib/apt/lists/*
+# 1. 确保目录存在
+RUN mkdir -p /etc/apt/sources.list.d
+# 2. 直接写入清华源（主源+安全源）
+RUN echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free" >> /etc/apt/sources.list && \
+    apt update && \
+    apt install -y --no-install-recommends curl fontconfig fonts-noto-color-emoji && \
+    apt clean && \
+    fc-cache -fv && \
+    apt-get purge -y --auto-remove curl && \
+    rm -rf /var/lib/apt/lists/*
 
 # 复制依赖项和应用代码
 COPY --from=build-stage /wheel /wheel

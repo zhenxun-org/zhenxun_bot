@@ -13,7 +13,6 @@ tests/
 .gitignore
 .pre-commit-config.yaml
 .prettier*
-.env.dev
 docker-compose.yml
 Dockerfile
 LICENSE
