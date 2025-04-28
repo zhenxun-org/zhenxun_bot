@@ -83,7 +83,7 @@ class PlatformUtils:
         bot: Bot,
         message: UniMessage | str,
         superuser_id: str | None = None,
-    ) -> Receipt | None:
+    ) -> list[tuple[str, Receipt]]:
         """发送消息给超级用户
 
         参数:
@@ -97,15 +97,33 @@ class PlatformUtils:
         返回:
             Receipt | None: Receipt
         """
-        if not superuser_id:
-            if platform := cls.get_platform(bot):
-                if platform_superusers := BotConfig.get_superuser(platform):
-                    superuser_id = random.choice(platform_superusers)
-                else:
-                    raise NotFindSuperuser()
+        superuser_ids = []
+        if superuser_id:
+            superuser_ids.append(superuser_id)
+        elif platform := cls.get_platform(bot):
+            if platform_superusers := BotConfig.get_superuser(platform):
+                superuser_ids = platform_superusers
+            else:
+                raise NotFindSuperuser()
         if isinstance(message, str):
             message = MessageUtils.build_message(message)
-        return await cls.send_message(bot, superuser_id, None, message)
+        result = []
+        for superuser_id in superuser_ids:
+            try:
+                result.append(
+                    (
+                        superuser_id,
+                        await cls.send_message(bot, superuser_id, None, message),
+                    )
+                )
+            except Exception as e:
+                logger.error(
+                    "发送消息给超级用户失败",
+                    "PlatformUtils:send_superuser",
+                    target=superuser_id,
+                    e=e,
+                )
+        return result
 
     @classmethod
     async def get_group_member_list(cls, bot: Bot, group_id: str) -> list[UserData]:

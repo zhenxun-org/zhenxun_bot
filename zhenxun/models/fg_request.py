@@ -5,6 +5,7 @@ from tortoise import fields
 
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.services.db_context import Model
+from zhenxun.utils.common_utils import SqlUtils
 from zhenxun.utils.enum import RequestHandleType, RequestType
 from zhenxun.utils.exception import NotFoundError
 
@@ -34,6 +35,8 @@ class FgRequest(Model):
         RequestHandleType, null=True, description="处理类型"
     )
     """处理类型"""
+    message_ids = fields.CharField(max_length=255, null=True, description="消息id列表")
+    """消息id列表"""
 
     class Meta:  # pyright: ignore [reportIncompatibleVariableOverride]
         table = "fg_request"
@@ -129,3 +132,9 @@ class FgRequest(Model):
                     approve=handle_type == RequestHandleType.APPROVE,
                 )
         return req
+
+    @classmethod
+    async def _run_script(cls):
+        return [
+            SqlUtils.add_column("fg_request", "message_ids", "character varying(255)")
+        ]
