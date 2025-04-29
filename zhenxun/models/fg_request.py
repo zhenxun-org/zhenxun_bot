@@ -3,6 +3,7 @@ from typing_extensions import Self
 from nonebot.adapters import Bot
 from tortoise import fields
 
+from zhenxun.configs.config import BotConfig
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.services.db_context import Model
 from zhenxun.utils.common_utils import SqlUtils
@@ -126,11 +127,20 @@ class FgRequest(Model):
                 await GroupConsole.update_or_create(
                     group_id=req.group_id, defaults={"group_flag": 1}
                 )
-                await bot.set_group_add_request(
-                    flag=req.flag,
-                    sub_type="invite",
-                    approve=handle_type == RequestHandleType.APPROVE,
-                )
+                if req.flag == "0":
+                    # 用户手动申请入群，创建群认证后提醒用户拉群
+                    await bot.send_private_msg(
+                        user_id=req.user_id,
+                        message=f"已同意你对{BotConfig.self_nickname}的申请群组："
+                        f"{req.group_id}，可以直接手动拉入群组，{BotConfig.self_nickname}会自动同意。",
+                    )
+                else:
+                    # 正常同意群组请求
+                    await bot.set_group_add_request(
+                        flag=req.flag,
+                        sub_type="invite",
+                        approve=handle_type == RequestHandleType.APPROVE,
+                    )
         return req
 
     @classmethod

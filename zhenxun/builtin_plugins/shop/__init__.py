@@ -33,6 +33,7 @@ __plugin_meta__ = PluginMetadata(
     usage="""
     商品操作
     指令：
+        商店
         我的金币
         我的道具
         使用道具 [名称/Id]

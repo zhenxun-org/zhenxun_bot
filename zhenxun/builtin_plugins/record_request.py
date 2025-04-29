@@ -123,7 +123,9 @@ async def _(bot: v12Bot | v11Bot, event: FriendRequestEvent, session: EventSessi
                 f"备注：{event.comment}",
             )
             if message_ids := [
-                r[1].msg_ids[0]["message_id"] for r in results if r and r[1].msg_ids
+                str(r[1].msg_ids[0]["message_id"])
+                for r in results
+                if r[1] and r[1].msg_ids
             ]:
                 f.message_ids = ",".join(message_ids)
                 await f.save(update_fields=["message_ids"])
@@ -254,7 +256,7 @@ async def _(bot: v12Bot | v11Bot, event: GroupRequestEvent, session: EventSessio
             f"{kick_message}",
         )
         if message_ids := [
-            r[1].msg_ids[0]["message_id"] for r in results if r and r[1].msg_ids
+            str(r[1].msg_ids[0]["message_id"]) for r in results if r[1] and r[1].msg_ids
         ]:
             f.message_ids = ",".join(message_ids)
             await f.save(update_fields=["message_ids"])
