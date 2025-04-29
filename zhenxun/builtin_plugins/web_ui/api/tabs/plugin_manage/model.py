@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from zhenxun.utils.enum import BlockType
 
@@ -37,19 +37,19 @@ class UpdatePlugin(BaseModel):
     module: str
     """模块"""
     default_status: bool
-    """默认开关"""
+    """是否默认开启"""
     limit_superuser: bool
-    """限制超级用户"""
-    cost_gold: int
-    """金币花费"""
-    menu_type: str
-    """插件菜单类型"""
+    """是否限制超级用户"""
     level: int
-    """插件所需群权限"""
+    """等级"""
+    cost_gold: int
+    """花费金币"""
+    menu_type: str
+    """菜单类型"""
     block_type: BlockType | None = None
     """禁用类型"""
     configs: dict[str, Any] | None = None
-    """配置项"""
+    """设置项"""
 
 
 class PluginInfo(BaseModel):
@@ -58,27 +58,26 @@ class PluginInfo(BaseModel):
     """
 
     module: str
-    """插件名称"""
+    """模块"""
     plugin_name: str
-    """插件中文名称"""
+    """插件名称"""
     default_status: bool
-    """默认开关"""
+    """是否默认开启"""
     limit_superuser: bool
-    """限制超级用户"""
+    """是否限制超级用户"""
+    level: int
+    """等级"""
     cost_gold: int
     """花费金币"""
     menu_type: str
-    """插件菜单类型"""
+    """菜单类型"""
     version: str
-    """插件版本"""
-    level: int
-    """群权限"""
+    """版本"""
     status: bool
-    """当前状态"""
+    """状态"""
     author: str | None = None
     """作者"""
-    block_type: BlockType | None = None
-    """禁用类型"""
+    block_type: BlockType | None = Field(None, description="插件禁用状态 (None: 启用)")
 
 
 class PluginConfig(BaseModel):
@@ -86,20 +85,13 @@ class PluginConfig(BaseModel):
     插件配置项
     """
 
-    module: str
-    """模块"""
-    key: str
-    """键"""
-    value: Any
-    """值"""
-    help: str | None = None
-    """帮助"""
-    default_value: Any
-    """默认值"""
-    type: Any = None
-    """值类型"""
-    type_inner: list[str] | None = None
-    """List Tuple等内部类型检验"""
+    module: str = Field(..., description="模块名")
+    key: str = Field(..., description="键")
+    value: Any = Field(None, description="值")
+    help: str | None = Field(None, description="帮助信息")
+    default_value: Any = Field(None, description="默认值")
+    type: str | None = Field(None, description="类型")
+    type_inner: list[str] | None = Field(None, description="内部类型")
 
 
 class PluginCount(BaseModel):
@@ -117,6 +109,21 @@ class PluginCount(BaseModel):
     """其他插件"""
 
 
+class BatchUpdatePluginItem(BaseModel):
+    module: str = Field(..., description="插件模块名")
+    default_status: bool | None = Field(None, description="默认状态(开关)")
+    menu_type: str | None = Field(None, description="菜单类型")
+    block_type: BlockType | None = Field(
+        None, description="插件禁用状态 (None: 启用, ALL: 禁用)"
+    )
+
+
+class BatchUpdatePlugins(BaseModel):
+    updates: list[BatchUpdatePluginItem] = Field(
+        ..., description="要批量更新的插件列表"
+    )
+
+
 class PluginDetail(PluginInfo):
     """
     插件详情
@@ -125,6 +132,26 @@ class PluginDetail(PluginInfo):
     config_list: list[PluginConfig]
 
 
+class RenameMenuTypePayload(BaseModel):
+    old_name: str = Field(..., description="旧菜单类型名称")
+    new_name: str = Field(..., description="新菜单类型名称")
+
+
 class PluginIr(BaseModel):
     id: int
     """插件id"""
+
+
+class BatchUpdateResult(BaseModel):
+    """
+    批量更新插件结果
+    """
+
+    success: bool = Field(..., description="是否全部成功")
+    """是否全部成功"""
+    updated_count: int = Field(..., description="更新成功的数量")
+    """更新成功的数量"""
+    errors: list[dict[str, str]] = Field(
+        default_factory=list, description="错误信息列表"
+    )
+    """错误信息列表"""
