@@ -91,8 +91,8 @@ class ShopManage:
             "plugins.json"
         )
         extra_github_url = await extra_github_repo.get_raw_download_urls("plugins.json")
-        res = await AsyncHttpx.get(default_github_url)
-        res2 = await AsyncHttpx.get(extra_github_url)
+        res = await AsyncHttpx.get(default_github_url,check_status_code=200)
+        res2 = await AsyncHttpx.get(extra_github_url,check_status_code=200)
 
         # 检查请求结果
         if res.status_code != 200 or res2.status_code != 200:
