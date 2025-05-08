@@ -78,6 +78,13 @@ class PluginInfo(BaseModel):
     author: str | None = None
     """作者"""
     block_type: BlockType | None = Field(None, description="插件禁用状态 (None: 启用)")
+    """禁用状态"""
+    is_builtin: bool = False
+    """是否为内置插件"""
+    allow_switch: bool = True
+    """是否允许开关"""
+    allow_setting: bool = True
+    """是否允许设置"""
 
 
 class PluginConfig(BaseModel):

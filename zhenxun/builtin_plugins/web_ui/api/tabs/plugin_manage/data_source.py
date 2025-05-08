@@ -52,6 +52,10 @@ class ApiDataSource:
                 status=plugin.status,
                 author=plugin.author,
                 block_type=plugin.block_type,
+                is_builtin="builtin_plugins" in plugin.module_path
+                or plugin.plugin_type == PluginType.HIDDEN,
+                allow_setting=plugin.plugin_type != PluginType.HIDDEN,
+                allow_switch=plugin.plugin_type != PluginType.HIDDEN,
             )
             plugin_list.append(plugin_info)
         return plugin_list

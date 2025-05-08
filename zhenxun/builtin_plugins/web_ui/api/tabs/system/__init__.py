@@ -36,6 +36,8 @@ async def _(path: str | None = None) -> Result[list[DirFile]]:
                 is_image=is_image,
                 name=file,
                 parent=path,
+                size=None if file_path.is_dir() else file_path.stat().st_size,
+                mtime=file_path.stat().st_mtime,
             )
         )
     return Result.ok(data_list)

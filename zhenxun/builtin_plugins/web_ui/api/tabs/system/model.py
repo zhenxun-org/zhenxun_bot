@@ -14,6 +14,10 @@ class DirFile(BaseModel):
     """文件夹或文件名称"""
     parent: str | None = None
     """父级"""
+    size: int | None = None
+    """文件大小"""
+    mtime: float | None = None
+    """修改时间"""
 
 
 class DeleteFile(BaseModel):
