@@ -50,7 +50,7 @@ ICON2STR = {
 
 
 def __handle_item(
-    bot: BotConsole, ,plugin: PluginInfo, group: GroupConsole | None, is_detail: bool
+    bot: BotConsole, plugin: PluginInfo, group: GroupConsole | None, is_detail: bool
 ) -> Item:
     """构造Item
 
