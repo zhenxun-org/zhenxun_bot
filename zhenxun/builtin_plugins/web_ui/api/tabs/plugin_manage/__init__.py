@@ -6,7 +6,7 @@ from zhenxun.services.log import logger
 from zhenxun.utils.enum import BlockType, PluginType
 
 from ....base_model import Result
-from ....utils import authentication
+from ....utils import authentication, clear_help_image
 from .data_source import ApiDataSource
 from .model import (
     BatchUpdatePlugins,
@@ -80,6 +80,7 @@ async def _() -> Result[PluginCount]:
 async def _(param: UpdatePlugin) -> Result:
     try:
         await ApiDataSource.update_plugin(param)
+        clear_help_image()
         return Result.ok(info="已经帮你写好啦!")
     except (ValueError, KeyError):
         return Result.fail("插件数据不存在...")
@@ -107,6 +108,7 @@ async def _(param: PluginSwitch) -> Result:
             db_plugin.block_type = None
             db_plugin.status = True
         await db_plugin.save()
+        clear_help_image()
         return Result.ok(info="成功改变了开关状态!")
     except Exception as e:
         logger.error(f"{router.prefix}/change_switch 调用错误", "WebUi", e=e)
@@ -173,6 +175,7 @@ async def batch_update_plugin_config_api(
             updated_count=result_dict["updated_count"],
             errors=result_dict["errors"],
         )
+        clear_help_image()
         return Result.ok(result_model, "插件配置更新完成")
     except Exception as e:
         logger.error(f"{router.prefix}/plugins/batch_update 调用错误", "WebUi", e=e)
@@ -192,6 +195,7 @@ async def rename_menu_type_api(payload: RenameMenuTypePayload) -> Result:
             old_name=payload.old_name, new_name=payload.new_name
         )
         if result.get("success"):
+            clear_help_image()
             return Result.ok(
                 info=result.get(
                     "info",

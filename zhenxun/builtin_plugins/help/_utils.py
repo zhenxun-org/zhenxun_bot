@@ -1,5 +1,8 @@
 from collections.abc import Callable
 
+from nonebot_plugin_uninfo import Uninfo
+
+from zhenxun.models.bot_console import BotConsole
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.utils.enum import PluginType
@@ -27,13 +30,15 @@ async def sort_type() -> dict[str, list[PluginInfo]]:
 
 
 async def classify_plugin(
-    group_id: str | None, is_detail: bool, handle: Callable
+    session: Uninfo, group_id: str | None, is_detail: bool, handle: Callable
 ) -> dict[str, list]:
     """对插件进行分类并判断状态
 
     参数:
+        session: Uninfo对象
         group_id: 群组id
         is_detail: 是否详细帮助
+        handle: 回调方法
 
     返回:
         dict[str, list[Item]]: 分类插件数据
@@ -41,9 +46,10 @@ async def classify_plugin(
     sort_data = await sort_type()
     classify: dict[str, list] = {}
     group = await GroupConsole.get_or_none(group_id=group_id) if group_id else None
+    bot = await BotConsole.get_or_none(bot_id=session.self_id)
     for menu, value in sort_data.items():
         for plugin in value:
             if not classify.get(menu):
                 classify[menu] = []
-            classify[menu].append(handle(plugin, group, is_detail))
+            classify[menu].append(handle(bot, plugin, group, is_detail))
     return classify

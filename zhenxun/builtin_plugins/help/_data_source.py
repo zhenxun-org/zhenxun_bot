@@ -40,7 +40,9 @@ async def create_help_img(
 
     match help_type:
         case "html":
-            result = BuildImage.open(await build_html_image(group_id, is_detail))
+            result = BuildImage.open(
+                await build_html_image(session, group_id, is_detail)
+            )
         case "zhenxun":
             result = BuildImage.open(
                 await build_zhenxun_image(session, group_id, is_detail)

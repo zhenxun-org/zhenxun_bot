@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from zhenxun.configs.config import BotConfig
 from zhenxun.configs.path_config import TEMPLATE_PATH
 from zhenxun.configs.utils import PluginExtraData
+from zhenxun.models.bot_console import BotConsole
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.utils.enum import BlockType
@@ -21,12 +22,19 @@ class Item(BaseModel):
     """插件命令"""
 
 
-def __handle_item(plugin: PluginInfo, group: GroupConsole | None, is_detail: bool):
+def __handle_item(
+    bot: BotConsole | None,
+    plugin: PluginInfo,
+    group: GroupConsole | None,
+    is_detail: bool,
+):
     """构造Item
 
     参数:
+        bot: BotConsole
         plugin: PluginInfo
         group: 群组
+        is_detail: 是否为详细
 
     返回:
         Item: Item
@@ -39,6 +47,8 @@ def __handle_item(plugin: PluginInfo, group: GroupConsole | None, is_detail: boo
         elif not group and plugin.block_type == BlockType.PRIVATE:
             plugin.name = f"{plugin.name}(不可用)"
     elif group and f"{plugin.module}," in group.block_plugin:
+        plugin.name = f"{plugin.name}(不可用)"
+    elif bot and f"{plugin.module}," in bot.block_plugins:
         plugin.name = f"{plugin.name}(不可用)"
     commands = []
     nb_plugin = nonebot.get_plugin_by_module_name(plugin.module_path)
@@ -142,7 +152,7 @@ async def build_zhenxun_image(
         group_id: 群号
         is_detail: 是否详细帮助
     """
-    classify = await classify_plugin(group_id, is_detail, __handle_item)
+    classify = await classify_plugin(session, group_id, is_detail, __handle_item)
     plugin_list = build_plugin_data(classify)
     platform = PlatformUtils.get_platform(session)
     bot_id = BotConfig.get_qbot_uid(session.self_id) or session.self_id

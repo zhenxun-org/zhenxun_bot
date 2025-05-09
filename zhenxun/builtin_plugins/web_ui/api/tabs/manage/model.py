@@ -237,6 +237,8 @@ class MessageItem(BaseModel):
     """消息类型"""
     msg: str
     """内容"""
+    time: str
+    """发送日期"""
 
 
 class Message(BaseModel):
