@@ -92,7 +92,7 @@ class ApiDataSource:
         """
         version_file = Path() / "__version__"
         if version_file.exists():
-            if text := version_file.open().read():
+            if text := version_file.open(encoding="utf-8").read():
                 return text.replace("__version__: ", "").strip()
         return "unknown"
 
