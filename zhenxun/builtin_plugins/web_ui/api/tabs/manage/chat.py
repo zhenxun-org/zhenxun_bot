@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter
 import nonebot
 from nonebot import on_message
@@ -49,13 +51,14 @@ async def message_handle(
     message: UniMsg,
     group_id: str | None,
 ):
+    time = str(datetime.now().replace(microsecond=0))
     messages = []
     for m in message:
         if isinstance(m, Text | str):
-            messages.append(MessageItem(type="text", msg=str(m)))
+            messages.append(MessageItem(type="text", msg=str(m), time=time))
         elif isinstance(m, Image):
             if m.url:
-                messages.append(MessageItem(type="img", msg=m.url))
+                messages.append(MessageItem(type="img", msg=m.url, time=time))
         elif isinstance(m, At):
             if group_id:
                 if m.target == "0":
@@ -72,9 +75,9 @@ async def message_handle(
                         uname = group_user.user_name
                         if m.target not in ID2NAME[group_id]:
                             ID2NAME[group_id][m.target] = uname
-                messages.append(MessageItem(type="at", msg=f"@{uname}"))
+                messages.append(MessageItem(type="at", msg=f"@{uname}", time=time))
         elif isinstance(m, Hyper):
-            messages.append(MessageItem(type="text", msg="[分享消息]"))
+            messages.append(MessageItem(type="text", msg="[分享消息]", time=time))
     return messages
 
 

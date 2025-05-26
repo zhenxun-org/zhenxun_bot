@@ -60,27 +60,41 @@ class PluginInfo(Model):
         table_description = "插件基本信息"
 
     @classmethod
-    async def get_plugin(cls, load_status: bool = True, **kwargs) -> Self | None:
+    async def get_plugin(
+        cls, load_status: bool = True, filter_parent: bool = True, **kwargs
+    ) -> Self | None:
         """获取插件列表
 
         参数:
             load_status: 加载状态.
+            filter_parent: 过滤父组件
 
         返回:
             Self | None: 插件
         """
+        if filter_parent:
+            return await cls.get_or_none(
+                load_status=load_status, plugin_type__not=PluginType.PARENT, **kwargs
+            )
         return await cls.get_or_none(load_status=load_status, **kwargs)
 
     @classmethod
-    async def get_plugins(cls, load_status: bool = True, **kwargs) -> list[Self]:
+    async def get_plugins(
+        cls, load_status: bool = True, filter_parent: bool = True, **kwargs
+    ) -> list[Self]:
         """获取插件列表
 
         参数:
             load_status: 加载状态.
+            filter_parent: 过滤父组件
 
         返回:
             list[Self]: 插件列表
         """
+        if filter_parent:
+            return await cls.filter(
+                load_status=load_status, plugin_type__not=PluginType.PARENT, **kwargs
+            ).all()
         return await cls.filter(load_status=load_status, **kwargs).all()
 
     @classmethod

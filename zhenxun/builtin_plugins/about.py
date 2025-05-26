@@ -26,6 +26,21 @@ __plugin_meta__ = PluginMetadata(
 _matcher = on_alconna(Alconna("关于"), priority=5, block=True, rule=to_me())
 
 
+QQ_INFO = """
+『绪山真寻Bot』
+版本：{version}
+简介：基于Nonebot2开发，支持多平台，是一个非常可爱的Bot呀，希望与大家要好好相处
+""".strip()
+
+INFO = """
+『绪山真寻Bot』
+版本：{version}
+简介：基于Nonebot2开发，支持多平台，是一个非常可爱的Bot呀，希望与大家要好好相处
+项目地址：https://github.com/zhenxun-org/zhenxun_bot
+文档地址：https://zhenxun-org.github.io/zhenxun_bot/
+""".strip()
+
+
 @_matcher.handle()
 async def _(session: Uninfo, arparma: Arparma):
     ver_file = Path() / "__version__"
@@ -35,25 +50,11 @@ async def _(session: Uninfo, arparma: Arparma):
             if text := await f.read():
                 version = text.split(":")[-1].strip()
     if PlatformUtils.is_qbot(session):
-        info: list[str | Path] = [
-            f"""
-『绪山真寻Bot』
-版本：{version}
-简介：基于Nonebot2开发，支持多平台，是一个非常可爱的Bot呀，希望与大家要好好相处
-        """.strip()
-        ]
+        result: list[str | Path] = [QQ_INFO.format(version=version)]
         path = DATA_PATH / "about.png"
         if path.exists():
-            info.append(path)
+            result.append(path)
+        await MessageUtils.build_message(result).send()  # type: ignore
     else:
-        info = [
-            f"""
-『绪山真寻Bot』
-版本：{version}
-简介：基于Nonebot2开发，支持多平台，是一个非常可爱的Bot呀，希望与大家要好好相处
-项目地址：https://github.com/HibiKier/zhenxun_bot
-文档地址：https://hibikier.github.io/zhenxun_bot/
-        """.strip()
-        ]
-    await MessageUtils.build_message(info).send()  # type: ignore
-    logger.info("查看关于", arparma.header_result, session=session)
+        await MessageUtils.build_message(INFO.format(version=version)).send()
+        logger.info("查看关于", arparma.header_result, session=session)

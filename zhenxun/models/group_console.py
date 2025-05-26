@@ -41,9 +41,9 @@ def convert_module_format(data: str | list[str]) -> str | list[str]:
         str | list[str]: 根据输入类型返回转换后的数据。
     """
     if isinstance(data, str):
-        return [item.strip(",") for item in data.split("<") if item]
+        return [item.strip(",") for item in data.split("<") if item.strip()]
     else:
-        return "".join(format(item) for item in data)
+        return "".join(add_disable_marker(item) for item in data)
 
 
 class GroupConsole(Model):

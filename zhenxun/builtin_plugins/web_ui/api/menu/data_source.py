@@ -46,7 +46,10 @@ class MenuManage:
                     icon="database",
                 ),
                 MenuItem(
-                    name="系统信息", module="system", router="/system", icon="system"
+                    name="文件管理", module="system", router="/system", icon="system"
+                ),
+                MenuItem(
+                    name="关于我们", module="about", router="/about", icon="about"
                 ),
             ]
             self.save()

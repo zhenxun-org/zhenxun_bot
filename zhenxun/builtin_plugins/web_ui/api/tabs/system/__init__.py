@@ -36,6 +36,8 @@ async def _(path: str | None = None) -> Result[list[DirFile]]:
                 is_image=is_image,
                 name=file,
                 parent=path,
+                size=None if file_path.is_dir() else file_path.stat().st_size,
+                mtime=file_path.stat().st_mtime,
             )
         )
     return Result.ok(data_list)
@@ -215,3 +217,13 @@ async def _(full_path: str) -> Result[str]:
         return Result.ok(BuildImage.open(path).pic2bs4())
     except Exception as e:
         return Result.warning_(f"获取图片失败: {e!s}")
+
+
+@router.get(
+    "/ping",
+    response_model=Result[str],
+    response_class=JSONResponse,
+    description="检查服务器状态",
+)
+async def _() -> Result[str]:
+    return Result.ok("pong")
