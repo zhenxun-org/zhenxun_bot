@@ -4,7 +4,8 @@ from strenum import StrEnum
 class BotSentType(StrEnum):
     GROUP = "GROUP"
     PRIVATE = "PRIVATE"
-    
+
+
 class BankHandleType(StrEnum):
     DEPOSIT = "DEPOSIT"
     """存款"""
