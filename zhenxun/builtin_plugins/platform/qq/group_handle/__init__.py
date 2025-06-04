@@ -141,7 +141,7 @@ async def _(
     group_id = str(event.group_id)
     if event.sub_type == "kick_me":
         """踢出Bot"""
-        await GroupManager.kick_bot(bot, user_id, group_id)
+        await GroupManager.kick_bot(bot, group_id, str(event.operator_id))
     elif event.sub_type in ["leave", "kick"]:
         result = await GroupManager.run_user(
             bot, user_id, group_id, str(event.operator_id), event.sub_type

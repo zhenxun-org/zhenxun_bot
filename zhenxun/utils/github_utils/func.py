@@ -23,7 +23,6 @@ async def get_fastest_raw_formats() -> list[str]:
     formats: dict[str, str] = {
         "https://raw.githubusercontent.com/": RAW_CONTENT_FORMAT,
         "https://ghproxy.cc/": f"https://ghproxy.cc/{RAW_CONTENT_FORMAT}",
-        "https://mirror.ghproxy.com/": f"https://mirror.ghproxy.com/{RAW_CONTENT_FORMAT}",
         "https://gh-proxy.com/": f"https://gh-proxy.com/{RAW_CONTENT_FORMAT}",
         "https://cdn.jsdelivr.net/": "https://cdn.jsdelivr.net/gh/{owner}/{repo}@{branch}/{path}",
     }
@@ -36,7 +35,6 @@ async def get_fastest_archive_formats() -> list[str]:
     formats: dict[str, str] = {
         "https://github.com/": ARCHIVE_URL_FORMAT,
         "https://ghproxy.cc/": f"https://ghproxy.cc/{ARCHIVE_URL_FORMAT}",
-        "https://mirror.ghproxy.com/": f"https://mirror.ghproxy.com/{ARCHIVE_URL_FORMAT}",
         "https://gh-proxy.com/": f"https://gh-proxy.com/{ARCHIVE_URL_FORMAT}",
     }
     return await __get_fastest_formats(formats)
@@ -48,7 +46,6 @@ async def get_fastest_release_formats() -> list[str]:
     formats: dict[str, str] = {
         "https://objects.githubusercontent.com/": RELEASE_ASSETS_FORMAT,
         "https://ghproxy.cc/": f"https://ghproxy.cc/{RELEASE_ASSETS_FORMAT}",
-        "https://mirror.ghproxy.com/": f"https://mirror.ghproxy.com/{RELEASE_ASSETS_FORMAT}",
         "https://gh-proxy.com/": f"https://gh-proxy.com/{RELEASE_ASSETS_FORMAT}",
     }
     return await __get_fastest_formats(formats)
