@@ -26,6 +26,19 @@ class BankHandleType(StrEnum):
     """利息"""
 
 
+class EventLogType(StrEnum):
+    GROUP_MEMBER_INCREASE = "GROUP_MEMBER_INCREASE"
+    """群成员增加"""
+    GROUP_MEMBER_DECREASE = "GROUP_MEMBER_DECREASE"
+    """群成员减少"""
+    KICK_MEMBER = "KICK_MEMBER"
+    """踢出群成员"""
+    KICK_BOT = "KICK_BOT"
+    """踢出Bot"""
+    LEAVE_MEMBER = "LEAVE_MEMBER"
+    """主动退群"""
+
+
 class GoldHandle(StrEnum):
     """
     金币处理
@@ -117,7 +130,9 @@ class RequestType(StrEnum):
     """
 
     FRIEND = "FRIEND"
+    """好友"""
     GROUP = "GROUP"
+    """群组"""
 
 
 class RequestHandleType(StrEnum):

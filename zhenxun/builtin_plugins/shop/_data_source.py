@@ -345,10 +345,11 @@ class ShopManage:
         if num > param.max_num_limit:
             return f"{goods_info.goods_name} 单次使用最大数量为{param.max_num_limit}..."
         await cls.run_before_after(goods, param, session, message, "before", **kwargs)
-        result = await cls.__run(goods, param, session, message, **kwargs)
         await UserConsole.use_props(
             session.user.id, goods_info.uuid, num, PlatformUtils.get_platform(session)
         )
+        result = await cls.__run(goods, param, session, message, **kwargs)
+
         await cls.run_before_after(goods, param, session, message, "after", **kwargs)
         if not result and param.send_success_msg:
             result = f"使用道具 {goods.name} {num} 次成功！"

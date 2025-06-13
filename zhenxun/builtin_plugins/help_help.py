@@ -21,7 +21,7 @@ from zhenxun.utils.message import MessageUtils
 __plugin_meta__ = PluginMetadata(
     name="笨蛋检测",
     description="功能名称当命令检测",
-    usage="""被动""".strip(),
+    usage="""当一些笨蛋直接输入功能名称时，提示笨蛋使用帮助指令查看功能帮助""".strip(),
     extra=PluginExtraData(
         author="HibiKier",
         version="0.1",
