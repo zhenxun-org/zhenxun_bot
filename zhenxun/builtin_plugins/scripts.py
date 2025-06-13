@@ -1,10 +1,6 @@
-import nonebot
-from nonebot.drivers import Driver
-
 from zhenxun.models.group_console import GroupConsole
-from zhenxun.services.log import logger
-from zhenxun.utils.http_utils import AsyncHttpx
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
+
 
 @PriorityLifecycle.on_startup(priority=5)
 async def _():
