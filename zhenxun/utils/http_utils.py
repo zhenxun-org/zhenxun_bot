@@ -1,9 +1,9 @@
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 import time
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, cast
 
 import aiofiles
 import httpx
@@ -276,38 +276,43 @@ class AsyncHttpx:
     @classmethod
     async def gather_download_file(
         cls,
-        url_list: list[str],
-        path_list: list[str | Path],
+        url_list: Sequence[list[str] | str],
+        path_list: Sequence[str | Path],
         *,
         limit_async_number: int = 5,
         **kwargs,
     ) -> list[bool]:
-        """并发下载多个文件。
+        """并发下载多个文件，支持为每个文件提供备用镜像链接。
 
         说明:
             使用 asyncio.Semaphore 来控制并发请求的数量。
+            对于 url_list 中的每个元素，如果它是一个列表，则会依次尝试直到下载成功。
 
         参数:
-            url_list: 包含所有文件 URL 的列表。
-            path_list: 与 URL 列表对应的文件保存路径列表。
+            url_list: 包含所有文件下载任务的列表。每个元素可以是：
+                      - 一个字符串 (str): 代表该任务的唯一URL。
+                      - 一个字符串列表 (list[str]): 代表该任务的多个备用/镜像URL。
+            path_list: 与 url_list 对应的文件保存路径列表。
             limit_async_number: (可选) 最大并发下载数，默认为 5。
             **kwargs: 其他所有传递给 download_file() 方法的参数。
 
         返回:
-            bool: 是否下载成功。
+            list[bool]: 对应每个下载任务是否成功。
         """
         if len(url_list) != len(path_list):
             raise ValueError("URL 列表和路径列表的长度必须相等")
 
         semaphore = asyncio.Semaphore(limit_async_number)
 
-        async def _download_with_semaphore(url: str, path: str | Path):
+        async def _download_with_semaphore(
+            urls_for_one_path: str | list[str], path: str | Path
+        ):
             async with semaphore:
-                return await cls.download_file(url, path, **kwargs)
+                return await cls.download_file(urls_for_one_path, path, **kwargs)
 
         tasks = [
-            _download_with_semaphore(url, path)
-            for url, path in zip(url_list, path_list)
+            _download_with_semaphore(url_group, path)
+            for url_group, path in zip(url_list, path_list)
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -315,10 +320,16 @@ class AsyncHttpx:
         final_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.error(f"并发下载 {url_list[i]} 时发生错误: {result}")
+                url_info = (
+                    url_list[i]
+                    if isinstance(url_list[i], str)
+                    else ", ".join(url_list[i])
+                )
+                logger.error(f"并发下载任务 ({url_info}) 时发生错误", e=result)
                 final_results.append(False)
             else:
-                final_results.append(result)  # type: ignore
+                # download_file 返回的是 bool，可以直接附加
+                final_results.append(cast(bool, result))
 
         return final_results
 
@@ -445,10 +456,6 @@ class AsyncPlaywright:
                 await card.screenshot(path=path, timeout=timeout, type=type_)
                 return MessageUtils.build_message(path)
         return None
-
-
-class UrlPathNumberNotEqual(Exception):
-    pass
 
 
 class BrowserIsNone(Exception):
