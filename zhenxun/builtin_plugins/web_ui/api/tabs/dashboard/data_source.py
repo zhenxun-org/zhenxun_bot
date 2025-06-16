@@ -13,6 +13,7 @@ from zhenxun.models.bot_connect_log import BotConnectLog
 from zhenxun.models.chat_history import ChatHistory
 from zhenxun.models.statistics import Statistics
 from zhenxun.services.log import logger
+from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.platform import PlatformUtils
 
 from ....base_model import BaseResultModel, QueryModel
@@ -31,7 +32,7 @@ driver: Driver = nonebot.get_driver()
 CONNECT_TIME = 0
 
 
-@driver.on_startup
+@PriorityLifecycle.on_startup(priority=5)
 async def _():
     global CONNECT_TIME
     CONNECT_TIME = int(time.time())

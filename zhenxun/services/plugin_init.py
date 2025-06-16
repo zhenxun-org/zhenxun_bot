@@ -6,6 +6,7 @@ from nonebot.utils import is_coroutine_callable
 from pydantic import BaseModel
 
 from zhenxun.services.log import logger
+from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
 driver = nonebot.get_driver()
 
@@ -100,6 +101,6 @@ class PluginInitManager:
                     logger.error(f"执行: {module_path}:remove 失败", e=e)
 
 
-@driver.on_startup
+@PriorityLifecycle.on_startup(priority=5)
 async def _():
     await PluginInitManager.install_all()

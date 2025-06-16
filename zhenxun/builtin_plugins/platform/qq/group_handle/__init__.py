@@ -1,4 +1,4 @@
-from nonebot import on_notice, on_request
+from nonebot import on_notice
 from nonebot.adapters import Bot
 from nonebot.adapters.onebot.v11 import (
     GroupDecreaseNoticeEvent,
@@ -14,9 +14,10 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.builtin_plugins.platform.qq.exception import ForceAddGroupError
 from zhenxun.configs.config import BotConfig, Config
 from zhenxun.configs.utils import PluginExtraData, RegisterConfig, Task
+from zhenxun.models.event_log import EventLog
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.utils.common_utils import CommonUtils
-from zhenxun.utils.enum import PluginType
+from zhenxun.utils.enum import EventLogType, PluginType
 from zhenxun.utils.platform import PlatformUtils
 from zhenxun.utils.rules import notice_rule
 
@@ -106,8 +107,6 @@ group_decrease_handle = on_notice(
     rule=notice_rule([GroupMemberDecreaseEvent, GroupDecreaseNoticeEvent]),
 )
 """群员减少处理"""
-add_group = on_request(priority=1, block=False)
-"""加群同意请求"""
 
 
 @group_increase_handle.handle()
@@ -141,8 +140,21 @@ async def _(
     group_id = str(event.group_id)
     if event.sub_type == "kick_me":
         """踢出Bot"""
-        await GroupManager.kick_bot(bot, user_id, group_id)
+        await GroupManager.kick_bot(bot, group_id, str(event.operator_id))
+        await EventLog.create(
+            user_id=user_id, group_id=group_id, event_type=EventLogType.KICK_BOT
+        )
     elif event.sub_type in ["leave", "kick"]:
+        if event.sub_type == "leave":
+            """主动退群"""
+            await EventLog.create(
+                user_id=user_id, group_id=group_id, event_type=EventLogType.LEAVE_MEMBER
+            )
+        else:
+            """被踢出群"""
+            await EventLog.create(
+                user_id=user_id, group_id=group_id, event_type=EventLogType.KICK_MEMBER
+            )
         result = await GroupManager.run_user(
             bot, user_id, group_id, str(event.operator_id), event.sub_type
         )

@@ -16,6 +16,7 @@ from zhenxun.models.sign_user import SignUser
 from zhenxun.models.user_console import UserConsole
 from zhenxun.services.log import logger
 from zhenxun.utils.decorator.shop import shop_register
+from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.manager.resource_manager import ResourceManager
 from zhenxun.utils.platform import PlatformUtils
 
@@ -70,7 +71,7 @@ from public.bag_users t1
 """
 
 
-@driver.on_startup
+@PriorityLifecycle.on_startup(priority=5)
 async def _():
     await ResourceManager.init_resources()
     """签到与用户的数据迁移"""

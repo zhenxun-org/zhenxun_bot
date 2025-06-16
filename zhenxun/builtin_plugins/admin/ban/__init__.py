@@ -14,13 +14,19 @@ from nonebot_plugin_alconna import (
 from nonebot_plugin_session import EventSession
 
 from zhenxun.configs.config import BotConfig, Config
-from zhenxun.configs.utils import PluginExtraData, RegisterConfig
+from zhenxun.configs.utils import (
+    AICallableParam,
+    AICallableProperties,
+    AICallableTag,
+    PluginExtraData,
+    RegisterConfig,
+)
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.rules import admin_check
 
-from ._data_source import BanManage
+from ._data_source import BanManage, call_ban
 
 base_config = Config.get("ban")
 
@@ -76,6 +82,22 @@ __plugin_meta__ = PluginMetadata(
                 help="ban/unban所需要的管理员权限等级",
                 default_value=5,
                 type=int,
+            )
+        ],
+        smart_tools=[
+            AICallableTag(
+                name="call_ban",
+                description="某人多次(至少三次)辱骂你，调用此方法进行封禁",
+                parameters=AICallableParam(
+                    type="object",
+                    properties={
+                        "user_id": AICallableProperties(
+                            type="string", description="用户的id"
+                        ),
+                    },
+                    required=["user_id"],
+                ),
+                func=call_ban,
             )
         ],
     ).to_dict(),

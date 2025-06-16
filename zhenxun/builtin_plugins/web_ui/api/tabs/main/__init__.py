@@ -16,7 +16,7 @@ from zhenxun.utils.platform import PlatformUtils
 
 from ....base_model import Result
 from ....config import QueryDateType
-from ....utils import authentication, get_system_status
+from ....utils import authentication, clear_help_image, get_system_status
 from .data_source import ApiDataSource
 from .model import (
     ActiveGroup,
@@ -234,6 +234,7 @@ async def _(param: BotManageUpdateParam):
         bot_data.block_plugins = CommonUtils.convert_module_format(param.block_plugins)
         bot_data.block_tasks = CommonUtils.convert_module_format(param.block_tasks)
         await bot_data.save(update_fields=["block_plugins", "block_tasks"])
+        clear_help_image()
         return Result.ok()
     except Exception as e:
         logger.error(f"{router.prefix}/update_bot_manage 调用错误", "WebUi", e=e)

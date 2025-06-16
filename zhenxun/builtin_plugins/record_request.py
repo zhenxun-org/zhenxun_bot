@@ -17,11 +17,12 @@ from nonebot_plugin_session import EventSession
 
 from zhenxun.configs.config import BotConfig, Config
 from zhenxun.configs.utils import PluginExtraData, RegisterConfig
+from zhenxun.models.event_log import EventLog
 from zhenxun.models.fg_request import FgRequest
 from zhenxun.models.friend_user import FriendUser
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.services.log import logger
-from zhenxun.utils.enum import PluginType, RequestHandleType, RequestType
+from zhenxun.utils.enum import EventLogType, PluginType, RequestHandleType, RequestType
 from zhenxun.utils.platform import PlatformUtils
 
 base_config = Config.get("invite_manager")
@@ -112,21 +113,29 @@ async def _(bot: v12Bot | v11Bot, event: FriendRequestEvent, session: EventSessi
                 nickname=nickname,
                 comment=comment,
             )
-            await PlatformUtils.send_superuser(
+            results = await PlatformUtils.send_superuser(
                 bot,
                 f"*****一份好友申请*****\n"
                 f"ID: {f.id}\n"
                 f"昵称：{nickname}({event.user_id})\n"
                 f"自动同意：{'√' if base_config.get('AUTO_ADD_FRIEND') else '×'}\n"
-                f"日期：{str(datetime.now()).split('.')[0]}\n"
+                f"日期：{datetime.now().replace(microsecond=0)}\n"
                 f"备注：{event.comment}",
             )
+            if message_ids := [
+                str(r[1].msg_ids[0]["message_id"])
+                for r in results
+                if r[1] and r[1].msg_ids
+            ]:
+                f.message_ids = ",".join(message_ids)
+                await f.save(update_fields=["message_ids"])
     else:
         logger.debug("好友请求五分钟内重复, 已忽略", "好友请求", target=event.user_id)
 
 
 @group_req.handle()
 async def _(bot: v12Bot | v11Bot, event: GroupRequestEvent, session: EventSession):
+    # sourcery skip: low-code-quality
     if event.sub_type != "invite":
         return
     if str(event.user_id) in bot.config.superusers or base_config.get("AUTO_ADD_GROUP"):
@@ -186,7 +195,7 @@ async def _(bot: v12Bot | v11Bot, event: GroupRequestEvent, session: EventSessio
                 group_id=str(event.group_id),
                 handle_type=RequestHandleType.APPROVE,
             )
-            await PlatformUtils.send_superuser(
+            results = await PlatformUtils.send_superuser(
                 bot,
                 f"*****一份入群申请*****\n"
                 f"ID：{f.id}\n"
@@ -230,13 +239,27 @@ async def _(bot: v12Bot | v11Bot, event: GroupRequestEvent, session: EventSessio
             nickname=nickname,
             group_id=str(event.group_id),
         )
-        await PlatformUtils.send_superuser(
+        kick_count = await EventLog.filter(
+            group_id=str(event.group_id), event_type=EventLogType.KICK_BOT
+        ).count()
+        kick_message = (
+            f"\n该群累计踢出{BotConfig.self_nickname} <{kick_count}>次"
+            if kick_count
+            else ""
+        )
+        results = await PlatformUtils.send_superuser(
             bot,
             f"*****一份入群申请*****\n"
             f"ID：{f.id}\n"
             f"申请人：{nickname}({event.user_id})\n群聊："
-            f"{event.group_id}\n邀请日期：{datetime.now().replace(microsecond=0)}",
+            f"{event.group_id}\n邀请日期：{datetime.now().replace(microsecond=0)}"
+            f"{kick_message}",
         )
+        if message_ids := [
+            str(r[1].msg_ids[0]["message_id"]) for r in results if r[1] and r[1].msg_ids
+        ]:
+            f.message_ids = ",".join(message_ids)
+            await f.save(update_fields=["message_ids"])
     else:
         logger.debug(
             "群聊请求五分钟内重复, 已忽略",

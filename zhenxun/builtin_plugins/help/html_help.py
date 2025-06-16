@@ -2,9 +2,11 @@ import os
 import random
 
 from nonebot_plugin_htmlrender import template_to_pic
+from nonebot_plugin_uninfo import Uninfo
 from pydantic import BaseModel
 
 from zhenxun.configs.path_config import TEMPLATE_PATH
+from zhenxun.models.bot_console import BotConsole
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.utils.enum import BlockType
@@ -48,11 +50,12 @@ ICON2STR = {
 
 
 def __handle_item(
-    plugin: PluginInfo, group: GroupConsole | None, is_detail: bool
+    bot: BotConsole, plugin: PluginInfo, group: GroupConsole | None, is_detail: bool
 ) -> Item:
     """构造Item
 
     参数:
+        bot: BotConsole
         plugin: PluginInfo
         group: 群组
         is_detail: 是否详细
@@ -73,10 +76,13 @@ def __handle_item(
         ]:
             sta = 2
     if group:
-        if f"{plugin.module}:super," in group.block_plugin:
+        if f"{plugin.module}," in group.superuser_block_plugin:
             sta = 2
         if f"{plugin.module}," in group.block_plugin:
             sta = 1
+    if bot:
+        if f"{plugin.module}," in bot.block_plugins:
+            sta = 2
     return Item(plugin_name=plugin.name, sta=sta)
 
 
@@ -119,14 +125,17 @@ def build_plugin_data(classify: dict[str, list[Item]]) -> list[dict[str, str]]:
     return plugin_list
 
 
-async def build_html_image(group_id: str | None, is_detail: bool) -> bytes:
+async def build_html_image(
+    session: Uninfo, group_id: str | None, is_detail: bool
+) -> bytes:
     """构造HTML帮助图片
 
     参数:
+        session: Uninfo
         group_id: 群号
         is_detail: 是否详细帮助
     """
-    classify = await classify_plugin(group_id, is_detail, __handle_item)
+    classify = await classify_plugin(session, group_id, is_detail, __handle_item)
     plugin_list = build_plugin_data(classify)
     return await template_to_pic(
         template_path=str((TEMPLATE_PATH / "menu").absolute()),

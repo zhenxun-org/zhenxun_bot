@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 import nonebot
-from nonebot.drivers import Driver
 from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun.models.sign_user import SignUser
@@ -9,14 +8,7 @@ from zhenxun.models.user_console import UserConsole
 from zhenxun.utils.decorator.shop import shop_register
 from zhenxun.utils.platform import PlatformUtils
 
-driver: Driver = nonebot.get_driver()
-
-
-# @driver.on_startup
-# async def _():
-#     """
-#     导入内置的三个商品
-#     """
+driver = nonebot.get_driver()
 
 
 @shop_register(

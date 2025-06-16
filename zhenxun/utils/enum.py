@@ -1,4 +1,42 @@
-from strenum import StrEnum
+import sys
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from strenum import StrEnum
+
+
+class PriorityLifecycleType(StrEnum):
+    STARTUP = "STARTUP"
+    """启动"""
+    SHUTDOWN = "SHUTDOWN"
+    """关闭"""
+
+
+class BankHandleType(StrEnum):
+    DEPOSIT = "DEPOSIT"
+    """存款"""
+    WITHDRAW = "WITHDRAW"
+    """取款"""
+    LOAN = "LOAN"
+    """贷款"""
+    REPAYMENT = "REPAYMENT"
+    """还款"""
+    INTEREST = "INTEREST"
+    """利息"""
+
+
+class EventLogType(StrEnum):
+    GROUP_MEMBER_INCREASE = "GROUP_MEMBER_INCREASE"
+    """群成员增加"""
+    GROUP_MEMBER_DECREASE = "GROUP_MEMBER_DECREASE"
+    """群成员减少"""
+    KICK_MEMBER = "KICK_MEMBER"
+    """踢出群成员"""
+    KICK_BOT = "KICK_BOT"
+    """踢出Bot"""
+    LEAVE_MEMBER = "LEAVE_MEMBER"
+    """主动退群"""
 
 
 class GoldHandle(StrEnum):
@@ -92,7 +130,9 @@ class RequestType(StrEnum):
     """
 
     FRIEND = "FRIEND"
+    """好友"""
     GROUP = "GROUP"
+    """群组"""
 
 
 class RequestHandleType(StrEnum):

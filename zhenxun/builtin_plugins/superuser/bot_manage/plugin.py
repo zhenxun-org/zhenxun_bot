@@ -110,7 +110,7 @@ async def enable_plugin(
             )
             await BotConsole.enable_plugin(None, plugin.module)
             await MessageUtils.build_message(
-                f"已禁用全部 bot 的插件: {plugin_name.result}"
+                f"已开启全部 bot 的插件: {plugin_name.result}"
             ).finish()
     elif bot_id.available:
         logger.info(

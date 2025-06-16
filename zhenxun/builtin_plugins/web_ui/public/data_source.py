@@ -18,6 +18,7 @@ async def update_webui_assets():
     download_url = await GithubUtils.parse_github_url(
         WEBUI_DIST_GITHUB_URL
     ).get_archive_download_urls()
+    logger.info("开始下载 webui_assets 资源...", COMMAND_NAME)
     if await AsyncHttpx.download_file(
         download_url, webui_assets_path, follow_redirects=True
     ):

@@ -43,6 +43,7 @@ class AsyncHttpx:
         use_proxy: bool = True,
         proxy: dict[str, str] | None = None,
         timeout: int = 30,  # noqa: ASYNC109
+        check_status_code: int | None = None,
         **kwargs,
     ) -> Response:
         """Get
@@ -56,6 +57,7 @@ class AsyncHttpx:
             use_proxy: 使用默认代理
             proxy: 指定代理
             timeout: 超时时间
+            check_status_code: 检查状态码
         """
         urls = [url] if isinstance(url, str) else url
         return await cls._get_first_successful(
@@ -67,6 +69,7 @@ class AsyncHttpx:
             use_proxy=use_proxy,
             proxy=proxy,
             timeout=timeout,
+            check_status_code=check_status_code,
             **kwargs,
         )
 
@@ -74,12 +77,18 @@ class AsyncHttpx:
     async def _get_first_successful(
         cls,
         urls: list[str],
+        check_status_code: int | None = None,
         **kwargs,
     ) -> Response:
         last_exception = None
         for url in urls:
             try:
-                return await cls._get_single(url, **kwargs)
+                logger.info(f"开始获取 {url}..")
+                response = await cls._get_single(url, **kwargs)
+                if check_status_code and response.status_code != check_status_code:
+                    status_code = response.status_code
+                    raise Exception(f"状态码错误:{status_code}!={check_status_code}")
+                return response
             except Exception as e:
                 last_exception = e
                 if url != urls[-1]:

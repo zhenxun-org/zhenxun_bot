@@ -92,7 +92,7 @@ async def enable_task(
             )
             await BotConsole.enable_task(None, task.module)
             await MessageUtils.build_message(
-                f"已禁用全部 bot 的被动: {task_name.available}"
+                f"已开启全部 bot 的被动: {task_name.available}"
             ).finish()
     elif bot_id.available:
         logger.info(

@@ -18,6 +18,12 @@ from zhenxun.utils.utils import is_number
 
 from .config import BASE_PATH, DEFAULT_GITHUB_URL, EXTRA_GITHUB_URL
 
+BAT_FILE = Path() / "win启动.bat"
+
+WIN_COMMAND = ["./Python310/python.exe", "-m", "pip", "install", "-r"]
+
+DEFAULT_COMMAND = ["poetry", "run", "pip", "install", "-r"]
+
 
 def row_style(column: str, text: str) -> RowStyle:
     """被动技能文本风格
@@ -50,8 +56,10 @@ def install_requirement(plugin_path: Path):
         return
 
     try:
+        command = WIN_COMMAND if BAT_FILE.exists() else DEFAULT_COMMAND
+        command.append(str(existing_requirements))
         result = subprocess.run(
-            ["poetry", "run", "pip", "install", "-r", str(existing_requirements)],
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -91,8 +99,8 @@ class ShopManage:
             "plugins.json"
         )
         extra_github_url = await extra_github_repo.get_raw_download_urls("plugins.json")
-        res = await AsyncHttpx.get(default_github_url)
-        res2 = await AsyncHttpx.get(extra_github_url)
+        res = await AsyncHttpx.get(default_github_url, check_status_code=200)
+        res2 = await AsyncHttpx.get(extra_github_url, check_status_code=200)
 
         # 检查请求结果
         if res.status_code != 200 or res2.status_code != 200:
