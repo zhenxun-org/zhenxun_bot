@@ -25,6 +25,7 @@ from zhenxun.services.log import logger
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.user_agent import get_user_agent
 
+CLIENT_KEY = ["use_proxy", "proxy", "verify", "headers"]
 
 def get_async_client(
     proxies: dict[str, str] | None = None, verify: bool = False, **kwargs
@@ -117,14 +118,11 @@ class AsyncHttpx:
         for current_url in urls:
             try:
                 logger.info(f"开始获取 {current_url}..")
-                async with cls._create_client(**kwargs) as client:
-                    # 从 kwargs 中提取仅 client.get 支持的参数
-                    get_kwargs = {
-                        k: v
-                        for k, v in kwargs.items()
-                        if k not in ["use_proxy", "proxy", "verify", "headers"]
-                    }
-                    response = await client.get(current_url, **get_kwargs)
+                client_kwargs = {k: v for k, v in kwargs.items() if k in CLIENT_KEY}
+                for key in CLIENT_KEY:
+                    kwargs.pop(key, None)
+                async with cls._create_client(**client_kwargs) as client:
+                    response = await client.get(current_url, **kwargs)
 
                 if check_status_code and response.status_code != check_status_code:
                     raise HTTPStatusError(
@@ -155,13 +153,11 @@ class AsyncHttpx:
         返回:
             Response: Response
         """
-        async with cls._create_client(**kwargs) as client:
-            head_kwargs = {
-                k: v
-                for k, v in kwargs.items()
-                if k not in ["use_proxy", "proxy", "verify"]
-            }
-            return await client.head(url, **head_kwargs)
+        client_kwargs = {k: v for k, v in kwargs.items() if k in CLIENT_KEY}
+        for key in CLIENT_KEY:
+            kwargs.pop(key, None)
+        async with cls._create_client(**client_kwargs) as client:
+            return await client.head(url, **kwargs)
 
     @classmethod
     async def post(cls, url: str, **kwargs) -> Response:
@@ -178,13 +174,11 @@ class AsyncHttpx:
         返回:
             Response: Response。
         """
-        async with cls._create_client(**kwargs) as client:
-            post_kwargs = {
-                k: v
-                for k, v in kwargs.items()
-                if k not in ["use_proxy", "proxy", "verify"]
-            }
-            return await client.post(url, **post_kwargs)
+        client_kwargs = {k: v for k, v in kwargs.items() if k in CLIENT_KEY}
+        for key in CLIENT_KEY:
+            kwargs.pop(key, None)
+        async with cls._create_client(**client_kwargs) as client:
+            return await client.post(url, **kwargs)
 
     @classmethod
     async def get_content(cls, url: str, **kwargs) -> bytes:
