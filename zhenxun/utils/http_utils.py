@@ -24,7 +24,7 @@ from zhenxun.utils.user_agent import get_user_agent
 # from .browser import get_browser
 
 
-def get_async_client(proxies=None, **kwargs):
+def get_async_client(proxies: dict[str, str] | None = None, **kwargs):
     transport = httpx.AsyncHTTPTransport(verify=False)
     try:
         return httpx.AsyncClient(proxies=proxies, transport=transport, **kwargs)
