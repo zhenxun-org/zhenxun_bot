@@ -10,7 +10,6 @@ import httpx
 from httpx import AsyncHTTPTransport, HTTPStatusError, Response
 from nonebot_plugin_alconna import UniMessage
 from nonebot_plugin_htmlrender import get_browser
-from packaging.version import parse as parse_version
 from playwright.async_api import Page
 from rich.progress import (
     BarColumn,
@@ -25,23 +24,28 @@ from zhenxun.services.log import logger
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.user_agent import get_user_agent
 
-CLIENT_KEY = ["use_proxy", "proxy", "verify", "headers"]
+CLIENT_KEY = ["use_proxy", "proxies", "verify", "headers"]
 
 
 def get_async_client(
     proxies: dict[str, str] | None = None, verify: bool = False, **kwargs
 ) -> httpx.AsyncClient:
-    check_httpx_version = parse_version(httpx.__version__) >= parse_version("0.28.0")
     transport = kwargs.pop("transport", None) or AsyncHTTPTransport(verify=verify)
-
-    if not check_httpx_version:
-        return httpx.AsyncClient(proxies=proxies, transport=transport, **kwargs)  # type: ignore
-    proxy_str = None
     if proxies:
-        proxy_str = proxies.get("http://") or proxies.get("https://")
-        if not proxy_str:
-            logger.warning(f"代理字典 {proxies} 中未能提取出有效的URL，代理已被忽略。")
-    return httpx.AsyncClient(proxy=proxy_str, transport=transport, **kwargs)  # type: ignore
+        http_proxy = proxies.get("http://")
+        https_proxy = proxies.get("https://")
+        transport_kwargs = {}
+        if http_proxy:
+            transport_kwargs["http"] = http_proxy
+        if https_proxy:
+            transport_kwargs["https"] = https_proxy
+        proxy_transport = AsyncHTTPTransport(**transport_kwargs)
+        return httpx.AsyncClient(
+            mounts={"http://": proxy_transport, "https://": proxy_transport},
+            transport=transport,
+            **kwargs,
+        )
+    return httpx.AsyncClient(transport=transport, **kwargs)
 
 
 class AsyncHttpx:
@@ -60,7 +64,7 @@ class AsyncHttpx:
         cls,
         *,
         use_proxy: bool = True,
-        proxy: dict[str, str] | None = None,
+        proxies: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
         verify: bool = False,
         **kwargs,
@@ -72,7 +76,7 @@ class AsyncHttpx:
 
         参数:
             use_proxy: 是否使用在类中定义的默认代理。
-            proxy: 手动指定的代理，会覆盖默认代理。
+            proxies: 手动指定的代理，会覆盖默认代理。
             headers: 需要合并到客户端的自定义请求头。
             verify: 是否验证 SSL 证书。
             **kwargs: 其他所有传递给 httpx.AsyncClient 的参数。
@@ -80,7 +84,7 @@ class AsyncHttpx:
         返回:
             AsyncGenerator[httpx.AsyncClient, None]: 生成器。
         """
-        proxies_to_use = proxy or (cls.default_proxy if use_proxy else None)
+        proxies_to_use = proxies or (cls.default_proxy if use_proxy else None)
 
         final_headers = get_user_agent()
         if headers:
