@@ -34,14 +34,11 @@ def get_async_client(
     if proxies:
         http_proxy = proxies.get("http://")
         https_proxy = proxies.get("https://")
-        transport_kwargs = {}
-        if http_proxy:
-            transport_kwargs["http"] = http_proxy
-        if https_proxy:
-            transport_kwargs["https"] = https_proxy
-        proxy_transport = AsyncHTTPTransport(**transport_kwargs)
         return httpx.AsyncClient(
-            mounts={"http://": proxy_transport, "https://": proxy_transport},
+            mounts={
+                "http://": AsyncHTTPTransport(proxy=http_proxy),
+                "https://": AsyncHTTPTransport(proxy=https_proxy),
+            },
             transport=transport,
             **kwargs,
         )
