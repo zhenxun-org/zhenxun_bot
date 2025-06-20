@@ -13,7 +13,6 @@ from httpx import ConnectTimeout, HTTPStatusError, Response
 from nonebot_plugin_alconna import UniMessage
 from nonebot_plugin_htmlrender import get_browser
 from playwright.async_api import Page
-from retrying import retry
 import rich
 
 from zhenxun.configs.config import BotConfig
@@ -31,7 +30,6 @@ class AsyncHttpx:
     }
 
     @classmethod
-    @retry(stop_max_attempt_number=3)
     async def get(
         cls,
         url: str | list[str],
