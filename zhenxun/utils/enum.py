@@ -1,4 +1,21 @@
-from strenum import StrEnum
+import sys
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from strenum import StrEnum
+
+
+class PriorityLifecycleType(StrEnum):
+    STARTUP = "STARTUP"
+    """启动"""
+    SHUTDOWN = "SHUTDOWN"
+    """关闭"""
+
+
+class BotSentType(StrEnum):
+    GROUP = "GROUP"
+    PRIVATE = "PRIVATE"
 
 
 class BankHandleType(StrEnum):

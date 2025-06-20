@@ -49,4 +49,14 @@ Config.add_plugin_config(
     type=bool,
 )
 
+Config.add_plugin_config(
+    "hook",
+    "RECORD_BOT_SENT_MESSAGES",
+    True,
+    help="记录bot消息发送",
+    default_value=True,
+    type=bool,
+)
+
+
 nonebot.load_plugins(str(Path(__file__).parent.resolve()))

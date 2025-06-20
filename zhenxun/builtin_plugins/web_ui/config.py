@@ -1,6 +1,12 @@
+import sys
+
 from fastapi.middleware.cors import CORSMiddleware
 import nonebot
-from strenum import StrEnum
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from strenum import StrEnum
 
 from zhenxun.configs.path_config import DATA_PATH, TEMP_PATH
 

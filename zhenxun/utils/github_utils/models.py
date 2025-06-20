@@ -1,12 +1,17 @@
 import contextlib
+import sys
 from typing import Protocol
 
 from aiocache import cached
 from nonebot.compat import model_dump
 from pydantic import BaseModel, Field
-from strenum import StrEnum
 
 from zhenxun.utils.http_utils import AsyncHttpx
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from strenum import StrEnum
 
 from .const import (
     CACHED_API_TTL,

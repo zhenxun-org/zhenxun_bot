@@ -10,6 +10,7 @@ from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.task_info import TaskInfo
 from zhenxun.services.log import logger
 from zhenxun.utils.common_utils import CommonUtils
+from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
 driver: Driver = nonebot.get_driver()
 
@@ -132,7 +133,7 @@ async def create_schedule(task: Task):
         logger.error(f"动态创建定时任务 {task.name}({task.module}) 失败", e=e)
 
 
-@driver.on_startup
+@PriorityLifecycle.on_startup(priority=5)
 async def _():
     """
     初始化插件数据配置

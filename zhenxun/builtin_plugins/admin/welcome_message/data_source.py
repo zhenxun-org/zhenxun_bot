@@ -14,6 +14,7 @@ from zhenxun.services.log import logger
 from zhenxun.utils._build_image import BuildImage
 from zhenxun.utils._image_template import ImageTemplate
 from zhenxun.utils.http_utils import AsyncHttpx
+from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.platform import PlatformUtils
 
 BASE_PATH = DATA_PATH / "welcome_message"
@@ -91,7 +92,7 @@ def migrate(path: Path):
         json.dump(new_data, f, ensure_ascii=False, indent=4)
 
 
-@driver.on_startup
+@PriorityLifecycle.on_startup(priority=5)
 def _():
     """数据迁移
 

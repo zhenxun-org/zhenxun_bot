@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from zhenxun.utils._build_image import BuildImage
 
 from ....base_model import Result, SystemFolderSize
-from ....utils import authentication, get_system_disk
+from ....utils import authentication, get_system_disk, validate_path
 from .model import AddFile, DeleteFile, DirFile, RenameFile, SaveFile
 
 router = APIRouter(prefix="/system")
@@ -25,22 +25,29 @@ IMAGE_TYPE = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "svg"]
     description="获取文件列表",
 )
 async def _(path: str | None = None) -> Result[list[DirFile]]:
-    base_path = Path(path) if path else Path()
-    data_list = []
-    for file in os.listdir(base_path):
-        file_path = base_path / file
-        is_image = any(file.endswith(f".{t}") for t in IMAGE_TYPE)
-        data_list.append(
-            DirFile(
-                is_file=not file_path.is_dir(),
-                is_image=is_image,
-                name=file,
-                parent=path,
-                size=None if file_path.is_dir() else file_path.stat().st_size,
-                mtime=file_path.stat().st_mtime,
+    try:
+        base_path, error = validate_path(path)
+        if error:
+            return Result.fail(error)
+        if not base_path:
+            return Result.fail("无效的路径")
+        data_list = []
+        for file in os.listdir(base_path):
+            file_path = base_path / file
+            is_image = any(file.endswith(f".{t}") for t in IMAGE_TYPE)
+            data_list.append(
+                DirFile(
+                    is_file=not file_path.is_dir(),
+                    is_image=is_image,
+                    name=file,
+                    parent=path,
+                    size=None if file_path.is_dir() else file_path.stat().st_size,
+                    mtime=file_path.stat().st_mtime,
+                )
             )
-        )
-    return Result.ok(data_list)
+        return Result.ok(data_list)
+    except Exception as e:
+        return Result.fail(f"获取文件列表失败: {e!s}")
 
 
 @router.get(
@@ -62,8 +69,12 @@ async def _(full_path: str | None = None) -> Result[list[SystemFolderSize]]:
     description="删除文件",
 )
 async def _(param: DeleteFile) -> Result:
-    path = Path(param.full_path)
-    if not path or not path.exists():
+    path, error = validate_path(param.full_path)
+    if error:
+        return Result.fail(error)
+    if not path:
+        return Result.fail("无效的路径")
+    if not path.exists():
         return Result.warning_("文件不存在...")
     try:
         path.unlink()
@@ -80,8 +91,12 @@ async def _(param: DeleteFile) -> Result:
     description="删除文件夹",
 )
 async def _(param: DeleteFile) -> Result:
-    path = Path(param.full_path)
-    if not path or not path.exists() or path.is_file():
+    path, error = validate_path(param.full_path)
+    if error:
+        return Result.fail(error)
+    if not path:
+        return Result.fail("无效的路径")
+    if not path.exists() or path.is_file():
         return Result.warning_("文件夹不存在...")
     try:
         shutil.rmtree(path.absolute())
@@ -98,10 +113,14 @@ async def _(param: DeleteFile) -> Result:
     description="重命名文件",
 )
 async def _(param: RenameFile) -> Result:
-    path = (
-        (Path(param.parent) / param.old_name) if param.parent else Path(param.old_name)
-    )
-    if not path or not path.exists():
+    parent_path, error = validate_path(param.parent)
+    if error:
+        return Result.fail(error)
+    if not parent_path:
+        return Result.fail("无效的路径")
+
+    path = (parent_path / param.old_name) if param.parent else Path(param.old_name)
+    if not path.exists():
         return Result.warning_("文件不存在...")
     try:
         path.rename(path.parent / param.name)
@@ -118,10 +137,14 @@ async def _(param: RenameFile) -> Result:
     description="重命名文件夹",
 )
 async def _(param: RenameFile) -> Result:
-    path = (
-        (Path(param.parent) / param.old_name) if param.parent else Path(param.old_name)
-    )
-    if not path or not path.exists() or path.is_file():
+    parent_path, error = validate_path(param.parent)
+    if error:
+        return Result.fail(error)
+    if not parent_path:
+        return Result.fail("无效的路径")
+
+    path = (parent_path / param.old_name) if param.parent else Path(param.old_name)
+    if not path.exists() or path.is_file():
         return Result.warning_("文件夹不存在...")
     try:
         new_path = path.parent / param.name
@@ -139,7 +162,13 @@ async def _(param: RenameFile) -> Result:
     description="新建文件",
 )
 async def _(param: AddFile) -> Result:
-    path = (Path(param.parent) / param.name) if param.parent else Path(param.name)
+    parent_path, error = validate_path(param.parent)
+    if error:
+        return Result.fail(error)
+    if not parent_path:
+        return Result.fail("无效的路径")
+
+    path = (parent_path / param.name) if param.parent else Path(param.name)
     if path.exists():
         return Result.warning_("文件已存在...")
     try:
@@ -157,7 +186,13 @@ async def _(param: AddFile) -> Result:
     description="新建文件夹",
 )
 async def _(param: AddFile) -> Result:
-    path = (Path(param.parent) / param.name) if param.parent else Path(param.name)
+    parent_path, error = validate_path(param.parent)
+    if error:
+        return Result.fail(error)
+    if not parent_path:
+        return Result.fail("无效的路径")
+
+    path = (parent_path / param.name) if param.parent else Path(param.name)
     if path.exists():
         return Result.warning_("文件夹已存在...")
     try:
@@ -175,7 +210,11 @@ async def _(param: AddFile) -> Result:
     description="读取文件",
 )
 async def _(full_path: str) -> Result:
-    path = Path(full_path)
+    path, error = validate_path(full_path)
+    if error:
+        return Result.fail(error)
+    if not path:
+        return Result.fail("无效的路径")
     if not path.exists():
         return Result.warning_("文件不存在...")
     try:
@@ -193,9 +232,13 @@ async def _(full_path: str) -> Result:
     description="读取文件",
 )
 async def _(param: SaveFile) -> Result[str]:
-    path = Path(param.full_path)
+    path, error = validate_path(param.full_path)
+    if error:
+        return Result.fail(error)
+    if not path:
+        return Result.fail("无效的路径")
     try:
-        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+        async with aiofiles.open(str(path), "w", encoding="utf-8") as f:
             await f.write(param.content)
         return Result.ok("更新成功!")
     except Exception as e:
@@ -210,7 +253,11 @@ async def _(param: SaveFile) -> Result[str]:
     description="读取图片base64",
 )
 async def _(full_path: str) -> Result[str]:
-    path = Path(full_path)
+    path, error = validate_path(full_path)
+    if error:
+        return Result.fail(error)
+    if not path:
+        return Result.fail("无效的路径")
     if not path.exists():
         return Result.warning_("文件不存在...")
     try:

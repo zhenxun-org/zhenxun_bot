@@ -23,6 +23,12 @@ from .config import (
     LOG_COMMAND,
 )
 
+BAT_FILE = Path() / "win启动.bat"
+
+WIN_COMMAND = ["./Python310/python.exe", "-m", "pip", "install", "-r"]
+
+DEFAULT_COMMAND = ["poetry", "run", "pip", "install", "-r"]
+
 
 def row_style(column: str, text: str) -> RowStyle:
     """被动技能文本风格
@@ -48,6 +54,33 @@ def install_requirement(plugin_path: Path):
         (path for path in requirement_paths if path.exists()), None
     ):
         VirtualEnvPackageManager.install_requirement(existing_requirements)
+
+
+    if not existing_requirements:
+        logger.debug(
+            f"No requirement.txt found for plugin: {plugin_path.name}", "插件管理"
+        )
+        return
+
+    try:
+        command = WIN_COMMAND if BAT_FILE.exists() else DEFAULT_COMMAND
+        command.append(str(existing_requirements))
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        logger.debug(
+            "Successfully installed dependencies for"
+            f" plugin: {plugin_path.name}. Output:\n{result.stdout}",
+            "插件管理",
+        )
+    except subprocess.CalledProcessError:
+        logger.error(
+            f"Failed to install dependencies for plugin: {plugin_path.name}. "
+            " Error:\n{e.stderr}"
+        )
 
 
 class StoreManager:

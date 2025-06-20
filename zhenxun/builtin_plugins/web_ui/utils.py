@@ -2,6 +2,7 @@ import contextlib
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
+import re
 
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
@@ -26,6 +27,45 @@ token_data = {"token": []}
 if token_file.exists():
     with contextlib.suppress(json.JSONDecodeError):
         token_data = json.load(open(token_file, encoding="utf8"))
+
+
+def validate_path(path_str: str | None) -> tuple[Path | None, str | None]:
+    """验证路径是否安全
+
+    参数:
+        path_str: 用户输入的路径
+
+    返回:
+        tuple[Path | None, str | None]: (验证后的路径, 错误信息)
+    """
+    try:
+        if not path_str:
+            return Path().resolve(), None
+
+        # 1. 移除任何可能的路径遍历尝试
+        path_str = re.sub(r"[\\/]\.\.[\\/]", "", path_str)
+
+        # 2. 规范化路径并转换为绝对路径
+        path = Path(path_str).resolve()
+
+        # 3. 获取项目根目录
+        root_dir = Path().resolve()
+
+        # 4. 验证路径是否在项目根目录内
+        try:
+            if not path.is_relative_to(root_dir):
+                return None, "访问路径超出允许范围"
+        except ValueError:
+            return None, "无效的路径格式"
+
+        # 5. 验证路径是否包含任何危险字符
+        if any(c in str(path) for c in ["..", "~", "*", "?", ">", "<", "|", '"']):
+            return None, "路径包含非法字符"
+
+        # 6. 验证路径长度是否合理
+        return (None, "路径长度超出限制") if len(str(path)) > 4096 else (path, None)
+    except Exception as e:
+        return None, f"路径验证失败: {e!s}"
 
 
 GROUP_HELP_PATH = DATA_PATH / "group_help"

@@ -14,9 +14,9 @@ driver.register_adapter(OneBotV11Adapter)
 # driver.register_adapter(DoDoAdapter)
 # driver.register_adapter(DiscordAdapter)
 
-from zhenxun.services.db_context import disconnect, init
+from zhenxun.services.db_context import disconnect
 
-driver.on_startup(init)
+# driver.on_startup(init)
 driver.on_shutdown(disconnect)
 
 # nonebot.load_builtin_plugins("echo")

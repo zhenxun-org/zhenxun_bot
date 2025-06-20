@@ -1,3 +1,15 @@
+class HookPriorityException(BaseException):
+    """
+    钩子优先级异常
+    """
+
+    def __init__(self, info: str = "") -> None:
+        self.info = info
+
+    def __str__(self) -> str:
+        return self.info
+
+
 class NotFoundError(Exception):
     """
     未发现

@@ -22,6 +22,4 @@ class MessageManager:
 
     @classmethod
     def get(cls, uid: str) -> list[str]:
-        if uid in cls.data:
-            return cls.data[uid]
-        return []
+        return cls.data[uid] if uid in cls.data else []

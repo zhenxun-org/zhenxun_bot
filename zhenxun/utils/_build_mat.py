@@ -1,11 +1,16 @@
 from io import BytesIO
 from pathlib import Path
 import random
+import sys
 
 from pydantic import BaseModel, Field
-from strenum import StrEnum
 
 from ._build_image import BuildImage
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from strenum import StrEnum
 
 
 class MatType(StrEnum):

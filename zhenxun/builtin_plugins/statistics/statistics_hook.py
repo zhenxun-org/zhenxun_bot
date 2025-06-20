@@ -53,10 +53,7 @@ async def _(
             )
 
 
-@scheduler.scheduled_job(
-    "interval",
-    minutes=1,
-)
+@scheduler.scheduled_job("interval", minutes=1, max_instances=5)
 async def _():
     try:
         call_list = TEMP_LIST.copy()

@@ -8,6 +8,7 @@ from zhenxun.configs.config import BotConfig
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.task_info import TaskInfo
 from zhenxun.services.log import logger
+from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
 from ....base_model import BaseResultModel, QueryModel, Result
 from ....utils import authentication
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/database")
 driver: Driver = nonebot.get_driver()
 
 
-@driver.on_startup
+@PriorityLifecycle.on_startup(priority=5)
 async def _():
     for plugin in nonebot.get_loaded_plugins():
         module = plugin.name

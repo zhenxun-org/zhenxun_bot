@@ -5,7 +5,9 @@ from nonebot_plugin_alconna import (
     AlconnaQuery,
     Args,
     Arparma,
+    At,
     Match,
+    MultiVar,
     Option,
     Query,
     Subcommand,
@@ -47,6 +49,7 @@ __plugin_meta__ = PluginMetadata(
         plugin_type=PluginType.NORMAL,
         menu_type="商店",
         commands=[
+            Command(command="商店"),
             Command(command="我的金币"),
             Command(command="我的道具"),
             Command(command="购买道具"),
@@ -75,8 +78,16 @@ _matcher = on_alconna(
         Subcommand("my-cost", help_text="我的金币"),
         Subcommand("my-props", help_text="我的道具"),
         Subcommand("buy", Args["name?", str]["num?", int], help_text="购买道具"),
-        Subcommand("use", Args["name?", str]["num?", int], help_text="使用道具"),
         Subcommand("gold-list", Args["num?", int], help_text="金币排行"),
+    ),
+    priority=5,
+    block=True,
+)
+
+_use_matcher = on_alconna(
+    Alconna(
+        "使用道具",
+        Args["name?", str]["num?", int]["at_users?", MultiVar(At)],
     ),
     priority=5,
     block=True,
@@ -100,13 +111,6 @@ _matcher.shortcut(
     "购买道具(?P<name>.*?)",
     command="商店",
     arguments=["buy", "{name}"],
-    prefix=True,
-)
-
-_matcher.shortcut(
-    "使用道具(?P<name>.*?)",
-    command="商店",
-    arguments=["use", "{name}"],
     prefix=True,
 )
 
@@ -173,7 +177,7 @@ async def _(
     await MessageUtils.build_message(result).send(reply_to=True)
 
 
-@_matcher.assign("use")
+@_use_matcher.handle()
 async def _(
     bot: Bot,
     event: Event,
@@ -182,6 +186,7 @@ async def _(
     arparma: Arparma,
     name: Match[str],
     num: Query[int] = AlconnaQuery("num", 1),
+    at_users: Query[list[At]] = AlconnaQuery("at_users", []),
 ):
     if not name.available:
         await MessageUtils.build_message(
@@ -189,7 +194,7 @@ async def _(
         ).finish(reply_to=True)
     try:
         result = await ShopManage.use(
-            bot, event, session, message, name.result, num.result, ""
+            bot, event, session, message, name.result, num.result, "", at_users.result
         )
         logger.info(
             f"使用道具 {name.result}, 数量: {num.result}",
