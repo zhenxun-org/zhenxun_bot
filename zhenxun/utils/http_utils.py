@@ -52,12 +52,8 @@ def get_async_client(
     elif proxy:
         return httpx.AsyncClient(
             mounts={
-                "http://": AsyncHTTPTransport(
-                    proxy=Proxy(proxy)
-                ),
-                "https://": AsyncHTTPTransport(
-                    proxy=Proxy(proxy)
-                ),
+                "http://": AsyncHTTPTransport(proxy=Proxy(proxy)),
+                "https://": AsyncHTTPTransport(proxy=Proxy(proxy)),
             },
             transport=transport,
             **kwargs,
