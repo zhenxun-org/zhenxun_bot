@@ -32,7 +32,7 @@ async def test_update_plugin_basic_need_update(
         new=tmp_path / "zhenxun",
     )
     mocker.patch(
-        "zhenxun.builtin_plugins.plugin_store.data_source.ShopManage.get_loaded_plugins",
+        "zhenxun.builtin_plugins.plugin_store.data_source.StoreManager.get_loaded_plugins",
         return_value=[("search_image", "0.0")],
     )
 
@@ -87,7 +87,7 @@ async def test_update_plugin_basic_is_new(
         new=tmp_path / "zhenxun",
     )
     mocker.patch(
-        "zhenxun.builtin_plugins.plugin_store.data_source.ShopManage.get_loaded_plugins",
+        "zhenxun.builtin_plugins.plugin_store.data_source.StoreManager.get_loaded_plugins",
         return_value=[("search_image", "0.1")],
     )
 

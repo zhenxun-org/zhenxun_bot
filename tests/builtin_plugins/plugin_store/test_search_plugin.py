@@ -57,7 +57,7 @@ async def test_search_plugin_name(
         )
         ctx.receive_event(bot=bot, event=event)
     mock_table_page.assert_awaited_once_with(
-        "插件列表",
+        "商店插件列表",
         "通过添加/移除插件 ID 来管理插件",
         ["-", "ID", "名称", "简介", "作者", "版本", "类型"],
         [
@@ -123,7 +123,7 @@ async def test_search_plugin_author(
         )
         ctx.receive_event(bot=bot, event=event)
     mock_table_page.assert_awaited_once_with(
-        "插件列表",
+        "商店插件列表",
         "通过添加/移除插件 ID 来管理插件",
         ["-", "ID", "名称", "简介", "作者", "版本", "类型"],
         [

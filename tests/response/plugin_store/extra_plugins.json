@@ -1,5 +1,6 @@
-{
-  "github订阅": {
+[
+  {
+    "name": "github订阅",
     "module": "github_sub",
     "module_path": "github_sub",
     "description": "订阅github用户或仓库",
@@ -10,7 +11,8 @@
     "is_dir": true,
     "github_url": "https://github.com/xuanerwa/zhenxun_github_sub"
   },
-  "Minecraft查服": {
+  {
+    "name": "Minecraft查服",
     "module": "mc_check",
     "module_path": "mc_check",
     "description": "Minecraft服务器状态查询，支持IPv6",
@@ -21,4 +23,4 @@
     "is_dir": true,
     "github_url": "https://github.com/molanp/zhenxun_check_Minecraft"
   }
-}
+]

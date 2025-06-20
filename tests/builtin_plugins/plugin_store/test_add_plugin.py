@@ -359,7 +359,7 @@ async def test_add_plugin_exist(
 
     init_mocked_api(mocked_api=mocked_api)
     mocker.patch(
-        "zhenxun.builtin_plugins.plugin_store.data_source.ShopManage.get_loaded_plugins",
+        "zhenxun.builtin_plugins.plugin_store.data_source.StoreManager.get_loaded_plugins",
         return_value=[("search_image", "0.1")],
     )
     plugin_id = 1

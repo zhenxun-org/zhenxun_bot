@@ -1,5 +1,6 @@
-{
-  "鸡汤": {
+[
+  {
+    "name": "鸡汤",
     "module": "jitang",
     "module_path": "plugins.alapi.jitang",
     "description": "喏，亲手为你煮的鸡汤",
@@ -9,7 +10,8 @@
     "plugin_type": "NORMAL",
     "is_dir": false
   },
-  "识图": {
+  {
+    "name": "识图",
     "module": "search_image",
     "module_path": "plugins.search_image",
     "description": "以图搜图，看破本源",
@@ -19,7 +21,8 @@
     "plugin_type": "NORMAL",
     "is_dir": true
   },
-  "网易云热评": {
+  {
+    "name": "网易云热评",
     "module": "comments_163",
     "module_path": "plugins.alapi.comments_163",
     "description": "生了个人，我很抱歉",
@@ -29,7 +32,8 @@
     "plugin_type": "NORMAL",
     "is_dir": false
   },
-  "B站订阅": {
+  {
+    "name": "B站订阅",
     "module": "bilibili_sub",
     "module_path": "plugins.bilibili_sub",
     "description": "非常便利的B站订阅通知",
@@ -39,4 +43,4 @@
     "plugin_type": "NORMAL",
     "is_dir": true
   }
-}
+]

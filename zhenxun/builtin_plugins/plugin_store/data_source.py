@@ -55,32 +55,6 @@ def install_requirement(plugin_path: Path):
     ):
         VirtualEnvPackageManager.install_requirement(existing_requirements)
 
-    if not existing_requirements:
-        logger.debug(
-            f"No requirement.txt found for plugin: {plugin_path.name}", "插件管理"
-        )
-        return
-
-    try:
-        command = WIN_COMMAND if BAT_FILE.exists() else DEFAULT_COMMAND
-        command.append(str(existing_requirements))
-        result = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        logger.debug(
-            "Successfully installed dependencies for"
-            f" plugin: {plugin_path.name}. Output:\n{result.stdout}",
-            "插件管理",
-        )
-    except subprocess.CalledProcessError:
-        logger.error(
-            f"Failed to install dependencies for plugin: {plugin_path.name}. "
-            " Error:\n{e.stderr}"
-        )
-
 
 class StoreManager:
     @classmethod
@@ -232,7 +206,7 @@ class StoreManager:
         db_plugin_list = await cls.get_loaded_plugins("module")
         plugin_info = next(p for p in plugin_list if p.module == plugin_key)
         if plugin_info.module in [p[0] for p in db_plugin_list]:
-            return f"插件 {plugin_key} 已安装，无需重复安装"
+            return f"插件 {plugin_info.name} 已安装，无需重复安装"
         is_external = True
         if plugin_info.github_url is None:
             plugin_info.github_url = DEFAULT_GITHUB_URL
@@ -241,14 +215,14 @@ class StoreManager:
         if len(version_split) > 1:
             github_url_split = plugin_info.github_url.split("/tree/")
             plugin_info.github_url = f"{github_url_split[0]}/tree/{version_split[1]}"
-        logger.info(f"正在安装插件 {plugin_key}...", LOG_COMMAND)
+        logger.info(f"正在安装插件 {plugin_info.name}...", LOG_COMMAND)
         await cls.install_plugin_with_repo(
             plugin_info.github_url,
             plugin_info.module_path,
             plugin_info.is_dir,
             is_external,
         )
-        return f"插件 {plugin_key} 安装成功! 重启后生效"
+        return f"插件 {plugin_info.name} 安装成功! 重启后生效"
 
     @classmethod
     async def install_plugin_with_repo(
@@ -348,14 +322,14 @@ class StoreManager:
         if not plugin_info.is_dir:
             path = Path(f"{path}.py")
         if not path.exists():
-            return f"插件 {plugin_key} 不存在..."
-        logger.debug(f"尝试移除插件 {plugin_key} 文件: {path}", LOG_COMMAND)
+            return f"插件 {plugin_info.name} 不存在..."
+        logger.debug(f"尝试移除插件 {plugin_info.name} 文件: {path}", LOG_COMMAND)
         if plugin_info.is_dir:
             shutil.rmtree(path)
         else:
             path.unlink()
         await PluginInitManager.remove(f"zhenxun.{plugin_info.module_path}")
-        return f"插件 {plugin_key} 移除成功! 重启后生效"
+        return f"插件 {plugin_info.name} 移除成功! 重启后生效"
 
     @classmethod
     async def search_plugin(cls, plugin_name_or_author: str) -> BuildImage | str:
@@ -393,7 +367,7 @@ class StoreManager:
             return "未找到相关插件..."
         column_name = ["-", "ID", "名称", "简介", "作者", "版本", "类型"]
         return await ImageTemplate.table_page(
-            "商店列表",
+            "商店插件列表",
             "通过添加/移除插件 ID 来管理插件",
             column_name,
             data_list,
@@ -415,15 +389,15 @@ class StoreManager:
             plugin_key = await cls._resolve_plugin_key(plugin_id)
         except ValueError as e:
             return str(e)
-        logger.info(f"尝试更新插件 {plugin_key}", LOG_COMMAND)
         plugin_info = next(p for p in plugin_list if p.module == plugin_key)
+        logger.info(f"尝试更新插件 {plugin_info.name}", LOG_COMMAND)
         db_plugin_list = await cls.get_loaded_plugins("module", "version")
         suc_plugin = {p[0]: (p[1] or "Unknown") for p in db_plugin_list}
         if plugin_info.module not in [p[0] for p in db_plugin_list]:
-            return f"插件 {plugin_key} 未安装，无法更新"
+            return f"插件 {plugin_info.name} 未安装，无法更新"
         logger.debug(f"当前插件列表: {suc_plugin}", LOG_COMMAND)
         if cls.check_version_is_new(plugin_info, suc_plugin):
-            return f"插件 {plugin_key} 已是最新版本"
+            return f"插件 {plugin_info.name} 已是最新版本"
         is_external = True
         if plugin_info.github_url is None:
             plugin_info.github_url = DEFAULT_GITHUB_URL
@@ -434,7 +408,7 @@ class StoreManager:
             plugin_info.is_dir,
             is_external,
         )
-        return f"插件 {plugin_key} 更新成功! 重启后生效"
+        return f"插件 {plugin_info.name} 更新成功! 重启后生效"
 
     @classmethod
     async def update_all_plugin(cls) -> str:
