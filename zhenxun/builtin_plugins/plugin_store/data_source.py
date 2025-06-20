@@ -60,7 +60,6 @@ class StoreManager:
         返回:
             list[StorePluginInfo]: 插件列表数据
         """
-        return []
         repo_info = GithubUtils.parse_github_url(DEFAULT_GITHUB_URL)
         if await repo_info.update_repo_commit():
             logger.info(f"获取最新提交: {repo_info.branch}", LOG_COMMAND)
@@ -69,6 +68,7 @@ class StoreManager:
         default_github_url = await repo_info.get_raw_download_urls("plugins.json")
         response = await AsyncHttpx.get(default_github_url, check_status_code=200)
         if response.status_code == 200:
+            logger.info("获取github插件列表成功", LOG_COMMAND)
             return [StorePluginInfo(**detail) for detail in json.loads(response.text)]
         else:
             logger.warning(
@@ -86,6 +86,7 @@ class StoreManager:
         url = f"{GITEE_RAW_URL}/plugins.json"
         response = await AsyncHttpx.get(url, check_status_code=200)
         if response.status_code == 200:
+            logger.info("获取gitee插件列表成功", LOG_COMMAND)
             return [StorePluginInfo(**detail) for detail in json.loads(response.text)]
         else:
             logger.warning(
@@ -124,8 +125,7 @@ class StoreManager:
             list[StorePluginInfo]: 插件信息数据
         """
         plugins = await cls.get_github_plugins() or await cls.get_gitee_plugins()
-        # extra_plugins = await cls.get_extra_plugins()
-        extra_plugins = []
+        extra_plugins = await cls.get_extra_plugins()
         return [*plugins, *extra_plugins]
 
     @classmethod
@@ -232,13 +232,12 @@ class StoreManager:
         logger.info(f"正在安装插件 {plugin_key}...", LOG_COMMAND)
         download_type = "GITHUB"
         try:
-            # await cls.install_plugin_with_repo(
-            #     plugin_info.github_url,
-            #     plugin_info.module_path,
-            #     plugin_info.is_dir,
-            #     is_external,
-            # )
-            pass
+            await cls.install_plugin_with_repo(
+                plugin_info.github_url,
+                plugin_info.module_path,
+                plugin_info.is_dir,
+                is_external,
+            )
         except Exception as e:
             download_type = "GITEE"
             logger.error(f"GITHUB 插件 {plugin_key} 更新失败", LOG_COMMAND, e=e)

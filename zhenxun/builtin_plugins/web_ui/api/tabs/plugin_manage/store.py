@@ -22,9 +22,9 @@ router = APIRouter(prefix="/store")
 async def _() -> Result[dict]:
     try:
         require("plugin_store")
-        from zhenxun.builtin_plugins.plugin_store import ShopManage
+        from zhenxun.builtin_plugins.plugin_store import StoreManager
 
-        data = await ShopManage.get_data()
+        data = await StoreManager.get_data()
         plugin_list = [
             {**data[name].to_dict(), "name": name, "id": idx}
             for idx, name in enumerate(data)
@@ -48,9 +48,9 @@ async def _() -> Result[dict]:
 async def _(param: PluginIr) -> Result:
     try:
         require("plugin_store")
-        from zhenxun.builtin_plugins.plugin_store import ShopManage
+        from zhenxun.builtin_plugins.plugin_store import StoreManager
 
-        result = await ShopManage.add_plugin(param.id)  # type: ignore
+        result = await StoreManager.add_plugin(param.id)  # type: ignore
         return Result.ok(info=result)
     except Exception as e:
         return Result.fail(f"安装插件失败: {type(e)}: {e}")
@@ -66,9 +66,9 @@ async def _(param: PluginIr) -> Result:
 async def _(param: PluginIr) -> Result:
     try:
         require("plugin_store")
-        from zhenxun.builtin_plugins.plugin_store import ShopManage
+        from zhenxun.builtin_plugins.plugin_store import StoreManager
 
-        result = await ShopManage.update_plugin(param.id)  # type: ignore
+        result = await StoreManager.update_plugin(param.id)  # type: ignore
         return Result.ok(info=result)
     except Exception as e:
         return Result.fail(f"更新插件失败: {type(e)}: {e}")
@@ -84,9 +84,9 @@ async def _(param: PluginIr) -> Result:
 async def _(param: PluginIr) -> Result:
     try:
         require("plugin_store")
-        from zhenxun.builtin_plugins.plugin_store import ShopManage
+        from zhenxun.builtin_plugins.plugin_store import StoreManager
 
-        result = await ShopManage.remove_plugin(param.id)  # type: ignore
+        result = await StoreManager.remove_plugin(param.id)  # type: ignore
         return Result.ok(info=result)
     except Exception as e:
         return Result.fail(f"移除插件失败: {type(e)}: {e}")
