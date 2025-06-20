@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from nonebot import require
+from nonebot.compat import model_dump
 
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.services.log import logger
@@ -26,8 +27,8 @@ async def _() -> Result[dict]:
 
         data = await StoreManager.get_data()
         plugin_list = [
-            {**data[name].to_dict(), "name": name, "id": idx}
-            for idx, name in enumerate(data)
+            {**model_dump(plugin), "name": plugin.name, "id": idx}
+            for idx, plugin in enumerate(data)
         ]
         modules = await PluginInfo.filter(load_status=True).values_list(
             "module", flat=True
