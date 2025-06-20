@@ -5,7 +5,7 @@ from aiocache import cached
 import ujson as json
 
 from zhenxun.builtin_plugins.auto_update.config import REQ_TXT_FILE_STRING
-from zhenxun.builtin_plugins.plugin_store.models import GiteeContents, StorePluginInfo
+from zhenxun.builtin_plugins.plugin_store.models import StorePluginInfo
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.services.log import logger
 from zhenxun.services.plugin_init import PluginInitManager
@@ -20,8 +20,6 @@ from .config import (
     BASE_PATH,
     DEFAULT_GITHUB_URL,
     EXTRA_GITHUB_URL,
-    GITEE_CONTENTS_URL,
-    GITEE_RAW_URL,
     LOG_COMMAND,
 )
 
@@ -77,24 +75,6 @@ class StoreManager:
         return []
 
     @classmethod
-    async def get_gitee_plugins(cls) -> list[StorePluginInfo]:
-        """获取gitcode插件列表信息
-
-        返回:
-            list[StorePluginInfo]: 插件列表数据
-        """
-        url = f"{GITEE_RAW_URL}/plugins.json"
-        response = await AsyncHttpx.get(url, check_status_code=200)
-        if response.status_code == 200:
-            logger.info("获取gitee插件列表成功", LOG_COMMAND)
-            return [StorePluginInfo(**detail) for detail in json.loads(response.text)]
-        else:
-            logger.warning(
-                f"获取gitee插件列表失败: {response.status_code}", LOG_COMMAND
-            )
-        return []
-
-    @classmethod
     async def get_extra_plugins(cls) -> list[StorePluginInfo]:
         """获取额外插件列表信息
 
@@ -124,7 +104,7 @@ class StoreManager:
         返回:
             list[StorePluginInfo]: 插件信息数据
         """
-        plugins = await cls.get_github_plugins() or await cls.get_gitee_plugins()
+        plugins = await cls.get_github_plugins()
         extra_plugins = await cls.get_extra_plugins()
         return [*plugins, *extra_plugins]
 
@@ -230,56 +210,13 @@ class StoreManager:
             github_url_split = plugin_info.github_url.split("/tree/")
             plugin_info.github_url = f"{github_url_split[0]}/tree/{version_split[1]}"
         logger.info(f"正在安装插件 {plugin_key}...", LOG_COMMAND)
-        download_type = "GITHUB"
-        try:
-            await cls.install_plugin_with_repo(
-                plugin_info.github_url,
-                plugin_info.module_path,
-                plugin_info.is_dir,
-                is_external,
-            )
-        except Exception as e:
-            download_type = "GITEE"
-            logger.error(f"GITHUB 插件 {plugin_key} 更新失败", LOG_COMMAND, e=e)
-        await cls.install_plugin_with_gitee(plugin_info.module_path, plugin_info.is_dir)
-        return f"插件 {download_type} {plugin_key} 安装成功! 重启后生效"
-
-    @classmethod
-    async def __get_download_files(cls, url: str, data_list: list[tuple[str, str]]):
-        response = await AsyncHttpx.get(url)
-        response.raise_for_status()
-        for item in [GiteeContents(**item) for item in response.json()]:
-            if item.type == "dir":
-                await cls.__get_download_files(item.url, data_list)
-            else:
-                data_list.append((item.path, item.download_url))
-
-    @classmethod
-    async def install_plugin_with_gitee(cls, module_path: str, is_dir: bool):
-        module_path = module_path.replace(".", "/")
-        data_list = []
-        if is_dir:
-            DIR_URL = f"{GITEE_CONTENTS_URL}/{module_path}"
-            await cls.__get_download_files(DIR_URL, data_list)
-        else:
-            FILE_URL = f"{GITEE_RAW_URL}/{module_path}.py"
-            data_list.append((f"{module_path}.py", FILE_URL))
-        if not data_list:
-            raise ValueError("获取插件文件失败（目录为空），请检查地址是否正确")
-        download_urls = []
-        download_paths = []
-        requirement_file = None
-        for item in data_list:
-            file_path = BASE_PATH / Path(item[0])
-            if file_path.is_file():
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-            download_urls.append(item[1])
-            download_paths.append(file_path)
-            if "requirement" in item[0] and str(item[0]).endswith(".txt"):
-                requirement_file = file_path
-        await AsyncHttpx.gather_download_file(download_urls, download_paths)
-        if requirement_file:
-            VirtualEnvPackageManager.install_requirement(requirement_file)
+        await cls.install_plugin_with_repo(
+            plugin_info.github_url,
+            plugin_info.module_path,
+            plugin_info.is_dir,
+            is_external,
+        )
+        return f"插件 {plugin_key} 安装成功! 重启后生效"
 
     @classmethod
     async def install_plugin_with_repo(
@@ -441,16 +378,16 @@ class StoreManager:
         返回:
             str: 返回消息
         """
-        data: dict[str, StorePluginInfo] = await cls.get_data()
+        plugin_list: list[StorePluginInfo] = await cls.get_data()
         try:
             plugin_key = await cls._resolve_plugin_key(plugin_id)
         except ValueError as e:
             return str(e)
         logger.info(f"尝试更新插件 {plugin_key}", LOG_COMMAND)
-        plugin_info = data[plugin_key]
-        plugin_list = await cls.get_loaded_plugins("module", "version")
-        suc_plugin = {p[0]: (p[1] or "Unknown") for p in plugin_list}
-        if plugin_info.module not in [p[0] for p in plugin_list]:
+        plugin_info = next(p for p in plugin_list if p.module == plugin_key)
+        db_plugin_list = await cls.get_loaded_plugins("module", "version")
+        suc_plugin = {p[0]: (p[1] or "Unknown") for p in db_plugin_list}
+        if plugin_info.module not in [p[0] for p in db_plugin_list]:
             return f"插件 {plugin_key} 未安装，无法更新"
         logger.debug(f"当前插件列表: {suc_plugin}", LOG_COMMAND)
         if cls.check_version_is_new(plugin_info, suc_plugin):
@@ -459,21 +396,13 @@ class StoreManager:
         if plugin_info.github_url is None:
             plugin_info.github_url = DEFAULT_GITHUB_URL
             is_external = False
-        download_type = "GITHUB"
-        try:
-            await cls.install_plugin_with_repo(
-                plugin_info.github_url,
-                plugin_info.module_path,
-                plugin_info.is_dir,
-                is_external,
-            )
-        except Exception as e:
-            download_type = "GITEE"
-            logger.error(f"GITHUB 插件 {plugin_key} 更新失败", LOG_COMMAND, e=e)
-            await cls.install_plugin_with_gitee(
-                plugin_info.module_path, plugin_info.is_dir
-            )
-        return f"插件 {download_type} {plugin_key} 更新成功! 重启后生效"
+        await cls.install_plugin_with_repo(
+            plugin_info.github_url,
+            plugin_info.module_path,
+            plugin_info.is_dir,
+            is_external,
+        )
+        return f"插件 {plugin_key} 更新成功! 重启后生效"
 
     @classmethod
     async def update_all_plugin(cls) -> str:
@@ -516,22 +445,12 @@ class StoreManager:
                 if plugin_info.github_url is None:
                     plugin_info.github_url = DEFAULT_GITHUB_URL
                     is_external = False
-                try:
-                    await cls.install_plugin_with_repo(
-                        plugin_info.github_url,
-                        plugin_info.module_path,
-                        plugin_info.is_dir,
-                        is_external,
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"GITHUB 插件 {plugin_info.name}({plugin_info.module}) 更新失败",
-                        LOG_COMMAND,
-                        e=e,
-                    )
-                    await cls.install_plugin_with_gitee(
-                        plugin_info.module_path, plugin_info.is_dir
-                    )
+                await cls.install_plugin_with_repo(
+                    plugin_info.github_url,
+                    plugin_info.module_path,
+                    plugin_info.is_dir,
+                    is_external,
+                )
                 update_success_list.append(plugin_info.name)
             except Exception as e:
                 logger.error(

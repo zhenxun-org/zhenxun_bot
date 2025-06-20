@@ -454,9 +454,9 @@ class ConfigsManager:
                         else config.default_value
                     )
             except Exception as e:
-                logger.warning(
+                logger.debug(
                     f"配置项类型转换 MODULE: [<u><y>{module}</y></u>]"
-                    f" | KEY: [<u><y>{key}</y></u>]",
+                    f" | KEY: [<u><y>{key}</y></u>] 将使用原始值",
                     e=e,
                 )
                 value = config.value or config.default_value

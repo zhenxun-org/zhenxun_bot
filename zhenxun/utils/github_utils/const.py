@@ -21,6 +21,9 @@ CACHED_API_TTL = 300
 RAW_CONTENT_FORMAT = "https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
 """raw content格式"""
 
+GITEE_RAW_CONTENT_FORMAT = "https://gitee.com/{owner}/{repo}/raw/main/{path}"
+"""gitee raw content格式"""
+
 ARCHIVE_URL_FORMAT = "https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
 """archive url格式"""
 
