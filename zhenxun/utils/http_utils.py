@@ -24,11 +24,14 @@ from zhenxun.services.log import logger
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.user_agent import get_user_agent
 
-CLIENT_KEY = ["use_proxy", "proxies", "verify", "headers"]
+CLIENT_KEY = ["use_proxy", "proxies", "proxy", "verify", "headers"]
 
 
 def get_async_client(
-    proxies: dict[str, str] | None = None, verify: bool = False, **kwargs
+    proxies: dict[str, str] | None = None,
+    proxy: str | None = None,
+    verify: bool = False,
+    **kwargs,
 ) -> httpx.AsyncClient:
     transport = kwargs.pop("transport", None) or AsyncHTTPTransport(verify=verify)
     if proxies:
@@ -41,6 +44,19 @@ def get_async_client(
                 ),
                 "https://": AsyncHTTPTransport(
                     proxy=Proxy(https_proxy) if https_proxy else None
+                ),
+            },
+            transport=transport,
+            **kwargs,
+        )
+    elif proxy:
+        return httpx.AsyncClient(
+            mounts={
+                "http://": AsyncHTTPTransport(
+                    proxy=Proxy(proxy)
+                ),
+                "https://": AsyncHTTPTransport(
+                    proxy=Proxy(proxy)
                 ),
             },
             transport=transport,
@@ -66,6 +82,7 @@ class AsyncHttpx:
         *,
         use_proxy: bool = True,
         proxies: dict[str, str] | None = None,
+        proxy: str | None = None,
         headers: dict[str, str] | None = None,
         verify: bool = False,
         **kwargs,
@@ -78,6 +95,7 @@ class AsyncHttpx:
         参数:
             use_proxy: 是否使用在类中定义的默认代理。
             proxies: 手动指定的代理，会覆盖默认代理。
+            proxy: 单个代理,用于兼容旧版本，不再使用
             headers: 需要合并到客户端的自定义请求头。
             verify: 是否验证 SSL 证书。
             **kwargs: 其他所有传递给 httpx.AsyncClient 的参数。
@@ -92,7 +110,11 @@ class AsyncHttpx:
             final_headers.update(headers)
 
         async with get_async_client(
-            proxies=proxies_to_use, verify=verify, headers=final_headers, **kwargs
+            proxies=proxies_to_use,
+            proxy=proxy,
+            verify=verify,
+            headers=final_headers,
+            **kwargs,
         ) as client:
             yield client
 
