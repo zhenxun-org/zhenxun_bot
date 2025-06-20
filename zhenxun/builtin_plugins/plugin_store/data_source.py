@@ -55,7 +55,6 @@ def install_requirement(plugin_path: Path):
     ):
         VirtualEnvPackageManager.install_requirement(existing_requirements)
 
-
     if not existing_requirements:
         logger.debug(
             f"No requirement.txt found for plugin: {plugin_path.name}", "插件管理"
