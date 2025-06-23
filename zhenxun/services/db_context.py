@@ -26,7 +26,8 @@ class Model(Model_):
     """
 
     def __init_subclass__(cls, **kwargs):
-        MODELS.append(cls.__module__)
+        if cls.__module__ not in MODELS:
+            MODELS.append(cls.__module__)
 
         if func := getattr(cls, "_run_script", None):
             SCRIPT_METHOD.append((cls.__module__, func))
