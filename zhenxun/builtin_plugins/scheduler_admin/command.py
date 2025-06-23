@@ -1,6 +1,9 @@
 import asyncio
+from datetime import datetime
+import re
 
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
+from nonebot.params import Depends
 from nonebot.permission import SUPERUSER
 from nonebot_plugin_alconna import (
     Alconna,
@@ -57,6 +60,152 @@ def _format_params(schedule_status: dict) -> str:
     return "-"
 
 
+def _parse_interval(interval_str: str) -> dict:
+    match = re.match(r"(\d+)([smh])", interval_str.lower())
+    if not match:
+        raise ValueError("时间间隔格式错误, 请使用如 '30m', '2h', '10s' 的格式。")
+
+    value, unit = int(match.group(1)), match.group(2)
+    if unit == "s":
+        return {"seconds": value}
+    if unit == "m":
+        return {"minutes": value}
+    if unit == "h":
+        return {"hours": value}
+    return {}
+
+
+async def GetBotId(
+    bot: Bot,
+    bot_id_match: Match[str] = AlconnaMatch("bot_id"),
+) -> str:
+    """获取要操作的Bot ID"""
+    if bot_id_match.available:
+        return bot_id_match.result
+    return bot.self_id
+
+
+class ScheduleTarget:
+    """定时任务操作目标的基类"""
+
+    pass
+
+
+class TargetByID(ScheduleTarget):
+    """按任务ID操作"""
+
+    def __init__(self, id: int):
+        self.id = id
+
+
+class TargetByPlugin(ScheduleTarget):
+    """按插件名操作"""
+
+    def __init__(
+        self, plugin: str, group_id: str | None = None, all_groups: bool = False
+    ):
+        self.plugin = plugin
+        self.group_id = group_id
+        self.all_groups = all_groups
+
+
+class TargetAll(ScheduleTarget):
+    """操作所有任务"""
+
+    def __init__(self, for_group: str | None = None):
+        self.for_group = for_group
+
+
+TargetScope = TargetByID | TargetByPlugin | TargetAll | None
+
+
+async def ParseScheduleTargetForDelete(
+    event: GroupMessageEvent,
+    schedule_id: Match[int] = AlconnaMatch("schedule_id"),
+    plugin_name: Match[str] = AlconnaMatch("plugin_name"),
+    group_id: Match[str] = AlconnaMatch("group_id"),
+    all_enabled: Query[bool] = Query("删除.all"),
+) -> TargetScope:
+    """解析删除命令的操作目标"""
+    if schedule_id.available:
+        return TargetByID(schedule_id.result)
+
+    if plugin_name.available:
+        p_name = plugin_name.result
+        if all_enabled.available:
+            return TargetByPlugin(plugin=p_name, all_groups=True)
+        elif group_id.available:
+            gid = group_id.result
+            if gid.lower() == "all":
+                gid = "__ALL_GROUPS__"
+            return TargetByPlugin(plugin=p_name, group_id=gid)
+        else:
+            return TargetByPlugin(plugin=p_name, group_id=str(event.group_id))
+
+    if all_enabled.available:
+        return TargetAll(for_group=group_id.result if group_id.available else None)
+
+    return None
+
+
+async def ParseScheduleTargetForPause(
+    event: GroupMessageEvent,
+    schedule_id: Match[int] = AlconnaMatch("schedule_id"),
+    plugin_name: Match[str] = AlconnaMatch("plugin_name"),
+    group_id: Match[str] = AlconnaMatch("group_id"),
+    all_enabled: Query[bool] = Query("暂停.all"),
+) -> TargetScope:
+    """解析暂停命令的操作目标"""
+    if schedule_id.available:
+        return TargetByID(schedule_id.result)
+
+    if plugin_name.available:
+        p_name = plugin_name.result
+        if all_enabled.available:
+            return TargetByPlugin(plugin=p_name, all_groups=True)
+        elif group_id.available:
+            gid = group_id.result
+            if gid.lower() == "all":
+                gid = "__ALL_GROUPS__"
+            return TargetByPlugin(plugin=p_name, group_id=gid)
+        else:
+            return TargetByPlugin(plugin=p_name, group_id=str(event.group_id))
+
+    if all_enabled.available:
+        return TargetAll(for_group=group_id.result if group_id.available else None)
+
+    return None
+
+
+async def ParseScheduleTargetForResume(
+    event: GroupMessageEvent,
+    schedule_id: Match[int] = AlconnaMatch("schedule_id"),
+    plugin_name: Match[str] = AlconnaMatch("plugin_name"),
+    group_id: Match[str] = AlconnaMatch("group_id"),
+    all_enabled: Query[bool] = Query("恢复.all"),
+) -> TargetScope:
+    """解析恢复命令的操作目标"""
+    if schedule_id.available:
+        return TargetByID(schedule_id.result)
+
+    if plugin_name.available:
+        p_name = plugin_name.result
+        if all_enabled.available:
+            return TargetByPlugin(plugin=p_name, all_groups=True)
+        elif group_id.available:
+            gid = group_id.result
+            if gid.lower() == "all":
+                gid = "__ALL_GROUPS__"
+            return TargetByPlugin(plugin=p_name, group_id=gid)
+        else:
+            return TargetByPlugin(plugin=p_name, group_id=str(event.group_id))
+
+    if all_enabled.available:
+        return TargetAll(for_group=group_id.result if group_id.available else None)
+
+    return None
+
+
 schedule_cmd = on_alconna(
     Alconna(
         "定时任务",
@@ -71,10 +220,16 @@ schedule_cmd = on_alconna(
         ),
         Subcommand(
             "设置",
-            Args["plugin_name", str]["time", str],
-            Option("-g", Args["group_id", str], help_text="指定群组ID"),
-            Option("-all", help_text="对所有群生效"),
+            Args["plugin_name", str],
+            Option("--cron", Args["cron_expr", str], help_text="设置 cron 表达式"),
+            Option("--interval", Args["interval_expr", str], help_text="设置时间间隔"),
+            Option("--date", Args["date_expr", str], help_text="设置特定执行日期"),
+            Option("-g", Args["group_id", str], help_text="指定群组ID或'all'"),
+            Option("-all", help_text="对所有群生效 (等同于 -g all)"),
             Option("--kwargs", Args["kwargs_str", str], help_text="设置任务参数"),
+            Option(
+                "--bot", Args["bot_id", str], help_text="指定操作的Bot ID (SUPERUSER)"
+            ),
             alias=["add", "开启"],
             help_text="设置/开启一个定时任务",
         ),
@@ -84,6 +239,9 @@ schedule_cmd = on_alconna(
             Option("-p", Args["plugin_name", str], help_text="指定插件名"),
             Option("-g", Args["group_id", str], help_text="指定群组ID"),
             Option("-all", help_text="对所有群生效"),
+            Option(
+                "--bot", Args["bot_id", str], help_text="指定操作的Bot ID (SUPERUSER)"
+            ),
             alias=["del", "rm", "remove", "关闭", "取消"],
             help_text="删除一个或多个定时任务",
         ),
@@ -93,6 +251,9 @@ schedule_cmd = on_alconna(
             Option("-all", help_text="对当前群所有任务生效"),
             Option("-p", Args["plugin_name", str], help_text="指定插件名"),
             Option("-g", Args["group_id", str], help_text="指定群组ID (SUPERUSER)"),
+            Option(
+                "--bot", Args["bot_id", str], help_text="指定操作的Bot ID (SUPERUSER)"
+            ),
             alias=["pause"],
             help_text="暂停一个或多个定时任务",
         ),
@@ -102,6 +263,9 @@ schedule_cmd = on_alconna(
             Option("-all", help_text="对当前群所有任务生效"),
             Option("-p", Args["plugin_name", str], help_text="指定插件名"),
             Option("-g", Args["group_id", str], help_text="指定群组ID (SUPERUSER)"),
+            Option(
+                "--bot", Args["bot_id", str], help_text="指定操作的Bot ID (SUPERUSER)"
+            ),
             alias=["resume"],
             help_text="恢复一个或多个定时任务",
         ),
@@ -114,7 +278,9 @@ schedule_cmd = on_alconna(
         Subcommand(
             "更新",
             Args["schedule_id", int],
-            Option("--time", Args["time", str], help_text="更新时间 (HH:MM)"),
+            Option("--cron", Args["cron_expr", str], help_text="设置 cron 表达式"),
+            Option("--interval", Args["interval_expr", str], help_text="设置时间间隔"),
+            Option("--date", Args["date_expr", str], help_text="设置特定执行日期"),
             Option("--kwargs", Args["kwargs_str", str], help_text="更新参数"),
             alias=["update", "modify", "修改"],
             help_text="更新任务配置",
@@ -190,7 +356,8 @@ async def _(
         [
             s["id"],
             s["plugin_name"],
-            s["group_id"],
+            s.get("bot_id") or "N/A",
+            s["group_id"] or "全局",
             s["next_run_time"],
             _format_trigger(s),
             _format_params(s),
@@ -206,7 +373,16 @@ async def _(
     img = await ImageTemplate.table_page(
         head_text=title,
         tip_text=f"第 {current_page}/{total_pages} 页，共 {total_items} 条任务",
-        column_name=["ID", "插件", "群组/目标", "下次运行", "触发规则", "参数", "状态"],
+        column_name=[
+            "ID",
+            "插件",
+            "Bot ID",
+            "群组/目标",
+            "下次运行",
+            "触发规则",
+            "参数",
+            "状态",
+        ],
         data_list=data_list,
         column_space=20,
     )
@@ -216,26 +392,43 @@ async def _(
 @schedule_cmd.assign("设置")
 async def _(
     plugin_name: str,
-    time: str,
+    cron_expr: Match[str] = AlconnaMatch("cron.cron_expr"),
+    interval_expr: Match[str] = AlconnaMatch("interval.interval_expr"),
+    date_expr: Match[str] = AlconnaMatch("date.date_expr"),
     group_id: Match[str] = AlconnaMatch("group_id"),
     kwargs_str: Match[str] = AlconnaMatch("kwargs_str"),
     all_enabled: Query[bool] = Query("设置.all"),
+    bot_id_to_operate: str = Depends(GetBotId),
 ):
     if plugin_name not in scheduler_manager._registered_tasks:
         await schedule_cmd.finish(
             f"插件 '{plugin_name}' 没有注册可用的定时任务。\n"
             f"可用插件: {list(scheduler_manager._registered_tasks.keys())}"
         )
+
+    trigger_type = ""
+    trigger_config = {}
+
     try:
-        time_parts = time.split(":")
-        if len(time_parts) != 2:
-            raise ValueError("时间格式应为 HH:MM")
-        hour, minute = map(int, time_parts)
-        if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            raise ValueError("小时或分钟超出有效范围")
-        trigger_config = {"hour": hour, "minute": minute}
+        if cron_expr.available:
+            trigger_type = "cron"
+            parts = cron_expr.result.split()
+            if len(parts) != 5:
+                raise ValueError("Cron 表达式必须有5个部分 (分 时 日 月 周)")
+            cron_keys = ["minute", "hour", "day", "month", "day_of_week"]
+            trigger_config = dict(zip(cron_keys, parts))
+        elif interval_expr.available:
+            trigger_type = "interval"
+            trigger_config = _parse_interval(interval_expr.result)
+        elif date_expr.available:
+            trigger_type = "date"
+            trigger_config = {"run_date": datetime.fromisoformat(date_expr.result)}
+        else:
+            await schedule_cmd.finish(
+                "必须提供一种时间选项: --cron, --interval, 或 --date。"
+            )
     except ValueError as e:
-        await schedule_cmd.finish(f"时间格式错误: {e}")
+        await schedule_cmd.finish(f"时间参数解析错误: {e}")
 
     job_kwargs = None
     if kwargs_str.available:
@@ -258,69 +451,76 @@ async def _(
                 f"参数格式错误，请使用 'key=value,key2=value2' 格式。错误: {e}"
             )
 
-    if all_enabled.available:
-        success, fail = await scheduler_manager.add_schedule_for_all(
-            plugin_name, "cron", trigger_config, job_kwargs
-        )
-        await schedule_cmd.finish(f"已为 {success} 个群组设置任务，{fail} 个失败。")
+    target_group_id: str | None = None
+    if group_id.available and group_id.result.lower() == "all":
+        target_group_id = "__ALL_GROUPS__"
+    elif all_enabled.available:
+        target_group_id = "__ALL_GROUPS__"
     elif group_id.available:
-        success, msg = await scheduler_manager.add_schedule(
-            plugin_name, group_id.result, "cron", trigger_config, job_kwargs
-        )
-        await schedule_cmd.finish(msg)
+        target_group_id = group_id.result
     else:
-        success, msg = await scheduler_manager.add_schedule(
-            plugin_name, None, "cron", trigger_config, job_kwargs
-        )
-        await schedule_cmd.finish(f"已设置全局任务: {msg}")
+        target_group_id = None
+
+    success, msg = await scheduler_manager.add_schedule(
+        plugin_name,
+        target_group_id,
+        trigger_type,
+        trigger_config,
+        job_kwargs,
+        bot_id=bot_id_to_operate,
+    )
+
+    if target_group_id == "__ALL_GROUPS__":
+        target_desc = "所有群组"
+    elif target_group_id is None:
+        target_desc = "全局"
+    else:
+        target_desc = f"群组 {target_group_id}"
+
+    if success:
+        await schedule_cmd.finish(f"已成功为 [{target_desc}] {msg}")
+    else:
+        await schedule_cmd.finish(f"为 [{target_desc}] 设置任务失败: {msg}")
 
 
 @schedule_cmd.assign("删除")
 async def _(
-    event: GroupMessageEvent,
-    schedule_id: Match[int] = AlconnaMatch("schedule_id"),
-    plugin_name: Match[str] = AlconnaMatch("plugin_name"),
-    group_id: Match[str] = AlconnaMatch("group_id"),
-    all_enabled: Query[bool] = Query("删除.all"),
+    target: TargetScope = Depends(ParseScheduleTargetForDelete),
+    bot_id_to_operate: str = Depends(GetBotId),
 ):
-    if schedule_id.available:
-        success, message = await scheduler_manager.remove_schedule_by_id(
-            schedule_id.result
-        )
+    if isinstance(target, TargetByID):
+        _, message = await scheduler_manager.remove_schedule_by_id(target.id)
         await schedule_cmd.finish(message)
 
-    elif plugin_name.available:
-        p_name = plugin_name.result
+    elif isinstance(target, TargetByPlugin):
+        p_name = target.plugin
         if p_name not in scheduler_manager.get_registered_plugins():
             await schedule_cmd.finish(f"未找到插件 '{p_name}'。")
 
-        if all_enabled.available:
-            removed_count = await scheduler_manager.remove_schedule_for_all(p_name)
+        if target.all_groups:
+            removed_count = await scheduler_manager.remove_schedule_for_all(
+                p_name, bot_id=bot_id_to_operate
+            )
             message = (
                 f"已取消了 {removed_count} 个群组的插件 '{p_name}' 定时任务。"
                 if removed_count > 0
                 else f"没有找到插件 '{p_name}' 的定时任务。"
             )
             await schedule_cmd.finish(message)
-
-        elif group_id.available:
-            success, message = await scheduler_manager.remove_schedule(
-                p_name, group_id.result
+        else:
+            _, message = await scheduler_manager.remove_schedule(
+                p_name, target.group_id, bot_id=bot_id_to_operate
             )
             await schedule_cmd.finish(message)
 
-        else:
-            gid = str(event.group_id)
-            success, message = await scheduler_manager.remove_schedule(p_name, gid)
-            await schedule_cmd.finish(message)
-
-    elif all_enabled.available:
-        if group_id.available:
-            gid = group_id.result
-            success, message = await scheduler_manager.remove_schedules_by_group(gid)
+    elif isinstance(target, TargetAll):
+        if target.for_group:
+            _, message = await scheduler_manager.remove_schedules_by_group(
+                target.for_group
+            )
             await schedule_cmd.finish(message)
         else:
-            count, message = await scheduler_manager.remove_all_schedules()
+            _, message = await scheduler_manager.remove_all_schedules()
             await schedule_cmd.finish(message)
 
     else:
@@ -331,44 +531,35 @@ async def _(
 
 @schedule_cmd.assign("暂停")
 async def _(
-    event: GroupMessageEvent,
-    schedule_id: Match[int] = AlconnaMatch("schedule_id"),
-    all_enabled: Query[bool] = Query("暂停.all"),
-    plugin_name: Match[str] = AlconnaMatch("plugin_name"),
-    group_id: Match[str] = AlconnaMatch("group_id"),
+    target: TargetScope = Depends(ParseScheduleTargetForPause),
+    bot_id_to_operate: str = Depends(GetBotId),
 ):
-    if schedule_id.available:
-        success, message = await scheduler_manager.pause_schedule(schedule_id.result)
+    if isinstance(target, TargetByID):
+        _, message = await scheduler_manager.pause_schedule(target.id)
         await schedule_cmd.finish(message)
 
-    elif plugin_name.available:
-        p_name = plugin_name.result
+    elif isinstance(target, TargetByPlugin):
+        p_name = target.plugin
         if p_name not in scheduler_manager.get_registered_plugins():
             await schedule_cmd.finish(f"未找到插件 '{p_name}'。")
 
-        if all_enabled.available:
-            count, message = await scheduler_manager.pause_schedules_by_plugin(p_name)
-            await schedule_cmd.finish(message)
-        elif group_id.available:
-            gid = group_id.result
-            success, message = await scheduler_manager.pause_schedule_by_plugin_group(
-                p_name, gid
-            )
+        if target.all_groups:
+            _, message = await scheduler_manager.pause_schedules_by_plugin(p_name)
             await schedule_cmd.finish(message)
         else:
-            gid = str(event.group_id)
-            success, message = await scheduler_manager.pause_schedule_by_plugin_group(
-                p_name, gid
+            _, message = await scheduler_manager.pause_schedule_by_plugin_group(
+                p_name, target.group_id, bot_id=bot_id_to_operate
             )
             await schedule_cmd.finish(message)
 
-    elif all_enabled.available:
-        if group_id.available:
-            gid = group_id.result
-            count, message = await scheduler_manager.pause_schedules_by_group(gid)
+    elif isinstance(target, TargetAll):
+        if target.for_group:
+            _, message = await scheduler_manager.pause_schedules_by_group(
+                target.for_group
+            )
             await schedule_cmd.finish(message)
         else:
-            count, message = await scheduler_manager.pause_all_schedules()
+            _, message = await scheduler_manager.pause_all_schedules()
             await schedule_cmd.finish(message)
 
     else:
@@ -377,44 +568,35 @@ async def _(
 
 @schedule_cmd.assign("恢复")
 async def _(
-    event: GroupMessageEvent,
-    schedule_id: Match[int] = AlconnaMatch("schedule_id"),
-    all_enabled: Query[bool] = Query("恢复.all"),
-    plugin_name: Match[str] = AlconnaMatch("plugin_name"),
-    group_id: Match[str] = AlconnaMatch("group_id"),
+    target: TargetScope = Depends(ParseScheduleTargetForResume),
+    bot_id_to_operate: str = Depends(GetBotId),
 ):
-    if schedule_id.available:
-        success, message = await scheduler_manager.resume_schedule(schedule_id.result)
+    if isinstance(target, TargetByID):
+        _, message = await scheduler_manager.resume_schedule(target.id)
         await schedule_cmd.finish(message)
 
-    elif plugin_name.available:
-        p_name = plugin_name.result
+    elif isinstance(target, TargetByPlugin):
+        p_name = target.plugin
         if p_name not in scheduler_manager.get_registered_plugins():
             await schedule_cmd.finish(f"未找到插件 '{p_name}'。")
 
-        if all_enabled.available:
-            count, message = await scheduler_manager.resume_schedules_by_plugin(p_name)
-            await schedule_cmd.finish(message)
-        elif group_id.available:
-            gid = group_id.result
-            success, message = await scheduler_manager.resume_schedule_by_plugin_group(
-                p_name, gid
-            )
+        if target.all_groups:
+            _, message = await scheduler_manager.resume_schedules_by_plugin(p_name)
             await schedule_cmd.finish(message)
         else:
-            gid = str(event.group_id)
-            success, message = await scheduler_manager.resume_schedule_by_plugin_group(
-                p_name, gid
+            _, message = await scheduler_manager.resume_schedule_by_plugin_group(
+                p_name, target.group_id, bot_id=bot_id_to_operate
             )
             await schedule_cmd.finish(message)
 
-    elif all_enabled.available:
-        if group_id.available:
-            gid = group_id.result
-            count, message = await scheduler_manager.resume_schedules_by_group(gid)
+    elif isinstance(target, TargetAll):
+        if target.for_group:
+            _, message = await scheduler_manager.resume_schedules_by_group(
+                target.for_group
+            )
             await schedule_cmd.finish(message)
         else:
-            count, message = await scheduler_manager.resume_all_schedules()
+            _, message = await scheduler_manager.resume_all_schedules()
             await schedule_cmd.finish(message)
 
     else:
@@ -423,27 +605,44 @@ async def _(
 
 @schedule_cmd.assign("执行")
 async def _(schedule_id: int):
-    success, message = await scheduler_manager.trigger_now(schedule_id)
+    _, message = await scheduler_manager.trigger_now(schedule_id)
     await schedule_cmd.finish(message)
 
 
 @schedule_cmd.assign("更新")
-async def _(schedule_id: int, time: Match[str], kwargs_str: Match[str]):
-    if not time.available and not kwargs_str.available:
-        await schedule_cmd.finish("请提供需要更新的时间 (--time) 或参数 (--kwargs)。")
+async def _(
+    schedule_id: int,
+    cron_expr: Match[str] = AlconnaMatch("cron.cron_expr"),
+    interval_expr: Match[str] = AlconnaMatch("interval.interval_expr"),
+    date_expr: Match[str] = AlconnaMatch("date.date_expr"),
+    kwargs_str: Match[str] = AlconnaMatch("kwargs_str"),
+):
+    if not any(
+        [
+            cron_expr.available,
+            interval_expr.available,
+            date_expr.available,
+            kwargs_str.available,
+        ]
+    ):
+        await schedule_cmd.finish(
+            "请提供需要更新的时间 (--cron/--interval/--date) 或参数 (--kwargs)。"
+        )
 
     trigger_config = None
-    if time.available:
-        try:
-            time_parts = time.result.split(":")
-            if len(time_parts) != 2:
-                raise ValueError("时间格式应为 HH:MM")
-            hour, minute = map(int, time_parts)
-            if not (0 <= hour <= 23) or not (0 <= minute <= 59):
-                raise ValueError("小时应在 0-23 范围内，分钟应在 0-59 范围内")
-            trigger_config = {"hour": hour, "minute": minute}
-        except ValueError as e:
-            await schedule_cmd.finish(f"时间格式错误: {e}")
+    try:
+        if cron_expr.available:
+            parts = cron_expr.result.split()
+            if len(parts) != 5:
+                raise ValueError("Cron 表达式必须有5个部分")
+            cron_keys = ["minute", "hour", "day", "month", "day_of_week"]
+            trigger_config = dict(zip(cron_keys, parts))
+        elif interval_expr.available:
+            trigger_config = _parse_interval(interval_expr.result)
+        elif date_expr.available:
+            trigger_config = {"run_date": datetime.fromisoformat(date_expr.result)}
+    except ValueError as e:
+        await schedule_cmd.finish(f"时间参数解析错误: {e}")
 
     job_kwargs = None
     if kwargs_str.available:
@@ -494,7 +693,7 @@ async def _(schedule_id: int, time: Match[str], kwargs_str: Match[str]):
                 f"参数格式错误，请使用 'key=value,key2=value2' 格式。错误: {e}"
             )
 
-    success, message = await scheduler_manager.update_schedule(
+    _, message = await scheduler_manager.update_schedule(
         schedule_id, trigger_config, job_kwargs
     )
     await schedule_cmd.finish(message)

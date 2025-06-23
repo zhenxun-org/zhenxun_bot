@@ -6,9 +6,17 @@ from zhenxun.services.db_context import Model
 class ScheduleInfo(Model):
     id = fields.IntField(pk=True, generated=True, auto_increment=True)
     """自增id"""
+    bot_id = fields.CharField(
+        255, null=True, default=None, description="任务关联的Bot ID"
+    )
+    """任务关联的Bot ID"""
     plugin_name = fields.CharField(255, description="插件模块名")
     """插件模块名"""
-    group_id = fields.CharField(255, null=True, description="群组ID, 为空表示全局任务")
+    group_id = fields.CharField(
+        255,
+        null=True,
+        description="群组ID, '__ALL_GROUPS__' 表示所有群, 为空表示全局任务",
+    )
     """群组ID, 为空表示全局任务"""
     trigger_type = fields.CharField(
         max_length=20, default="cron", description="触发器类型 (cron, interval, date)"

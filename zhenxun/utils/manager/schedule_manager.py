@@ -1,5 +1,7 @@
 import asyncio
 from collections.abc import Callable, Coroutine
+import inspect
+import random
 from typing import ClassVar
 
 import nonebot
@@ -58,7 +60,7 @@ class SchedulerManager:
     async def _execute_job(self, schedule_id: int):
         """
         APScheduler 调度的入口函数。
-        它会根据 group_id 执行单个群组的任务。
+        根据 schedule_id 处理特定任务、所有群组任务或全局任务。
         """
         schedule = await ScheduleInfo.get_or_none(id=schedule_id)
         if not schedule or not schedule.is_enabled:
@@ -66,7 +68,6 @@ class SchedulerManager:
             return
 
         plugin_name = schedule.plugin_name
-        group_id = schedule.group_id
 
         task_meta = self._registered_tasks.get(plugin_name)
         if not task_meta:
@@ -79,13 +80,78 @@ class SchedulerManager:
             return
 
         try:
-            bot = nonebot.get_bot()
+            if schedule.bot_id:
+                bot = nonebot.get_bot(schedule.bot_id)
+            else:
+                bot = nonebot.get_bot()
+                logger.debug(
+                    f"任务 {schedule_id} 未关联特定Bot，使用默认Bot {bot.self_id}"
+                )
+        except KeyError:
+            logger.warning(
+                f"定时任务 {schedule_id} 需要的 Bot {schedule.bot_id} "
+                f"不在线，本次执行跳过。"
+            )
+            return
+        except ValueError:
+            logger.warning(f"当前没有Bot在线，定时任务 {schedule_id} 跳过。")
+            return
 
+        if schedule.group_id == "__ALL_GROUPS__":
+            await self._execute_for_all_groups(schedule, task_meta, bot)
+        else:
+            await self._execute_for_single_target(schedule, task_meta, bot)
+
+    async def _execute_for_all_groups(
+        self, schedule: ScheduleInfo, task_meta: dict, bot
+    ):
+        """为所有群组执行任务，并处理优先级覆盖。"""
+        plugin_name = schedule.plugin_name
+        logger.info(
+            f"开始执行针对 [所有群组] 的任务 "
+            f"(ID: {schedule.id}, 插件: {plugin_name}, Bot: {bot.self_id})"
+        )
+
+        all_gids = set()
+        try:
+            group_list, _ = await PlatformUtils.get_group_list(bot)
+            all_gids.update(
+                g.group_id for g in group_list if g.group_id and not g.channel_id
+            )
+        except Exception as e:
+            logger.error(f"为 'all' 任务获取 Bot {bot.self_id} 的群列表失败", e=e)
+            return
+
+        specific_tasks_gids = set(
+            await ScheduleInfo.filter(
+                plugin_name=plugin_name, group_id__in=list(all_gids)
+            ).values_list("group_id", flat=True)
+        )
+
+        for gid in all_gids:
+            if gid in specific_tasks_gids:
+                logger.debug(f"群组 {gid} 已有特定任务，跳过 'all' 任务的执行。")
+                continue
+
+            temp_schedule = schedule
+            temp_schedule.group_id = gid
+            await self._execute_for_single_target(temp_schedule, task_meta, bot)
+            await asyncio.sleep(random.uniform(0.1, 0.5))
+
+    async def _execute_for_single_target(
+        self, schedule: ScheduleInfo, task_meta: dict, bot
+    ):
+        """为单个目标（具体群组或全局）执行任务。"""
+        plugin_name = schedule.plugin_name
+        group_id = schedule.group_id
+
+        try:
             is_blocked = await CommonUtils.task_is_block(bot, plugin_name, group_id)
             if is_blocked:
+                target_desc = f"群 {group_id}" if group_id else "全局"
                 logger.info(
-                    f"插件 '{plugin_name}' 在群 {group_id} "
-                    f"的定时任务因功能被禁用而跳过执行。"
+                    f"插件 '{plugin_name}' 的定时任务在目标 [{target_desc}]"
+                    "因功能被禁用而跳过执行。"
                 )
                 return
 
@@ -93,13 +159,17 @@ class SchedulerManager:
             job_kwargs = schedule.job_kwargs
             if not isinstance(job_kwargs, dict):
                 logger.error(
-                    f"任务 {schedule_id} 的 job_kwargs 不是字典类型: {type(job_kwargs)}"
+                    f"任务 {schedule.id} 的 job_kwargs 不是字典类型: {type(job_kwargs)}"
                 )
                 return
 
+            sig = inspect.signature(task_func)
+            if "bot" in sig.parameters:
+                job_kwargs["bot"] = bot
+
             logger.info(
-                f"插件 '{plugin_name}' 开始为群 {group_id} 执行定时任务 "
-                f"(ID: {schedule_id})。"
+                f"插件 '{plugin_name}' 开始为目标 [{group_id or '全局'}] "
+                f"执行定时任务 (ID: {schedule.id})。"
             )
             task = asyncio.create_task(task_func(group_id, **job_kwargs))
             self._running_tasks.add(task)
@@ -107,7 +177,8 @@ class SchedulerManager:
             await task
         except Exception as e:
             logger.error(
-                f"执行定时任务 (ID: {schedule_id}, Plugin: {plugin_name}) 时发生异常",
+                f"执行定时任务 (ID: {schedule.id}, 插件: {plugin_name}, "
+                f"目标: {group_id or '全局'}) 时发生异常",
                 e=e,
             )
 
@@ -155,30 +226,30 @@ class SchedulerManager:
         trigger_type: str,
         trigger_config: dict,
         job_kwargs: dict | None = None,
+        bot_id: str | None = None,
     ) -> tuple[bool, str]:
         """
         添加或更新一个定时任务。
-        如果已有相同 plugin_name 和 group_id 的任务，则会更新它。
-
-        Args:
-            plugin_name: 插件名。
-            group_id: 群组ID，为None表示全局任务。
-            trigger_type: "cron", "interval", "date"。
-            trigger_config: 对应触发器的配置字典。 e.g., {"hour": 8, "minute": 30}
-            job_kwargs: 传递给任务函数的额外关键字参数。
         """
         if plugin_name not in self._registered_tasks:
             return False, f"插件 '{plugin_name}' 没有注册可用的定时任务。"
 
+        search_kwargs = {
+            "plugin_name": plugin_name,
+            "group_id": group_id,
+            "bot_id": bot_id,
+        }
+
+        defaults = {
+            "trigger_type": trigger_type,
+            "trigger_config": trigger_config,
+            "job_kwargs": job_kwargs if job_kwargs is not None else {},
+            "is_enabled": True,
+        }
+
         schedule, created = await ScheduleInfo.update_or_create(
-            plugin_name=plugin_name,
-            group_id=group_id,
-            defaults={
-                "trigger_type": trigger_type,
-                "trigger_config": trigger_config,
-                "job_kwargs": job_kwargs if job_kwargs is not None else {},
-                "is_enabled": True,
-            },
+            **search_kwargs,
+            defaults=defaults,
         )
         self._add_aps_job(schedule)
         action = "设置" if created else "更新"
@@ -254,24 +325,41 @@ class SchedulerManager:
         return True, f"成功更新了任务 ID: {schedule_id} 的配置。"
 
     async def remove_schedule(
-        self, plugin_name: str, group_id: str | None
+        self, plugin_name: str, group_id: str | None, bot_id: str | None = None
     ) -> tuple[bool, str]:
         """移除指定插件和群组的定时任务。"""
-        schedules = await ScheduleInfo.filter(
-            plugin_name=plugin_name, group_id=group_id
-        )
+        query = {"plugin_name": plugin_name, "group_id": group_id}
+        if bot_id:
+            query["bot_id"] = bot_id
+
+        schedules = await ScheduleInfo.filter(**query)
         if not schedules:
-            return False, f"群 {group_id} 未设置插件 '{plugin_name}' 的定时任务。"
+            msg = (
+                f"未找到与 Bot {bot_id} 相关的群 {group_id} "
+                f"的插件 '{plugin_name}' 定时任务。"
+            )
+            return (False, msg)
 
         for schedule in schedules:
             self._remove_aps_job(schedule.id)
             await schedule.delete()
 
-        return True, f"已取消群 {group_id} 的插件 '{plugin_name}' 所有定时任务。"
+        target_desc = f"群 {group_id}" if group_id else "全局"
+        msg = (
+            f"已取消 Bot {bot_id} 在 [{target_desc}] "
+            f"的插件 '{plugin_name}' 所有定时任务。"
+        )
+        return (True, msg)
 
-    async def remove_schedule_for_all(self, plugin_name: str) -> int:
+    async def remove_schedule_for_all(
+        self, plugin_name: str, bot_id: str | None = None
+    ) -> int:
         """移除指定插件在所有群组的定时任务。"""
-        schedules_to_delete = await ScheduleInfo.filter(plugin_name=plugin_name).all()
+        query = {"plugin_name": plugin_name}
+        if bot_id:
+            query["bot_id"] = bot_id
+
+        schedules_to_delete = await ScheduleInfo.filter(**query).all()
         if not schedules_to_delete:
             return 0
 
@@ -364,12 +452,14 @@ class SchedulerManager:
         )
 
     async def pause_schedule_by_plugin_group(
-        self, plugin_name: str, group_id: str | None
+        self, plugin_name: str, group_id: str | None, bot_id: str | None = None
     ) -> tuple[bool, str]:
         """暂停指定插件在指定群组的定时任务。"""
-        schedules = await ScheduleInfo.filter(
-            plugin_name=plugin_name, group_id=group_id, is_enabled=True
-        )
+        query = {"plugin_name": plugin_name, "group_id": group_id, "is_enabled": True}
+        if bot_id:
+            query["bot_id"] = bot_id
+
+        schedules = await ScheduleInfo.filter(**query)
         if not schedules:
             return (
                 False,
@@ -388,12 +478,14 @@ class SchedulerManager:
         )
 
     async def resume_schedule_by_plugin_group(
-        self, plugin_name: str, group_id: str | None
+        self, plugin_name: str, group_id: str | None, bot_id: str | None = None
     ) -> tuple[bool, str]:
         """恢复指定插件在指定群组的定时任务。"""
-        schedules = await ScheduleInfo.filter(
-            plugin_name=plugin_name, group_id=group_id, is_enabled=False
-        )
+        query = {"plugin_name": plugin_name, "group_id": group_id, "is_enabled": False}
+        if bot_id:
+            query["bot_id"] = bot_id
+
+        schedules = await ScheduleInfo.filter(**query)
         if not schedules:
             return (
                 False,
@@ -508,6 +600,7 @@ class SchedulerManager:
 
         status = {
             "id": schedule.id,
+            "bot_id": schedule.bot_id,
             "plugin_name": schedule.plugin_name,
             "group_id": schedule.group_id,
             "is_enabled": schedule.is_enabled,
