@@ -4,6 +4,7 @@ LLM 类型定义模块
 统一导出所有核心类型、协议和异常定义。
 """
 
+from .capabilities import ModelCapabilities, ModelModality, get_model_capabilities
 from .content import (
     LLMContentPart,
     LLMMessage,
@@ -26,6 +27,7 @@ from .models import (
     ToolMetadata,
     UsageInfo,
 )
+from .protocols import MCPCompatible
 
 __all__ = [
     "EmbeddingTaskType",
@@ -41,8 +43,11 @@ __all__ = [
     "LLMTool",
     "LLMToolCall",
     "LLMToolFunction",
+    "MCPCompatible",
+    "ModelCapabilities",
     "ModelDetail",
     "ModelInfo",
+    "ModelModality",
     "ModelName",
     "ModelProvider",
     "ProviderConfig",
@@ -50,5 +55,6 @@ __all__ = [
     "ToolCategory",
     "ToolMetadata",
     "UsageInfo",
+    "get_model_capabilities",
     "get_user_friendly_error_message",
 ]

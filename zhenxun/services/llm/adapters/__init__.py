@@ -8,7 +8,6 @@ from .base import BaseAdapter, OpenAICompatAdapter, RequestData, ResponseData
 from .factory import LLMAdapterFactory, get_adapter_for_api_type, register_adapter
 from .gemini import GeminiAdapter
 from .openai import OpenAIAdapter
-from .zhipu import ZhipuAdapter
 
 LLMAdapterFactory.initialize()
 
@@ -20,7 +19,6 @@ __all__ = [
     "OpenAICompatAdapter",
     "RequestData",
     "ResponseData",
-    "ZhipuAdapter",
     "get_adapter_for_api_type",
     "register_adapter",
 ]

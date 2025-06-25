@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ..service import LLMModel
     from ..types.content import LLMMessage
     from ..types.enums import EmbeddingTaskType
+    from ..types.models import LLMTool
 
 
 class RequestData(BaseModel):
@@ -60,7 +61,7 @@ class BaseAdapter(ABC):
         """支持的API类型列表"""
         pass
 
-    def prepare_simple_request(
+    async def prepare_simple_request(
         self,
         model: "LLMModel",
         api_key: str,
@@ -86,7 +87,7 @@ class BaseAdapter(ABC):
 
         config = model._generation_config
 
-        return self.prepare_advanced_request(
+        return await self.prepare_advanced_request(
             model=model,
             api_key=api_key,
             messages=messages,
@@ -96,13 +97,13 @@ class BaseAdapter(ABC):
         )
 
     @abstractmethod
-    def prepare_advanced_request(
+    async def prepare_advanced_request(
         self,
         model: "LLMModel",
         api_key: str,
         messages: list["LLMMessage"],
         config: "LLMGenerationConfig | None" = None,
-        tools: list[dict[str, Any]] | None = None,
+        tools: list["LLMTool"] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> RequestData:
         """准备高级请求"""
@@ -237,6 +238,9 @@ class BaseAdapter(ABC):
             choice = choices[0]
             message = choice.get("message", {})
             content = message.get("content", "")
+
+            if content:
+                content = content.strip()
 
             parsed_tool_calls: list[LLMToolCall] | None = None
             if message_tool_calls := message.get("tool_calls"):
@@ -375,7 +379,7 @@ class BaseAdapter(ABC):
         if model.temperature is not None:
             base_config["temperature"] = model.temperature
         if model.max_tokens is not None:
-            if model.api_type in ["gemini", "gemini_native"]:
+            if model.api_type == "gemini":
                 base_config["maxOutputTokens"] = model.max_tokens
             else:
                 base_config["max_tokens"] = model.max_tokens
@@ -401,26 +405,51 @@ class OpenAICompatAdapter(BaseAdapter):
     """
 
     @abstractmethod
-    def get_chat_endpoint(self) -> str:
+    def get_chat_endpoint(self, model: "LLMModel") -> str:
         """子类必须实现，返回 chat completions 的端点"""
         pass
 
     @abstractmethod
-    def get_embedding_endpoint(self) -> str:
+    def get_embedding_endpoint(self, model: "LLMModel") -> str:
         """子类必须实现，返回 embeddings 的端点"""
         pass
 
-    def prepare_advanced_request(
+    async def prepare_simple_request(
+        self,
+        model: "LLMModel",
+        api_key: str,
+        prompt: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> RequestData:
+        """准备简单文本生成请求 - OpenAI兼容API的通用实现"""
+        url = self.get_api_url(model, self.get_chat_endpoint(model))
+        headers = self.get_base_headers(api_key)
+
+        messages = []
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": prompt})
+
+        body = {
+            "model": model.model_name,
+            "messages": messages,
+        }
+
+        body = self.apply_config_override(model, body)
+
+        return RequestData(url=url, headers=headers, body=body)
+
+    async def prepare_advanced_request(
         self,
         model: "LLMModel",
         api_key: str,
         messages: list["LLMMessage"],
         config: "LLMGenerationConfig | None" = None,
-        tools: list[dict[str, Any]] | None = None,
+        tools: list["LLMTool"] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> RequestData:
         """准备高级请求 - OpenAI兼容格式"""
-        url = self.get_api_url(model, self.get_chat_endpoint())
+        url = self.get_api_url(model, self.get_chat_endpoint(model))
         headers = self.get_base_headers(api_key)
         openai_messages = self.convert_messages_to_openai_format(messages)
 
@@ -430,7 +459,21 @@ class OpenAICompatAdapter(BaseAdapter):
         }
 
         if tools:
-            body["tools"] = tools
+            openai_tools = []
+            for tool in tools:
+                if tool.type == "function" and tool.function:
+                    openai_tools.append({"type": "function", "function": tool.function})
+                elif tool.type == "mcp" and tool.mcp_session:
+                    if callable(tool.mcp_session):
+                        raise ValueError(
+                            "适配器接收到未激活的 MCP 会话工厂。"
+                            "会话工厂应该在 LLMModel.generate_response 中被激活。"
+                        )
+                    openai_tools.append(
+                        tool.mcp_session.to_api_tool(api_type=self.api_type)
+                    )
+            if openai_tools:
+                body["tools"] = openai_tools
         if tool_choice:
             body["tool_choice"] = tool_choice
 
@@ -444,7 +487,7 @@ class OpenAICompatAdapter(BaseAdapter):
         is_advanced: bool = False,
     ) -> ResponseData:
         """解析响应 - 直接使用基类的 OpenAI 格式解析"""
-        _ = model, is_advanced  # 未使用的参数
+        _ = model, is_advanced
         return self.parse_openai_response(response_json)
 
     def prepare_embedding_request(
@@ -456,8 +499,8 @@ class OpenAICompatAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> RequestData:
         """准备嵌入请求 - OpenAI兼容格式"""
-        _ = task_type  # 未使用的参数
-        url = self.get_api_url(model, self.get_embedding_endpoint())
+        _ = task_type
+        url = self.get_api_url(model, self.get_embedding_endpoint(model))
         headers = self.get_base_headers(api_key)
 
         body = {
@@ -465,7 +508,6 @@ class OpenAICompatAdapter(BaseAdapter):
             "input": texts,
         }
 
-        # 应用额外的配置参数
         if kwargs:
             body.update(kwargs)
 

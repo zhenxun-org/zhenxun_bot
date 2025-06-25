@@ -111,12 +111,12 @@ class LLMGenerationConfig(ModelConfigOverride):
             params["temperature"] = self.temperature
 
         if self.max_tokens is not None:
-            if api_type in ["gemini", "gemini_native"]:
+            if api_type == "gemini":
                 params["maxOutputTokens"] = self.max_tokens
             else:
                 params["max_tokens"] = self.max_tokens
 
-        if api_type in ["gemini", "gemini_native"]:
+        if api_type == "gemini":
             if self.top_k is not None:
                 params["topK"] = self.top_k
             if self.top_p is not None:
@@ -151,13 +151,13 @@ class LLMGenerationConfig(ModelConfigOverride):
                 if api_type in ["openai", "zhipu", "deepseek", "general_openai_compat"]:
                     params["response_format"] = {"type": "json_object"}
                     logger.debug(f"为 {api_type} 启用 JSON 对象输出模式")
-                elif api_type in ["gemini", "gemini_native"]:
+                elif api_type == "gemini":
                     params["responseMimeType"] = "application/json"
                     if self.response_schema:
                         params["responseSchema"] = self.response_schema
                     logger.debug(f"为 {api_type} 启用 JSON MIME 类型输出模式")
 
-        if api_type in ["gemini", "gemini_native"]:
+        if api_type == "gemini":
             if (
                 self.response_format != ResponseFormat.JSON
                 and self.response_mime_type is not None
@@ -214,7 +214,7 @@ def apply_api_specific_mappings(
     """应用API特定的参数映射"""
     mapped_params = params.copy()
 
-    if api_type in ["gemini", "gemini_native"]:
+    if api_type == "gemini":
         if "max_tokens" in mapped_params:
             mapped_params["maxOutputTokens"] = mapped_params.pop("max_tokens")
         if "top_k" in mapped_params:

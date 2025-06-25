@@ -49,12 +49,36 @@ class LLMHttpClient:
                         max_keepalive_connections=self.config.max_keepalive_connections,
                     )
                     timeout = httpx.Timeout(self.config.timeout)
+
+                    client_kwargs = {}
+                    if self.config.proxy:
+                        try:
+                            version_parts = httpx.__version__.split(".")
+                            major = int(
+                                "".join(c for c in version_parts[0] if c.isdigit())
+                            )
+                            minor = (
+                                int("".join(c for c in version_parts[1] if c.isdigit()))
+                                if len(version_parts) > 1
+                                else 0
+                            )
+                            if (major, minor) >= (0, 28):
+                                client_kwargs["proxy"] = self.config.proxy
+                            else:
+                                client_kwargs["proxies"] = self.config.proxy
+                        except (ValueError, IndexError):
+                            client_kwargs["proxies"] = self.config.proxy
+                            logger.warning(
+                                f"无法解析 httpx 版本 '{httpx.__version__}'，"
+                                "LLM模块将默认使用旧版 'proxies' 参数语法。"
+                            )
+
                     self._client = httpx.AsyncClient(
                         headers=headers,
                         limits=limits,
                         timeout=timeout,
-                        proxies=self.config.proxy,
                         follow_redirects=True,
+                        **client_kwargs,
                     )
         if self._client is None:
             raise LLMException(

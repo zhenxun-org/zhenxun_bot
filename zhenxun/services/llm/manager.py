@@ -17,6 +17,7 @@ from .config.providers import AI_CONFIG_GROUP, PROVIDERS_CONFIG_KEY, get_ai_conf
 from .core import http_client_manager, key_store
 from .service import LLMModel
 from .types import LLMErrorCode, LLMException, ModelDetail, ProviderConfig
+from .types.capabilities import get_model_capabilities
 
 DEFAULT_MODEL_NAME_KEY = "default_model_name"
 PROXY_KEY = "proxy"
@@ -292,6 +293,10 @@ async def get_model_instance(
 
     provider_config_found, model_detail_found = config_tuple_found
 
+    capabilities = get_model_capabilities(model_detail_found.model_name)
+
+    model_detail_found.is_embedding_model = capabilities.is_embedding_model
+
     ai_config = get_ai_config()
     global_proxy_setting = ai_config.get(PROXY_KEY)
     default_timeout = (
@@ -322,6 +327,7 @@ async def get_model_instance(
             model_detail=model_detail_found,
             key_store=key_store,
             http_client=shared_http_client,
+            capabilities=capabilities,
         )
 
         if override_config:

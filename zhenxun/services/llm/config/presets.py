@@ -71,14 +71,17 @@ class CommonOverrides:
 
     @staticmethod
     def gemini_safe() -> LLMGenerationConfig:
-        """Gemini 安全模式：严格安全设置"""
+        """Gemini 安全模式：使用配置的安全设置"""
+        from .providers import get_gemini_safety_threshold
+
+        threshold = get_gemini_safety_threshold()
         return LLMGenerationConfig(
             temperature=0.5,
             safety_settings={
-                "HARM_CATEGORY_HARASSMENT": "BLOCK_MEDIUM_AND_ABOVE",
-                "HARM_CATEGORY_HATE_SPEECH": "BLOCK_MEDIUM_AND_ABOVE",
-                "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_MEDIUM_AND_ABOVE",
-                "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_MEDIUM_AND_ABOVE",
+                "HARM_CATEGORY_HARASSMENT": threshold,
+                "HARM_CATEGORY_HATE_SPEECH": threshold,
+                "HARM_CATEGORY_SEXUALLY_EXPLICIT": threshold,
+                "HARM_CATEGORY_DANGEROUS_CONTENT": threshold,
             },
         )
 
