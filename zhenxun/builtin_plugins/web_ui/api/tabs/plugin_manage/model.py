@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -162,3 +162,15 @@ class BatchUpdateResult(BaseModel):
         default_factory=list, description="错误信息列表"
     )
     """错误信息列表"""
+
+
+class InstallDependenciesPayload(BaseModel):
+    """
+    安装依赖
+    """
+
+    handle_type: Literal["install", "uninstall"] = Field(..., description="处理类型")
+    """处理类型"""
+
+    dependencies: list[str] = Field(..., description="依赖列表")
+    """依赖列表"""

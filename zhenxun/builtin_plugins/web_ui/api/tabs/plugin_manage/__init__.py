@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from zhenxun.models.plugin_info import PluginInfo as DbPluginInfo
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import BlockType, PluginType
+from zhenxun.utils.manager.virtual_env_package_manager import VirtualEnvPackageManager
 
 from ....base_model import Result
 from ....utils import authentication, clear_help_image
@@ -11,6 +12,7 @@ from .data_source import ApiDataSource
 from .model import (
     BatchUpdatePlugins,
     BatchUpdateResult,
+    InstallDependenciesPayload,
     PluginCount,
     PluginDetail,
     PluginInfo,
@@ -162,9 +164,9 @@ async def _(module: str) -> Result[PluginDetail]:
     dependencies=[authentication()],
     response_model=Result[BatchUpdateResult],
     response_class=JSONResponse,
-    summary="批量更新插件配置",
+    description="批量更新插件配置",
 )
-async def batch_update_plugin_config_api(
+async def _(
     params: BatchUpdatePlugins,
 ) -> Result[BatchUpdateResult]:
     """批量更新插件配置，如开关、类型等"""
@@ -187,9 +189,9 @@ async def batch_update_plugin_config_api(
     "/menu_type/rename",
     dependencies=[authentication()],
     response_model=Result,
-    summary="重命名菜单类型",
+    description="重命名菜单类型",
 )
-async def rename_menu_type_api(payload: RenameMenuTypePayload) -> Result:
+async def _(payload: RenameMenuTypePayload) -> Result[str]:
     try:
         result = await ApiDataSource.rename_menu_type(
             old_name=payload.old_name, new_name=payload.new_name
@@ -213,3 +215,24 @@ async def rename_menu_type_api(payload: RenameMenuTypePayload) -> Result:
     except Exception as e:
         logger.error(f"{router.prefix}/menu_type/rename 调用错误", "WebUi", e=e)
         return Result.fail(info=f"发生未知错误: {type(e).__name__}")
+
+
+@router.post(
+    "/install_dependencies",
+    dependencies=[authentication()],
+    response_model=Result,
+    response_class=JSONResponse,
+    description="安装/卸载依赖",
+)
+async def _(payload: InstallDependenciesPayload) -> Result:
+    try:
+        if not payload.dependencies:
+            return Result.fail("依赖列表不能为空")
+        if payload.handle_type == "install":
+            result = VirtualEnvPackageManager.install(payload.dependencies)
+        else:
+            result = VirtualEnvPackageManager.uninstall(payload.dependencies)
+        return Result.ok(result)
+    except Exception as e:
+        logger.error(f"{router.prefix}/install_dependencies 调用错误", "WebUi", e=e)
+        return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")
