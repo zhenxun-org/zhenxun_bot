@@ -207,6 +207,7 @@ class AsyncHttpx:
             response = await cls()._execute_request_inner(
                 active_client, method, url, **request_kwargs
             )
+            response.raise_for_status()
             return response
 
     @classmethod
