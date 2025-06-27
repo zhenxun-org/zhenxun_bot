@@ -640,7 +640,6 @@ class AsyncHttpx:
         _results = sorted(iter(_results), key=lambda r: r["elapsed_time"])
         return [result["url"] for result in _results]
 
-
     @classmethod
     @asynccontextmanager
     async def temporary_client(cls, **kwargs) -> AsyncGenerator[AsyncClient, None]:
