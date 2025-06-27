@@ -64,3 +64,23 @@ class GoodsNotFound(Exception):
     """
 
     pass
+
+
+class AllURIsFailedError(Exception):
+    """
+    当所有备用URL都尝试失败后抛出此异常
+    """
+
+    def __init__(self, urls: list[str], exceptions: list[Exception]):
+        self.urls = urls
+        self.exceptions = exceptions
+        super().__init__(
+            f"All {len(urls)} URIs failed. Last exception: {exceptions[-1]}"
+        )
+
+    def __str__(self) -> str:
+        exc_info = "\n".join(
+            f"  - {url}: {exc.__class__.__name__}({exc})"
+            for url, exc in zip(self.urls, self.exceptions)
+        )
+        return f"All {len(self.urls)} URIs failed:\n{exc_info}"
