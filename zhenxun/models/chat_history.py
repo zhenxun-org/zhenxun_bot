@@ -49,7 +49,8 @@ class ChatHistory(Model):
         o = "-" if order == "DESC" else ""
         query = cls.filter(group_id=gid) if gid else cls
         if date_scope:
-            query = query.filter(create_time__range=date_scope)
+            filter_scope = (date_scope[0].isoformat(" "), date_scope[1].isoformat(" "))
+            query = query.filter(create_time__range=filter_scope)
         return list(
             await query.annotate(count=Count("user_id"))
             .order_by(f"{o}count")

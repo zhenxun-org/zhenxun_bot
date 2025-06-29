@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta
-
 from tortoise.functions import Count
 
 from zhenxun.models.group_console import GroupConsole
@@ -10,6 +8,7 @@ from zhenxun.utils.echart_utils import ChartUtils
 from zhenxun.utils.echart_utils.models import Barh
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.image_utils import BuildImage
+from zhenxun.utils.utils import TimeUtils
 
 
 class StatisticsManage:
@@ -68,8 +67,7 @@ class StatisticsManage:
         if plugin_name:
             query = query.filter(plugin_name=plugin_name)
         if day:
-            time = datetime.now() - timedelta(days=day)
-            query = query.filter(create_time__gte=time)
+            query = query.filter(create_time__gte=TimeUtils.get_day_start())
         data_list = (
             await query.annotate(count=Count("id"))
             .group_by("plugin_name")
@@ -89,8 +87,7 @@ class StatisticsManage:
         if group_id:
             query = query.filter(group_id=group_id)
         if day:
-            time = datetime.now() - timedelta(days=day)
-            query = query.filter(create_time__gte=time)
+            query = query.filter(create_time__gte=TimeUtils.get_day_start())
         data_list = (
             await query.annotate(count=Count("id"))
             .group_by("plugin_name")
@@ -106,8 +103,7 @@ class StatisticsManage:
     async def get_group_statistics(cls, group_id: str, day: int | None, title: str):
         query = Statistics.filter(group_id=group_id)
         if day:
-            time = datetime.now() - timedelta(days=day)
-            query = query.filter(create_time__gte=time)
+            query = query.filter(create_time__gte=TimeUtils.get_day_start())
         data_list = (
             await query.annotate(count=Count("id"))
             .group_by("plugin_name")

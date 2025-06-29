@@ -80,14 +80,14 @@ class PlatformUtils:
     @classmethod
     async def send_superuser(
         cls,
-        bot: Bot,
+        bot: Bot | None,
         message: UniMessage | str,
         superuser_id: str | None = None,
     ) -> list[tuple[str, Receipt]]:
         """发送消息给超级用户
 
         参数:
-            bot: Bot
+            bot: Bot，没有传入时使用get_bot随机获取
             message: 消息
             superuser_id: 指定超级用户id.
 
@@ -97,6 +97,8 @@ class PlatformUtils:
         返回:
             Receipt | None: Receipt
         """
+        if not bot:
+            bot = nonebot.get_bot()
         superuser_ids = []
         if superuser_id:
             superuser_ids.append(superuser_id)
