@@ -28,7 +28,7 @@ from nonebot_plugin_alconna.uniseg.segment import (
 )
 from nonebot_plugin_session import EventSession
 
-from zhenxun.configs.utils import PluginExtraData, RegisterConfig, Task
+from zhenxun.configs.utils import PluginExtraData, Task
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
 
@@ -73,16 +73,6 @@ __plugin_meta__ = PluginMetadata(
         author="HibiKier",
         version="1.2",
         plugin_type=PluginType.SUPERUSER,
-        configs=[
-            RegisterConfig(
-                module="_task",
-                key="DEFAULT_BROADCAST",
-                value=True,
-                help="被动 广播 进群默认开关状态",
-                default_value=True,
-                type=bool,
-            )
-        ],
         tasks=[Task(module="broadcast", name="广播")],
     ).to_dict(),
 )

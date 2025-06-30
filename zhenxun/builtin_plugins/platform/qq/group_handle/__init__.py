@@ -54,22 +54,6 @@ __plugin_meta__ = PluginMetadata(
                 default_value=5,
                 type=int,
             ),
-            RegisterConfig(
-                module="_task",
-                key="DEFAULT_GROUP_WELCOME",
-                value=True,
-                help="被动 进群欢迎 进群默认开关状态",
-                default_value=True,
-                type=bool,
-            ),
-            RegisterConfig(
-                module="_task",
-                key="DEFAULT_REFUND_GROUP_REMIND",
-                value=True,
-                help="被动 退群提醒 进群默认开关状态",
-                default_value=True,
-                type=bool,
-            ),
         ],
         tasks=[
             Task(
