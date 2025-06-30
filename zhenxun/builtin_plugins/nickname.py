@@ -1,7 +1,6 @@
 import random
 
 from nonebot.adapters import Bot
-from nonebot.params import Depends
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import to_me
 from nonebot_plugin_alconna import (
