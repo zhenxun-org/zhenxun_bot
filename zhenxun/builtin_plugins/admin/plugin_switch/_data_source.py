@@ -155,7 +155,7 @@ async def build_task(group_id: str | None) -> BuildImage:
     )
 
 
-class PluginManage:
+class PluginManager:
     @classmethod
     async def set_default_status(cls, plugin_name: str, status: bool) -> str:
         """设置插件进群默认状态
@@ -342,17 +342,21 @@ class PluginManage:
         return await cls._change_group_task("", group_id, True, True)
 
     @classmethod
-    async def block_global_all_task(cls) -> str:
+    async def block_global_all_task(cls, is_default: bool) -> str:
         """禁用全局被动技能
 
         返回:
             str: 返回信息
         """
-        await TaskInfo.all().update(status=False)
-        return "已全局禁用所有被动状态"
+        if is_default:
+            await TaskInfo.all().update(default_status=False)
+            return "已禁用所有被动进群默认状态"
+        else:
+            await TaskInfo.all().update(status=False)
+            return "已全局禁用所有被动状态"
 
     @classmethod
-    async def block_global_task(cls, name: str) -> str:
+    async def block_global_task(cls, name: str, is_default: bool = False) -> str:
         """禁用全局被动技能
 
         参数:
@@ -361,31 +365,47 @@ class PluginManage:
         返回:
             str: 返回信息
         """
-        await TaskInfo.filter(name=name).update(status=False)
-        return f"已全局禁用被动状态 {name}"
+        if is_default:
+            await TaskInfo.filter(name=name).update(default_status=False)
+            return f"已禁用被动进群默认状态 {name}"
+        else:
+            await TaskInfo.filter(name=name).update(status=False)
+            return f"已全局禁用被动状态 {name}"
 
     @classmethod
-    async def unblock_global_all_task(cls) -> str:
+    async def unblock_global_all_task(cls, is_default: bool) -> str:
         """开启全局被动技能
+
+        参数:
+            is_default: 是否为默认状态
 
         返回:
             str: 返回信息
         """
-        await TaskInfo.all().update(status=True)
-        return "已全局开启所有被动状态"
+        if is_default:
+            await TaskInfo.all().update(default_status=True)
+            return "已开启所有被动进群默认状态"
+        else:
+            await TaskInfo.all().update(status=True)
+            return "已全局开启所有被动状态"
 
     @classmethod
-    async def unblock_global_task(cls, name: str) -> str:
+    async def unblock_global_task(cls, name: str, is_default: bool = False) -> str:
         """开启全局被动技能
 
         参数:
             name: 被动技能名称
+            is_default: 是否为默认状态
 
         返回:
             str: 返回信息
         """
-        await TaskInfo.filter(name=name).update(status=True)
-        return f"已全局开启被动状态 {name}"
+        if is_default:
+            await TaskInfo.filter(name=name).update(default_status=True)
+            return f"已开启被动进群默认状态 {name}"
+        else:
+            await TaskInfo.filter(name=name).update(status=True)
+            return f"已全局开启被动状态 {name}"
 
     @classmethod
     async def unblock_group_plugin(cls, plugin_name: str, group_id: str) -> str:

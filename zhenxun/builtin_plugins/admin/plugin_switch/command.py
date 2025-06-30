@@ -73,6 +73,20 @@ _status_matcher.shortcut(
     prefix=True,
 )
 
+_status_matcher.shortcut(
+    r"开启(所有|全部)默认群被动",
+    command="switch",
+    arguments=["open", "--task", "--all", "-df"],
+    prefix=True,
+)
+
+_status_matcher.shortcut(
+    r"关闭(所有|全部)默认群被动",
+    command="switch",
+    arguments=["close", "--task", "--all", "-df"],
+    prefix=True,
+)
+
 
 _status_matcher.shortcut(
     r"开启(所有|全部)群被动",
