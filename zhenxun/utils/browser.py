@@ -118,7 +118,7 @@ class AsyncPlaywright:
         if cookies:
             if isinstance(cookies, dict):
                 cookies = [cookies]
-            await ctx.add_cookies(cookies) # type: ignore
+            await ctx.add_cookies(cookies)  # type: ignore
         page = await ctx.new_page()
         try:
             yield page
