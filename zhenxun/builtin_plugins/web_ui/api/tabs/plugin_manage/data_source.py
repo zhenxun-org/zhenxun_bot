@@ -167,7 +167,7 @@ class ApiDataSource:
                 )
 
         return {
-            "success": len(errors) == 0,
+            "success": not errors,
             "updated_count": updated_count + bulk_updated_count,
             "errors": errors,
         }
@@ -184,19 +184,24 @@ class ApiDataSource:
             config: ConfigGroup
 
         返回:
-            lPluginConfig: 配置数据
+            PluginConfig: 配置数据
         """
         type_str = ""
         type_inner = None
-        if r := re.search(r"<class '(.*)'>", str(config.configs[cfg].type)):
+        ct = str(config.configs[cfg].type)
+        if r := re.search(r"<class '(.*)'>", ct):
             type_str = r[1]
-        elif r := re.search(r"typing\.(.*)\[(.*)\]", str(config.configs[cfg].type)):
+        elif (r := re.search(r"typing\.(.*)\[(.*)\]", ct)) or (
+            r := re.search(r"(.*)\[(.*)\]", ct)
+        ):
             type_str = r[1]
             if type_str:
                 type_str = type_str.lower()
             type_inner = r[2]
             if type_inner:
                 type_inner = [x.strip() for x in type_inner.split(",")]
+        else:
+            type_str = ct
         return PluginConfig(
             module=module,
             key=cfg,

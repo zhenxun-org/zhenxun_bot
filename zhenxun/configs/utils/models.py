@@ -65,7 +65,7 @@ class RegisterConfig(BaseModel):
     """配置注解"""
     default_value: Any | None = None
     """默认值"""
-    type: Any = None
+    type: Any = str
     """参数类型"""
     arg_parser: Callable | None = None
     """参数解析"""

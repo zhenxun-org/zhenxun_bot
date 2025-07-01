@@ -107,14 +107,11 @@ class ConfigGroup(BaseModel):
             return default
 
         if cfg.type:
-            if _is_pydantic_type(cfg.type):
-                if build_model:
-                    try:
-                        return parse_as(cfg.type, value_to_process)
-                    except Exception as e:
-                        logger.warning(
-                            f"Pydantic 模型解析失败 (key: {c.upper()}). ", e=e
-                        )
+            if build_model and _is_pydantic_type(cfg.type):
+                try:
+                    return parse_as(cfg.type, value_to_process)
+                except Exception as e:
+                    logger.warning(f"Pydantic 模型解析失败 (key: {c.upper()}). ", e=e)
             try:
                 return cattrs.structure(value_to_process, cfg.type)
             except Exception as e:
@@ -167,6 +164,57 @@ class ConfigsManager:
         if data := self._data.get(module):
             data.name = name
 
+    def _merge_dicts(self, new_data: dict, original_data: dict) -> dict:
+        """合并两个字典，只进行key值的新增和删除操作，不修改原有key的值
+
+        递归处理嵌套字典，确保所有层级的key保持一致
+
+        参数:
+            new_data: 新数据字典
+            original_data: 原数据字典
+
+        返回:
+            合并后的字典
+        """
+        result = dict(original_data)
+
+        # 遍历新数据的键
+        for key, value in new_data.items():
+            # 如果键不在原数据中，添加它
+            if key not in original_data:
+                result[key] = value
+            # 如果两边都是字典，递归处理
+            elif isinstance(value, dict) and isinstance(original_data[key], dict):
+                result[key] = self._merge_dicts(value, original_data[key])
+            # 如果键已存在，保留原值，不覆盖
+            # (不做任何操作，保持原值)
+
+        return result
+
+    def _normalize_config_data(self, value: Any, original_value: Any = None) -> Any:
+        """标准化配置数据，处理BaseModel和字典的情况
+
+        参数:
+            value: 要标准化的值
+            original_value: 原始值，用于合并字典
+
+        返回:
+            标准化后的值
+        """
+        # 处理BaseModel
+        processed_value = _dump_pydantic_obj(value)
+
+        # 如果处理后的值是字典，且原始值也存在
+        if isinstance(processed_value, dict) and original_value is not None:
+            # 处理原始值
+            processed_original = _dump_pydantic_obj(original_value)
+
+            # 如果原始值也是字典，合并它们
+            if isinstance(processed_original, dict):
+                return self._merge_dicts(processed_value, processed_original)
+
+        return processed_value
+
     def add_plugin_config(
         self,
         module: str,
@@ -195,16 +243,18 @@ class ConfigsManager:
             ValueError: module和key不能为为空
             ValueError: 填写错误
         """
-
+        key = key.upper()
         if not module or not key:
             raise ValueError("add_plugin_config: module和key不能为为空")
-        if isinstance(value, BaseModel):
-            value = model_dump(value)
-        if isinstance(default_value, BaseModel):
-            default_value = model_dump(default_value)
 
-        processed_value = _dump_pydantic_obj(value)
-        processed_default_value = _dump_pydantic_obj(default_value)
+        # 获取现有配置值（如果存在）
+        existing_value = None
+        if module in self._data and (config := self._data[module].configs.get(key)):
+            existing_value = config.value
+
+        # 标准化值和默认值
+        processed_value = self._normalize_config_data(value, existing_value)
+        processed_default_value = self._normalize_config_data(default_value)
 
         self.add_module.append(f"{module}:{key}".lower())
         if module in self._data and (config := self._data[module].configs.get(key)):
@@ -338,14 +388,13 @@ class ConfigsManager:
             with open(self._simple_file, "w", encoding="utf8") as f:
                 _yaml.dump(self._simple_data, f)
         path = path or self.file
-        save_data = {}
-        for module, config_group in self._data.items():
-            save_data[module] = {}
-            for config_key, config_model in config_group.configs.items():
-                save_data[module][config_key] = model_dump(
-                    config_model, exclude={"type", "arg_parser"}
-                )
-
+        save_data = {
+            module: {
+                config_key: model_dump(config_model, exclude={"type", "arg_parser"})
+                for config_key, config_model in config_group.configs.items()
+            }
+            for module, config_group in self._data.items()
+        }
         with open(path, "w", encoding="utf8") as f:
             _yaml.dump(save_data, f)
 
