@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Callable, Coroutine
+import copy
 import inspect
 import random
 from typing import ClassVar
@@ -7,12 +8,16 @@ from typing import ClassVar
 import nonebot
 from nonebot import get_bots
 from nonebot_plugin_apscheduler import scheduler
+from pydantic import BaseModel, ValidationError
 
+from zhenxun.configs.config import Config
 from zhenxun.models.schedule_info import ScheduleInfo
 from zhenxun.services.log import logger
 from zhenxun.utils.common_utils import CommonUtils
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.platform import PlatformUtils
+
+SCHEDULE_CONCURRENCY_KEY = "all_groups_concurrency_limit"
 
 
 class SchedulerManager:
@@ -20,12 +25,14 @@ class SchedulerManager:
     一个通用的、持久化的定时任务管理器，供所有插件使用。
     """
 
-    _registered_tasks: ClassVar[dict[str, dict]] = {}
+    _registered_tasks: ClassVar[
+        dict[str, dict[str, Callable | type[BaseModel] | None]]
+    ] = {}
     _JOB_PREFIX = "zhenxun_schedule_"
     _running_tasks: ClassVar[set] = set()
 
     def register(
-        self, plugin_name: str, params: dict[str, dict] | None = None
+        self, plugin_name: str, params_model: type[BaseModel] | None = None
     ) -> Callable:
         """
         注册一个可调度的任务函数。
@@ -33,8 +40,8 @@ class SchedulerManager:
 
         Args:
             plugin_name (str): 插件的唯一名称 (通常是模块名)。
-            params (dict, optional): 任务函数接受的额外参数元数据，用于通用命令。
-                格式: {"param_name": {"type": str, "help": "描述", "default": ...}}
+            params_model (type[BaseModel], optional): 一个 Pydantic BaseModel 类，
+                用于定义和验证任务函数接受的额外参数。
         """
 
         def decorator(func: Callable[..., Coroutine]) -> Callable[..., Coroutine]:
@@ -42,9 +49,12 @@ class SchedulerManager:
                 logger.warning(f"插件 '{plugin_name}' 的定时任务已被重复注册。")
             self._registered_tasks[plugin_name] = {
                 "func": func,
-                "params": params,
+                "model": params_model,
             }
-            logger.debug(f"插件 '{plugin_name}' 的定时任务已注册，参数元数据: {params}")
+            model_name = params_model.__name__ if params_model else "无"
+            logger.debug(
+                f"插件 '{plugin_name}' 的定时任务已注册，参数模型: {model_name}"
+            )
             return func
 
         return decorator
@@ -107,9 +117,20 @@ class SchedulerManager:
     ):
         """为所有群组执行任务，并处理优先级覆盖。"""
         plugin_name = schedule.plugin_name
+
+        concurrency_limit = Config.get_config(
+            "SchedulerManager", SCHEDULE_CONCURRENCY_KEY, 5
+        )
+        if not isinstance(concurrency_limit, int) or concurrency_limit <= 0:
+            logger.warning(
+                f"无效的定时任务并发限制配置 '{concurrency_limit}'，将使用默认值 5。"
+            )
+            concurrency_limit = 5
+
         logger.info(
             f"开始执行针对 [所有群组] 的任务 "
-            f"(ID: {schedule.id}, 插件: {plugin_name}, Bot: {bot.self_id})"
+            f"(ID: {schedule.id}, 插件: {plugin_name}, Bot: {bot.self_id})，"
+            f"并发限制: {concurrency_limit}"
         )
 
         all_gids = set()
@@ -128,15 +149,25 @@ class SchedulerManager:
             ).values_list("group_id", flat=True)
         )
 
+        semaphore = asyncio.Semaphore(concurrency_limit)
+
+        async def worker(gid: str):
+            """使用 Semaphore 包装单个群组的任务执行"""
+            async with semaphore:
+                temp_schedule = copy.deepcopy(schedule)
+                temp_schedule.group_id = gid
+                await self._execute_for_single_target(temp_schedule, task_meta, bot)
+                await asyncio.sleep(random.uniform(0.1, 0.5))
+
+        tasks_to_run = []
         for gid in all_gids:
             if gid in specific_tasks_gids:
                 logger.debug(f"群组 {gid} 已有特定任务，跳过 'all' 任务的执行。")
                 continue
+            tasks_to_run.append(worker(gid))
 
-            temp_schedule = schedule
-            temp_schedule.group_id = gid
-            await self._execute_for_single_target(temp_schedule, task_meta, bot)
-            await asyncio.sleep(random.uniform(0.1, 0.5))
+        if tasks_to_run:
+            await asyncio.gather(*tasks_to_run)
 
     async def _execute_for_single_target(
         self, schedule: ScheduleInfo, task_meta: dict, bot
@@ -181,6 +212,46 @@ class SchedulerManager:
                 f"目标: {group_id or '全局'}) 时发生异常",
                 e=e,
             )
+
+    def _validate_and_prepare_kwargs(
+        self, plugin_name: str, job_kwargs: dict | None
+    ) -> tuple[bool, str | dict]:
+        """验证并准备任务参数，应用默认值"""
+        task_meta = self._registered_tasks.get(plugin_name)
+        if not task_meta:
+            return False, f"插件 '{plugin_name}' 未注册。"
+
+        params_model = task_meta.get("model")
+        job_kwargs = job_kwargs if job_kwargs is not None else {}
+
+        if not params_model:
+            if job_kwargs:
+                logger.warning(
+                    f"插件 '{plugin_name}' 未定义参数模型，但收到了参数: {job_kwargs}"
+                )
+            return True, job_kwargs
+
+        if not (isinstance(params_model, type) and issubclass(params_model, BaseModel)):
+            logger.error(f"插件 '{plugin_name}' 的参数模型不是有效的 BaseModel 类")
+            return False, f"插件 '{plugin_name}' 的参数模型配置错误"
+
+        try:
+            model_validate = getattr(params_model, "model_validate", None)
+            if not model_validate:
+                return False, f"插件 '{plugin_name}' 的参数模型不支持验证"
+
+            validated_model = model_validate(job_kwargs)
+
+            model_dump = getattr(validated_model, "model_dump", None)
+            if not model_dump:
+                return False, f"插件 '{plugin_name}' 的参数模型不支持导出"
+
+            return True, model_dump()
+        except ValidationError as e:
+            errors = [f"  - {err['loc'][0]}: {err['msg']}" for err in e.errors()]
+            error_str = "\n".join(errors)
+            msg = f"插件 '{plugin_name}' 的任务参数验证失败:\n{error_str}"
+            return False, msg
 
     def _add_aps_job(self, schedule: ScheduleInfo):
         """根据 ScheduleInfo 对象添加或更新一个 APScheduler 任务。"""
@@ -234,23 +305,46 @@ class SchedulerManager:
         if plugin_name not in self._registered_tasks:
             return False, f"插件 '{plugin_name}' 没有注册可用的定时任务。"
 
+        is_valid, result = self._validate_and_prepare_kwargs(plugin_name, job_kwargs)
+        if not is_valid:
+            return False, str(result)
+
+        validated_job_kwargs = result
+
+        effective_bot_id = bot_id if group_id == "__ALL_GROUPS__" else None
+
         search_kwargs = {
             "plugin_name": plugin_name,
             "group_id": group_id,
-            "bot_id": bot_id,
         }
+        if effective_bot_id:
+            search_kwargs["bot_id"] = effective_bot_id
+        else:
+            search_kwargs["bot_id__isnull"] = True
 
         defaults = {
             "trigger_type": trigger_type,
             "trigger_config": trigger_config,
-            "job_kwargs": job_kwargs if job_kwargs is not None else {},
+            "job_kwargs": validated_job_kwargs,
             "is_enabled": True,
         }
 
-        schedule, created = await ScheduleInfo.update_or_create(
-            **search_kwargs,
-            defaults=defaults,
-        )
+        schedule = await ScheduleInfo.filter(**search_kwargs).first()
+        created = False
+
+        if schedule:
+            for key, value in defaults.items():
+                setattr(schedule, key, value)
+            await schedule.save()
+        else:
+            creation_kwargs = {
+                "plugin_name": plugin_name,
+                "group_id": group_id,
+                "bot_id": effective_bot_id,
+                **defaults,
+            }
+            schedule = await ScheduleInfo.create(**creation_kwargs)
+            created = True
         self._add_aps_job(schedule)
         action = "设置" if created else "更新"
         return True, f"已成功{action}插件 '{plugin_name}' 的定时任务。"
@@ -296,6 +390,7 @@ class SchedulerManager:
     async def update_schedule(
         self,
         schedule_id: int,
+        trigger_type: str | None = None,
         trigger_config: dict | None = None,
         job_kwargs: dict | None = None,
     ) -> tuple[bool, str]:
@@ -306,15 +401,27 @@ class SchedulerManager:
 
         updated_fields = []
         if trigger_config is not None:
-            if not isinstance(schedule.trigger_config, dict):
-                return False, f"任务 {schedule_id} 的 trigger_config 数据格式错误。"
-            schedule.trigger_config.update(trigger_config)
+            schedule.trigger_config = trigger_config
             updated_fields.append("trigger_config")
+
+            if trigger_type is not None and schedule.trigger_type != trigger_type:
+                schedule.trigger_type = trigger_type
+                updated_fields.append("trigger_type")
 
         if job_kwargs is not None:
             if not isinstance(schedule.job_kwargs, dict):
                 return False, f"任务 {schedule_id} 的 job_kwargs 数据格式错误。"
-            schedule.job_kwargs.update(job_kwargs)
+
+            merged_kwargs = schedule.job_kwargs.copy()
+            merged_kwargs.update(job_kwargs)
+
+            is_valid, result = self._validate_and_prepare_kwargs(
+                schedule.plugin_name, merged_kwargs
+            )
+            if not is_valid:
+                return False, str(result)
+
+            schedule.job_kwargs = result  # type: ignore
             updated_fields.append("job_kwargs")
 
         if not updated_fields:
@@ -683,6 +790,14 @@ scheduler_manager = SchedulerManager()
 @PriorityLifecycle.on_startup(priority=90)
 async def _load_schedules_from_db():
     """在服务启动时从数据库加载并调度所有任务。"""
+    Config.add_plugin_config(
+        "SchedulerManager",
+        SCHEDULE_CONCURRENCY_KEY,
+        5,
+        help="“所有群组”类型定时任务的并发执行数量限制",
+        type=int,
+    )
+
     logger.info("正在从数据库加载并调度所有定时任务...")
     schedules = await ScheduleInfo.filter(is_enabled=True).all()
     count = 0

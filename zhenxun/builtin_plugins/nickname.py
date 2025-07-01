@@ -1,12 +1,17 @@
 import random
-from typing import Any
 
-from nonebot import on_regex
 from nonebot.adapters import Bot
-from nonebot.params import Depends, RegexGroup
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import to_me
-from nonebot_plugin_alconna import Alconna, Option, on_alconna, store_true
+from nonebot_plugin_alconna import (
+    Alconna,
+    Args,
+    Arparma,
+    CommandMeta,
+    Option,
+    on_alconna,
+    store_true,
+)
 from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun.configs.config import BotConfig, Config
@@ -54,15 +59,22 @@ __plugin_meta__ = PluginMetadata(
     ).to_dict(),
 )
 
-_nickname_matcher = on_regex(
-    "(?:以后)?(?:叫我|请叫我|称呼我)(.*)",
+_nickname_matcher = on_alconna(
+    Alconna(
+        "re:(?:以后)?(?:叫我|请叫我|称呼我)",
+        Args["name?", str],
+        meta=CommandMeta(compact=True),
+    ),
     rule=to_me(),
     priority=5,
     block=True,
 )
 
-_global_nickname_matcher = on_regex(
-    "设置全局昵称(.*)", rule=to_me(), priority=5, block=True
+_global_nickname_matcher = on_alconna(
+    Alconna("设置全局昵称", Args["name?", str], meta=CommandMeta(compact=True)),
+    rule=to_me(),
+    priority=5,
+    block=True,
 )
 
 _matcher = on_alconna(
@@ -117,34 +129,32 @@ CANCEL = [
 ]
 
 
-def CheckNickname():
+async def CheckNickname(
+    bot: Bot,
+    session: Uninfo,
+    params: Arparma,
+):
     """
     检查名称是否合法
     """
-
-    async def dependency(
-        bot: Bot,
-        session: Uninfo,
-        reg_group: tuple[Any, ...] = RegexGroup(),
-    ):
-        black_word = Config.get_config("nickname", "BLACK_WORD")
-        (name,) = reg_group
-        logger.debug(f"昵称检查: {name}", "昵称设置", session=session)
-        if not name:
-            await MessageUtils.build_message("叫你空白？叫你虚空？叫你无名??").finish(
-                at_sender=True
-            )
-        if session.user.id in bot.config.superusers:
-            logger.debug(
-                f"超级用户设置昵称, 跳过合法检测: {name}", "昵称设置", session=session
-            )
-            return
+    black_word = Config.get_config("nickname", "BLACK_WORD")
+    name = params.query("name")
+    logger.debug(f"昵称检查: {name}", "昵称设置", session=session)
+    if not name:
+        await MessageUtils.build_message("叫你空白？叫你虚空？叫你无名??").finish(
+            at_sender=True
+        )
+    if session.user.id in bot.config.superusers:
+        logger.debug(
+            f"超级用户设置昵称, 跳过合法检测: {name}", "昵称设置", session=session
+        )
+    else:
         if len(name) > 20:
             await MessageUtils.build_message("昵称可不能超过20个字!").finish(
                 at_sender=True
             )
         if name in bot.config.nickname:
-            await MessageUtils.build_message("笨蛋！休想占用我的名字! #").finish(
+            await MessageUtils.build_message("笨蛋！休想占用我的名字! ").finish(
                 at_sender=True
             )
         if black_word:
@@ -162,17 +172,17 @@ def CheckNickname():
                     await MessageUtils.build_message(
                         f"字符 [{word}] 为禁止字符!"
                     ).finish(at_sender=True)
+    return name
 
-    return Depends(dependency)
 
-
-@_nickname_matcher.handle(parameterless=[CheckNickname()])
+@_nickname_matcher.handle()
 async def _(
+    bot: Bot,
     session: Uninfo,
+    name_: Arparma,
     uname: str = UserName(),
-    reg_group: tuple[Any, ...] = RegexGroup(),
 ):
-    (name,) = reg_group
+    name = await CheckNickname(bot, session, name_)
     if len(name) < 5 and random.random() < 0.3:
         name = "~".join(name)
     group_id = None
@@ -200,13 +210,14 @@ async def _(
     )
 
 
-@_global_nickname_matcher.handle(parameterless=[CheckNickname()])
+@_global_nickname_matcher.handle()
 async def _(
+    bot: Bot,
     session: Uninfo,
+    name_: Arparma,
     nickname: str = UserName(),
-    reg_group: tuple[Any, ...] = RegexGroup(),
 ):
-    (name,) = reg_group
+    name = await CheckNickname(bot, session, name_)
     await FriendUser.set_user_nickname(
         session.user.id,
         name,
@@ -227,15 +238,14 @@ async def _(session: Uninfo, uname: str = UserName()):
         group_id = session.group.parent.id if session.group.parent else session.group.id
     if group_id:
         nickname = await GroupInfoUser.get_user_nickname(session.user.id, group_id)
-        card = uname
     else:
         nickname = await FriendUser.get_user_nickname(session.user.id)
-        card = uname
     if nickname:
         await MessageUtils.build_message(random.choice(REMIND).format(nickname)).finish(
             reply_to=True
         )
     else:
+        card = uname
         await MessageUtils.build_message(
             random.choice(
                 [

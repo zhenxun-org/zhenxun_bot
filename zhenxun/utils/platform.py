@@ -227,7 +227,7 @@ class PlatformUtils:
         url = None
         if platform == "qq":
             if user_id.isdigit():
-                url = f"http://q1.qlogo.cn/g?b=qq&nk={user_id}&s=160"
+                url = f"http://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640"
             else:
                 url = f"https://q.qlogo.cn/qqapp/{appid}/{user_id}/640"
         return await AsyncHttpx.get_content(url) if url else None
