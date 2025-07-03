@@ -139,22 +139,9 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-demo.py
-test.py
-server_ip.py
-member_activity_handle.py
-Yu-Gi-Oh/
-csgo/
-fantasy_card/
 data/
 log/
 backup/
-extensive_plugin/
-test/
-bot.py
 .idea/
 resources/
-/configs/config.py
-configs/config.yaml
 .vscode/launch.json
-plugins_/
