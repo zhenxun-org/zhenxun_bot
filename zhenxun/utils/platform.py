@@ -529,9 +529,16 @@ class BroadcastEngine:
                 try:
                     self.bot_list.append(nonebot.get_bot(i))
                 except KeyError:
-                    logger.warning(f"Bot:{i} 对象未连接或不存在")
+                    logger.warning(f"Bot:{i} 对象未连接或不存在", log_cmd)
         if not self.bot_list:
-            raise ValueError("当前没有可用的Bot对象...", log_cmd)
+            try:
+                bot = nonebot.get_bot()
+                self.bot_list.append(bot)
+                logger.warning(
+                    f"广播任务未传入Bot对象，使用默认Bot {bot.self_id}", log_cmd
+                )
+            except Exception as e:
+                raise ValueError("当前没有可用的Bot对象...", log_cmd) from e
 
     async def call_check(self, bot: Bot, group_id: str) -> bool:
         """运行发送检测函数
