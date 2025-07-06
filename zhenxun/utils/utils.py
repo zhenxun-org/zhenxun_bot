@@ -244,8 +244,10 @@ def is_valid_date(date_text: str, separator: str = "-") -> bool:
 
 def get_entity_ids(session: Uninfo) -> EntityIDs:
     """获取用户id，群组id，频道id
+
     参数:
         session: Uninfo
+
     返回:
         EntityIDs: 用户id，群组id，频道id
     """
