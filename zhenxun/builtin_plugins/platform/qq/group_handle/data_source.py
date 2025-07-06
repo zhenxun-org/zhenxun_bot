@@ -147,7 +147,7 @@ class GroupManager:
                     e=e,
                 )
                 raise ForceAddGroupError("强制拉群或未有群信息，退出群聊失败...") from e
-            #await GroupConsole.filter(group_id=group_id).delete()
+            await GroupConsole.filter(group_id=group_id).delete()
             raise ForceAddGroupError(f"触发强制入群保护，已成功退出群聊 {group_id}...")
         else:
             await cls.__handle_add_group(bot, group_id, group)
