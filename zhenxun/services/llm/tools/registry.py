@@ -57,7 +57,7 @@ class ToolRegistry:
         """
         装饰器：在代码中注册一个简单的、无状态的函数工具。
 
-        Args:
+        参数:
             name: 工具的唯一名称。
             description: 工具功能的描述。
             parameters: OpenAPI格式的函数参数schema的properties部分。
@@ -86,7 +86,7 @@ class ToolRegistry:
         """
         装饰器：注册一个MCP工具及其配置模型。
 
-        Args:
+        参数:
             name: 工具的唯一名称，必须与配置文件中的名称匹配。
             config_model: 一个Pydantic模型，用于定义和验证该工具的 `mcp_config`。
         """
@@ -113,7 +113,7 @@ class ToolRegistry:
         """
         在代码中注册一个 MCP 会话工厂，将其与配置中的工具名称关联。
 
-        Args:
+        参数:
             name: 工具的唯一名称，必须与配置文件中的名称匹配。
             factory: 一个返回异步生成器的可调用对象（会话工厂）。
         """

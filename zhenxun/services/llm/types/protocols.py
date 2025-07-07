@@ -15,10 +15,10 @@ class MCPCompatible(Protocol):
         """
         将此MCP会话转换为特定LLM提供商API所需的工具格式。
 
-        Args:
+        参数:
             api_type: 目标API的类型 (例如 'gemini', 'openai')。
 
-        Returns:
-            一个字典，代表可以在API请求中使用的工具定义。
+        返回:
+            dict[str, Any]: 一个字典，代表可以在API请求中使用的工具定义。
         """
         ...

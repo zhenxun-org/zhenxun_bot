@@ -173,7 +173,7 @@ def get_default_providers() -> list[dict[str, Any]]:
             "api_base": "https://ark.cn-beijing.volces.com",
             "api_type": "ark",
             "models": [
-                {
+                    {
                     "model_name": "ep-xxxxxxxxxxxxxxxx-xxxxx",
                 },
             ],
@@ -184,9 +184,7 @@ def get_default_providers() -> list[dict[str, Any]]:
             "api_base": "https://api.siliconflow.cn",
             "api_type": "openai",
             "models": [
-                {
-                    "model_name": "deepseek-ai/DeepSeek-V3",
-                },
+                {"model_name": "deepseek-ai/DeepSeek-V3"},
             ],
         },
         {

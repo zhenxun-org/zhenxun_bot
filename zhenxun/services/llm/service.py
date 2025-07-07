@@ -46,7 +46,17 @@ class LLMModelBase(ABC):
         history: list[dict[str, str]] | None = None,
         **kwargs: Any,
     ) -> str:
-        """生成文本"""
+        """
+        生成文本
+
+        参数:
+            prompt: 输入提示词。
+            history: 对话历史记录。
+            **kwargs: 其他参数。
+
+        返回:
+            str: 生成的文本。
+        """
         pass
 
     @abstractmethod
@@ -58,7 +68,19 @@ class LLMModelBase(ABC):
         tool_choice: str | dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
-        """生成高级响应"""
+        """
+        生成高级响应
+
+        参数:
+            messages: 消息列表。
+            config: 生成配置。
+            tools: 工具列表。
+            tool_choice: 工具选择策略。
+            **kwargs: 其他参数。
+
+        返回:
+            LLMResponse: 模型响应。
+        """
         pass
 
     @abstractmethod
@@ -68,7 +90,17 @@ class LLMModelBase(ABC):
         task_type: EmbeddingTaskType | str = EmbeddingTaskType.RETRIEVAL_DOCUMENT,
         **kwargs: Any,
     ) -> list[list[float]]:
-        """生成文本嵌入向量"""
+        """
+        生成文本嵌入向量
+
+        参数:
+            texts: 文本列表。
+            task_type: 嵌入任务类型。
+            **kwargs: 其他参数。
+
+        返回:
+            list[list[float]]: 嵌入向量列表。
+        """
         pass
 
 
@@ -187,6 +219,16 @@ class LLMModel(LLMModelBase):
         4. 处理HTTP错误和API特定错误。
         5. 记录密钥使用状态。
         6. 解析成功的响应。
+
+        参数:
+            prepare_request_func: 准备请求的函数。
+            parse_response_func: 解析响应的函数。
+            http_client: HTTP客户端。
+            failed_keys: 失败的密钥集合。
+            log_context: 日志上下文。
+
+        返回:
+            Any: 解析后的响应数据。
         """
         api_key = await self._select_api_key(failed_keys)
 
@@ -445,7 +487,17 @@ class LLMModel(LLMModelBase):
         history: list[dict[str, str]] | None = None,
         **kwargs: Any,
     ) -> str:
-        """生成文本 - 通过 generate_response 实现"""
+        """
+        生成文本 - 通过 generate_response 实现
+
+        参数:
+            prompt: 输入提示词。
+            history: 对话历史记录。
+            **kwargs: 其他参数。
+
+        返回:
+            str: 生成的文本。
+        """
         self._check_not_closed()
 
         messages: list[LLMMessage] = []
@@ -487,7 +539,17 @@ class LLMModel(LLMModelBase):
         **kwargs: Any,
     ) -> LLMResponse:
         """
-        生成高级响应。
+        生成高级响应
+
+        参数:
+            messages: 消息列表。
+            config: 生成配置。
+            tools: 工具列表。
+            tool_choice: 工具选择策略。
+            **kwargs: 其他参数。
+
+        返回:
+            LLMResponse: 模型响应。
         """
         self._check_not_closed()
 
@@ -557,7 +619,17 @@ class LLMModel(LLMModelBase):
         task_type: EmbeddingTaskType | str = EmbeddingTaskType.RETRIEVAL_DOCUMENT,
         **kwargs: Any,
     ) -> list[list[float]]:
-        """生成文本嵌入向量"""
+        """
+        生成文本嵌入向量
+
+        参数:
+            texts: 文本列表。
+            task_type: 嵌入任务类型。
+            **kwargs: 其他参数。
+
+        返回:
+            list[list[float]]: 嵌入向量列表。
+        """
         self._check_not_closed()
         if not texts:
             return []

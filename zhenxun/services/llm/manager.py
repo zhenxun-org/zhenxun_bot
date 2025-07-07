@@ -174,14 +174,15 @@ def get_configured_providers() -> list[ProviderConfig]:
 def find_model_config(
     provider_name: str, model_name: str
 ) -> tuple[ProviderConfig, ModelDetail] | None:
-    """在配置中查找指定的 Provider 和 ModelDetail
+    """
+    在配置中查找指定的 Provider 和 ModelDetail
 
-    Args:
+    参数:
         provider_name: 提供商名称
         model_name: 模型名称
 
-    Returns:
-        找到的 (ProviderConfig, ModelDetail) 元组，未找到则返回 None
+    返回:
+        tuple[ProviderConfig, ModelDetail] | None: 找到的配置元组，未找到则返回 None
     """
     providers = get_configured_providers()
 
@@ -222,10 +223,11 @@ def _get_model_identifiers(provider_name: str, model_detail: ModelDetail) -> lis
 
 
 def list_model_identifiers() -> dict[str, list[str]]:
-    """列出所有模型的可用标识符
+    """
+    列出所有模型的可用标识符
 
-    Returns:
-        字典，键为模型的完整名称，值为该模型的所有可用标识符列表
+    返回:
+        dict[str, list[str]]: 字典，键为模型的完整名称，值为该模型的所有可用标识符列表
     """
     providers = get_configured_providers()
     result = {}
@@ -249,7 +251,16 @@ async def get_model_instance(
     provider_model_name: str | None = None,
     override_config: dict[str, Any] | None = None,
 ) -> LLMModel:
-    """根据 'ProviderName/ModelName' 字符串获取并实例化 LLMModel (异步版本)"""
+    """
+    根据 'ProviderName/ModelName' 字符串获取并实例化 LLMModel (异步版本)
+
+    参数:
+        provider_model_name: 模型名称，格式为 'ProviderName/ModelName'。
+        override_config: 覆盖配置字典。
+
+    返回:
+        LLMModel: 模型实例。
+    """
     cache_key = _make_cache_key(provider_model_name, override_config)
     cached_model = _get_cached_model(cache_key)
     if cached_model:
@@ -363,7 +374,15 @@ def get_global_default_model_name() -> str | None:
 
 
 def set_global_default_model_name(provider_model_name: str | None) -> bool:
-    """设置全局默认模型名称"""
+    """
+    设置全局默认模型名称
+
+    参数:
+        provider_model_name: 模型名称，格式为 'ProviderName/ModelName'。
+
+    返回:
+        bool: 设置是否成功。
+    """
     if provider_model_name:
         prov_name, mod_name = parse_provider_model_string(provider_model_name)
         if not prov_name or not mod_name or not find_model_config(prov_name, mod_name):
@@ -383,7 +402,12 @@ def set_global_default_model_name(provider_model_name: str | None) -> bool:
 
 
 async def get_key_usage_stats() -> dict[str, Any]:
-    """获取所有Provider的Key使用统计"""
+    """
+    获取所有Provider的Key使用统计
+
+    返回:
+        dict[str, Any]: 包含所有Provider的Key使用统计信息。
+    """
     providers = get_configured_providers()
     stats = {}
 
@@ -406,7 +430,16 @@ async def get_key_usage_stats() -> dict[str, Any]:
 
 
 async def reset_key_status(provider_name: str, api_key: str | None = None) -> bool:
-    """重置指定Provider的Key状态"""
+    """
+    重置指定Provider的Key状态
+
+    参数:
+        provider_name: 提供商名称。
+        api_key: 要重置的特定API密钥，如果为None则重置所有密钥。
+
+    返回:
+        bool: 重置是否成功。
+    """
     providers = get_configured_providers()
     target_provider = None
 

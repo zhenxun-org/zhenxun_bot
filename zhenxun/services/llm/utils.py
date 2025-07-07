@@ -28,6 +28,12 @@ async def unimsg_to_llm_parts(message: UniMessage) -> list[LLMContentPart]:
     """
     将 UniMessage 实例转换为一个 LLMContentPart 列表。
     这是处理多模态输入的核心转换逻辑。
+
+    参数:
+        message: 要转换的UniMessage实例。
+
+    返回:
+        list[LLMContentPart]: 转换后的内容部分列表。
     """
     parts: list[LLMContentPart] = []
     for seg in message:
@@ -141,16 +147,18 @@ def create_multimodal_message(
     audio_mimetypes: list[str] | str | None = None,
 ) -> UniMessage:
     """
-    创建多模态消息的便捷函数。
+    创建多模态消息的便捷函数
 
-    Args:
+    参数:
         text: 文本内容
         images: 图片数据，支持路径、字节数据或URL
         videos: 视频数据
         audios: 音频数据
-        *_mimetypes: 对应媒体的MIME类型，bytes数据时需要指定
+        image_mimetypes: 图片MIME类型，bytes数据时需要指定
+        video_mimetypes: 视频MIME类型，bytes数据时需要指定
+        audio_mimetypes: 音频MIME类型，bytes数据时需要指定
 
-    Returns:
+    返回:
         UniMessage: 构建好的多模态消息
     """
     message = UniMessage()
@@ -203,6 +211,12 @@ def message_to_unimessage(message: PlatformMessage) -> UniMessage:
     """
     将平台特定的 Message 对象转换为通用的 UniMessage。
     主要用于处理引用消息等未被自动转换的消息体。
+
+    参数:
+        message: 平台特定的Message对象。
+
+    返回:
+        UniMessage: 转换后的通用消息对象。
     """
     uni_segments = []
     for seg in message:
@@ -224,7 +238,13 @@ def message_to_unimessage(message: PlatformMessage) -> UniMessage:
 
 def _sanitize_request_body_for_logging(body: dict) -> dict:
     """
-    净化请求体用于日志记录，移除大数据字段并添加摘要信息。
+    净化请求体用于日志记录，移除大数据字段并添加摘要信息
+
+    参数:
+        body: 原始请求体字典。
+
+    返回:
+        dict: 净化后的请求体字典。
     """
     try:
         sanitized_body = copy.deepcopy(body)

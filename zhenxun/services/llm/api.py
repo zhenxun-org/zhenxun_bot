@@ -84,7 +84,7 @@ class AI:
         """
         初始化AI服务
 
-        Args:
+        参数:
             config: AI 配置.
             history: 可选的初始对话历史.
         """
@@ -144,7 +144,7 @@ class AI:
         进行一次聊天对话。
         此方法会自动使用和更新会话内的历史记录。
 
-        Args:
+        参数:
             message: 用户输入的消息。
             model: 本次对话要使用的模型。
             preserve_media_in_history: 是否在历史记录中保留原始多模态信息。
@@ -152,6 +152,9 @@ class AI:
                 - False: 不保留，替换为占位符，提高效率。
                 - None (默认): 使用AI实例配置的默认值。
             **kwargs: 传递给模型的其他参数。
+
+        返回:
+            str: 模型的文本响应。
         """
         current_message: LLMMessage
         if isinstance(message, str):
@@ -202,7 +205,18 @@ class AI:
         timeout: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """代码执行"""
+        """
+        代码执行
+
+        参数:
+            prompt: 代码执行的提示词。
+            model: 要使用的模型名称。
+            timeout: 代码执行超时时间（秒）。
+            **kwargs: 传递给模型的其他参数。
+
+        返回:
+            dict[str, Any]: 包含执行结果的字典，包含text、code_executions和success字段。
+        """
         resolved_model = model or self.config.model or "Gemini/gemini-2.0-flash"
 
         config = CommonOverrides.gemini_code_execution()
@@ -230,7 +244,18 @@ class AI:
         instruction: str = "",
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """信息搜索 - 支持多模态输入"""
+        """
+        信息搜索 - 支持多模态输入
+
+        参数:
+            query: 搜索查询内容，支持文本或多模态消息。
+            model: 要使用的模型名称。
+            instruction: 搜索指令。
+            **kwargs: 传递给模型的其他参数。
+
+        返回:
+            dict[str, Any]: 包含搜索结果的字典，包含text、sources、queries和success字段
+        """
         resolved_model = model or self.config.model or "Gemini/gemini-2.0-flash"
         config = CommonOverrides.gemini_grounding()
 
@@ -291,6 +316,19 @@ class AI:
     ) -> LLMResponse:
         """
         内容分析 - 接收 UniMessage 物件进行多模态分析和工具呼叫。
+
+        参数:
+            message: 要分析的消息内容（支持多模态）。
+            instruction: 分析指令。
+            model: 要使用的模型名称。
+            use_tools: 要使用的工具名称列表。
+            tool_config: 工具配置。
+            activated_tools: 已激活的工具列表。
+            history: 对话历史记录。
+            **kwargs: 传递给模型的其他参数。
+
+        返回:
+            LLMResponse: 模型的完整响应结果。
         """
         content_parts = await unimsg_to_llm_parts(message or UniMessage())
 
@@ -435,7 +473,18 @@ class AI:
         task_type: EmbeddingTaskType | str = EmbeddingTaskType.RETRIEVAL_DOCUMENT,
         **kwargs: Any,
     ) -> list[list[float]]:
-        """生成文本嵌入向量"""
+        """
+        生成文本嵌入向量
+
+        参数:
+            texts: 要生成嵌入向量的文本或文本列表。
+            model: 要使用的嵌入模型名称。
+            task_type: 嵌入任务类型。
+            **kwargs: 传递给模型的其他参数。
+
+        返回:
+            list[list[float]]: 文本的嵌入向量列表。
+        """
         if isinstance(texts, str):
             texts = [texts]
         if not texts:
@@ -475,7 +524,17 @@ async def chat(
     model: ModelName = None,
     **kwargs: Any,
 ) -> str:
-    """聊天对话便捷函数"""
+    """
+    聊天对话便捷函数
+
+    参数:
+        message: 用户输入的消息。
+        model: 要使用的模型名称。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        str: 模型的文本响应。
+    """
     ai = AI()
     return await ai.chat(message, model=model, **kwargs)
 
@@ -487,7 +546,18 @@ async def code(
     timeout: int | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """代码执行便捷函数"""
+    """
+    代码执行便捷函数
+
+    参数:
+        prompt: 代码执行的提示词。
+        model: 要使用的模型名称。
+        timeout: 代码执行超时时间（秒）。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        dict[str, Any]: 包含执行结果的字典。
+    """
     ai = AI()
     return await ai.code(prompt, model=model, timeout=timeout, **kwargs)
 
@@ -499,7 +569,18 @@ async def search(
     instruction: str = "",
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """信息搜索便捷函数"""
+    """
+    信息搜索便捷函数
+
+    参数:
+        query: 搜索查询内容。
+        model: 要使用的模型名称。
+        instruction: 搜索指令。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        dict[str, Any]: 包含搜索结果的字典。
+    """
     ai = AI()
     return await ai.search(query, model=model, instruction=instruction, **kwargs)
 
@@ -513,7 +594,20 @@ async def analyze(
     tool_config: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> str | LLMResponse:
-    """内容分析便捷函数"""
+    """
+    内容分析便捷函数
+
+    参数:
+        message: 要分析的消息内容。
+        instruction: 分析指令。
+        model: 要使用的模型名称。
+        use_tools: 要使用的工具名称列表。
+        tool_config: 工具配置。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        str | LLMResponse: 分析结果。
+    """
     ai = AI()
     return await ai.analyze(
         message,
@@ -535,7 +629,21 @@ async def analyze_multimodal(
     model: ModelName = None,
     **kwargs: Any,
 ) -> str | LLMResponse:
-    """多模态分析便捷函数"""
+    """
+    多模态分析便捷函数
+
+    参数:
+        text: 文本内容。
+        images: 图片文件路径、字节数据或列表。
+        videos: 视频文件路径、字节数据或列表。
+        audios: 音频文件路径、字节数据或列表。
+        instruction: 分析指令。
+        model: 要使用的模型名称。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        str | LLMResponse: 分析结果。
+    """
     message = create_multimodal_message(
         text=text, images=images, videos=videos, audios=audios
     )
@@ -552,7 +660,21 @@ async def search_multimodal(
     model: ModelName = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """多模态搜索便捷函数"""
+    """
+    多模态搜索便捷函数
+
+    参数:
+        text: 文本内容。
+        images: 图片文件路径、字节数据或列表。
+        videos: 视频文件路径、字节数据或列表。
+        audios: 音频文件路径、字节数据或列表。
+        instruction: 搜索指令。
+        model: 要使用的模型名称。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        dict[str, Any]: 包含搜索结果的字典。
+    """
     message = create_multimodal_message(
         text=text, images=images, videos=videos, audios=audios
     )
@@ -567,7 +689,18 @@ async def embed(
     task_type: EmbeddingTaskType | str = EmbeddingTaskType.RETRIEVAL_DOCUMENT,
     **kwargs: Any,
 ) -> list[list[float]]:
-    """文本嵌入便捷函数"""
+    """
+    文本嵌入便捷函数
+
+    参数:
+        texts: 要生成嵌入向量的文本或文本列表。
+        model: 要使用的嵌入模型名称。
+        task_type: 嵌入任务类型。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        list[list[float]]: 文本的嵌入向量列表。
+    """
     ai = AI()
     return await ai.embed(texts, model=model, task_type=task_type, **kwargs)
 
@@ -583,14 +716,14 @@ async def pipeline_chat(
     """
     AI模型链式调用，前一个模型的输出作为下一个模型的输入。
 
-    Args:
+    参数:
         message: 初始输入消息（支持多模态）
         model_chain: 模型名称列表
         initial_instruction: 第一个模型的系统指令
         final_instruction: 最后一个模型的系统指令
         **kwargs: 传递给模型实例的其他参数
 
-    Returns:
+    返回:
         LLMResponse: 最后一个模型的响应结果
     """
     if not model_chain:
