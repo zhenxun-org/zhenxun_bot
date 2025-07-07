@@ -248,28 +248,32 @@ class PlatformUtils:
             else:
                 return f"https://q.qlogo.cn/qqapp/{appid}/{user_id}/640"
         elif platform == "kaiheila":
-            if not hasattr(cls,'_kook_cache'):
-                params = {
-                    'user_id': user_id
+            if not hasattr(cls, "_kook_cache"):
+                params = {"user_id": user_id}
+                header = {
+                    "Authorization": f"Bot {BotConfig.kaiheila_bots[0].get('token')}"
                 }
-                header={
-                    'Authorization': f"Bot {BotConfig.kaiheila_bots[0].get('token')}"
-                }
-                result=await AsyncHttpx.get(url='https://www.kookapp.cn/api/v3/user/view',params=params,headers=header)
-                cls._kook_cache = result.json()['data']['avatar']
+                result = await AsyncHttpx.get(
+                    url="https://www.kookapp.cn/api/v3/user/view",
+                    params=params,
+                    headers=header,
+                )
+                cls._kook_cache = result.json()["data"]["avatar"]
                 return cls._kook_cache
             else:
-                return cls._kook_cache  #使用临时缓存
+                return cls._kook_cache  # 使用临时缓存
         elif platform == "discord":
-            if not hasattr(cls,'_discord_cache'):
-                header={
-                    'Authorization': f"Bot {BotConfig.discord_bots[0].get('token')}"
+            if not hasattr(cls, "_discord_cache"):
+                header = {
+                    "Authorization": f"Bot {BotConfig.discord_bots[0].get('token')}"
                 }
-                result=await AsyncHttpx.get(url=f'https://discord.com/api/users/{user_id}',headers=header)
+                result = await AsyncHttpx.get(
+                    url=f"https://discord.com/api/users/{user_id}", headers=header
+                )
                 cls._discord_cache = f"https://cdn.discordapp.com/avatars/{user_id}/{result.json()['avatar']}.png?size=256"
                 return cls._discord_cache
             else:
-                return cls._discord_cache  #使用临时缓存
+                return cls._discord_cache  # 使用临时缓存
 
         else:
             return None

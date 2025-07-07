@@ -81,10 +81,8 @@ class ApiDataSource:
             bot=bot,
             self_id=bot.self_id,
             nickname=login_info["nickname"] if login_info else bot.self_id,
-            ava_url=await PlatformUtils.get_user_avatar_url(
-                bot.self_id, platform
-            )
-                    or AVA_URL.format(bot.self_id),
+            ava_url=await PlatformUtils.get_user_avatar_url(bot.self_id, platform)
+            or AVA_URL.format(bot.self_id),
         )
 
     @classmethod
