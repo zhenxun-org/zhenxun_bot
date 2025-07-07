@@ -173,9 +173,10 @@ def get_default_providers() -> list[dict[str, Any]]:
             "api_base": "https://ark.cn-beijing.volces.com",
             "api_type": "ark",
             "models": [
-                    {
-                    "model_name": "ep-xxxxxxxxxxxxxxxx-xxxxx",
-                },
+                {"model_name": "deepseek-r1-250528"},
+                {"model_name": "doubao-seed-1-6-250615"},
+                {"model_name": "doubao-seed-1-6-flash-250615"},
+                {"model_name": "doubao-seed-1-6-thinking-250615"},
             ],
         },
         {
