@@ -76,11 +76,15 @@ class ApiDataSource:
             login_info = await bot.get_login_info()
         except Exception as e:
             logger.warning("调用接口get_login_info失败", "WebUi", e=e)
+        platform = PlatformUtils.get_platform(bot) or ""
         return TemplateBaseInfo(
             bot=bot,
             self_id=bot.self_id,
             nickname=login_info["nickname"] if login_info else bot.self_id,
-            ava_url=AVA_URL.format(bot.self_id),
+            ava_url=await PlatformUtils.get_user_avatar_url(
+                bot.self_id, platform
+            )
+                    or AVA_URL.format(bot.self_id),
         )
 
     @classmethod

@@ -233,7 +233,7 @@ class PlatformUtils:
         return await AsyncHttpx.get_content(url) if url else None
 
     @classmethod
-    def get_user_avatar_url(
+    async def get_user_avatar_url(
         cls, user_id: str, platform: str, appid: str | None = None
     ) -> str | None:
         """快捷获取用户头像url
@@ -242,12 +242,37 @@ class PlatformUtils:
             user_id: 用户id
             platform: 平台
         """
-        if platform != "qq":
-            return None
-        if user_id.isdigit():
-            return f"http://q1.qlogo.cn/g?b=qq&nk={user_id}&s=160"
+        if platform == "qq":
+            if user_id.isdigit():
+                return f"http://q1.qlogo.cn/g?b=qq&nk={user_id}&s=160"
+            else:
+                return f"https://q.qlogo.cn/qqapp/{appid}/{user_id}/640"
+        elif platform == "kaiheila":
+            if not hasattr(cls,'_kook_cache'):
+                params = {
+                    'user_id': user_id
+                }
+                header={
+                    'Authorization': f"Bot {BotConfig.kaiheila_bots[0].get('token')}"
+                }
+                result=await AsyncHttpx.get(url='https://www.kookapp.cn/api/v3/user/view',params=params,headers=header)
+                cls._kook_cache = result.json()['data']['avatar']
+                return cls._kook_cache
+            else:
+                return cls._kook_cache  #使用临时缓存
+        elif platform == "discord":
+            if not hasattr(cls,'_discord_cache'):
+                header={
+                    'Authorization': f"Bot {BotConfig.discord_bots[0].get('token')}"
+                }
+                result=await AsyncHttpx.get(url=f'https://discord.com/api/users/{user_id}',headers=header)
+                cls._discord_cache = f"https://cdn.discordapp.com/avatars/{user_id}/{result.json()['avatar']}.png?size=256"
+                return cls._discord_cache
+            else:
+                return cls._discord_cache  #使用临时缓存
+
         else:
-            return f"https://q.qlogo.cn/qqapp/{appid}/{user_id}/640"
+            return None
 
     @classmethod
     async def get_group_avatar(cls, gid: str, platform: str) -> bytes | None:

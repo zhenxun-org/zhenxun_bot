@@ -62,7 +62,12 @@ class ApiDataSource:
             )
         else:
             nickname = bot.self_id
-            ava_url = ""
+            ava_url = (
+                    await PlatformUtils.get_user_avatar_url(
+                        bot.self_id, platform
+                    )
+                    or ""
+            )
         bot_info = BotInfo(
             self_id=bot.self_id, nickname=nickname, ava_url=ava_url, platform=platform
         )
