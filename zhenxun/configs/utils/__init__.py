@@ -106,21 +106,34 @@ class ConfigGroup(BaseModel):
         if value_to_process is None:
             return default
 
-        if cfg.type:
-            if _is_pydantic_type(cfg.type):
-                if build_model:
-                    try:
-                        return parse_as(cfg.type, value_to_process)
-                    except Exception as e:
-                        logger.warning(
-                            f"Pydantic 模型解析失败 (key: {c.upper()}). ", e=e
-                        )
+        if cfg.arg_parser:
             try:
-                return cattrs.structure(value_to_process, cfg.type)
+                return cfg.arg_parser(value_to_process)
             except Exception as e:
-                logger.warning(f"Cattrs 结构化失败 (key: {key})，返回原始值。", e=e)
+                logger.debug(
+                    f"配置项类型转换 MODULE: [<u><y>{self.module}</y></u>] | "
+                    f"KEY: [<u><y>{key}</y></u>] 的自定义解析器失败，将使用原始值",
+                    e=e,
+                )
+                return value_to_process
 
-        return value_to_process
+        if not build_model or not cfg.type:
+            return value_to_process
+
+        try:
+            if _is_pydantic_type(cfg.type):
+                parsed_value = parse_as(cfg.type, value_to_process)
+                return parsed_value
+            else:
+                structured_value = cattrs.structure(value_to_process, cfg.type)
+                return structured_value
+        except Exception as e:
+            logger.error(
+                f"❌ 配置项 '{self.module}.{key}' 自动类型转换失败 "
+                f"(目标类型: {cfg.type})，将返回原始值。请检查配置文件格式。错误: {e}",
+                e=e,
+            )
+            return value_to_process
 
     def to_dict(self, **kwargs):
         return model_dump(self, **kwargs)
