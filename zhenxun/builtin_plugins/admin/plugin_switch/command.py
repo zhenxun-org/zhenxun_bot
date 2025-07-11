@@ -58,6 +58,19 @@ _status_matcher.shortcut(
     prefix=True,
 )
 
+_status_matcher.shortcut(
+    r"开启(所有|全部)默认群被动",
+    command="switch",
+    arguments=["open", "--task", "--all", "-df"],
+    prefix=True,
+)
+
+_status_matcher.shortcut(
+    r"关闭(所有|全部)默认群被动",
+    command="switch",
+    arguments=["close", "--task", "--all", "-df"],
+    prefix=True,
+)
 
 _status_matcher.shortcut(
     r"开启群被动\s*(?P<name>.+)",
@@ -70,6 +83,20 @@ _status_matcher.shortcut(
     r"关闭群被动\s*(?P<name>.+)",
     command="switch",
     arguments=["close", "{name}", "--task"],
+    prefix=True,
+)
+
+_status_matcher.shortcut(
+    r"开启默认群被动\s*(?P<name>.+)",
+    command="switch",
+    arguments=["open", "{name}", "--task", "-df"],
+    prefix=True,
+)
+
+_status_matcher.shortcut(
+    r"关闭默认群被动\s*(?P<name>.+)",
+    command="switch",
+    arguments=["close", "{name}", "--task", "-df"],
     prefix=True,
 )
 

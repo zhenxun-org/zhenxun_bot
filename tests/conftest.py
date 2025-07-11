@@ -116,6 +116,7 @@ async def app(app: App, tmp_path: Path, mocker: MockerFixture):
     await init()
     # await driver._lifespan.startup()
     os.environ["AIOCACHE_DISABLE"] = "1"
+    os.environ["PYTEST_CURRENT_TEST"] = "1"
 
     yield app
 

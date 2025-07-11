@@ -225,8 +225,10 @@ class LLMContentPart(BaseModel):
             logger.warning(f"无法解析Base64图像数据: {self.image_source[:50]}...")
             return None
 
-    def convert_for_api(self, api_type: str) -> dict[str, Any]:
+    async def convert_for_api_async(self, api_type: str) -> dict[str, Any]:
         """根据API类型转换多模态内容格式"""
+        from zhenxun.utils.http_utils import AsyncHttpx
+
         if self.type == "text":
             if api_type == "openai":
                 return {"type": "text", "text": self.text}
@@ -248,20 +250,23 @@ class LLMContentPart(BaseModel):
                         mime_type, data = base64_info
                         return {"inlineData": {"mimeType": mime_type, "data": data}}
                     else:
-                        # 如果无法解析 Base64 数据，抛出异常
                         raise ValueError(
                             f"无法解析Base64图像数据: {self.image_source[:50]}..."
                         )
-                else:
-                    logger.warning(
-                        f"Gemini API需要Base64格式，但提供的是URL: {self.image_source}"
-                    )
-                    return {
-                        "inlineData": {
-                            "mimeType": "image/jpeg",
-                            "data": self.image_source,
+                elif self.is_image_url():
+                    logger.debug(f"正在为Gemini下载并编码URL图片: {self.image_source}")
+                    try:
+                        image_bytes = await AsyncHttpx.get_content(self.image_source)
+                        mime_type = self.mime_type or "image/jpeg"
+                        base64_data = base64.b64encode(image_bytes).decode("utf-8")
+                        return {
+                            "inlineData": {"mimeType": mime_type, "data": base64_data}
                         }
-                    }
+                    except Exception as e:
+                        logger.error(f"下载或编码URL图片失败: {e}", e=e)
+                        raise ValueError(f"无法处理图片URL: {e}")
+                else:
+                    raise ValueError(f"不支持的图像源格式: {self.image_source[:50]}...")
             else:
                 return {"type": "image_url", "image_url": {"url": self.image_source}}
 

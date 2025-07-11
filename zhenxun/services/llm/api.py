@@ -2,6 +2,7 @@
 LLM 服务的高级 API 接口
 """
 
+import copy
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -14,6 +15,7 @@ from zhenxun.services.log import logger
 from .config import CommonOverrides, LLMGenerationConfig
 from .config.providers import get_ai_config
 from .manager import get_global_default_model_name, get_model_instance
+from .tools import tool_registry
 from .types import (
     EmbeddingTaskType,
     LLMContentPart,
@@ -56,6 +58,7 @@ class AIConfig:
     enable_gemini_safe_mode: bool = False
     enable_gemini_multimodal: bool = False
     enable_gemini_grounding: bool = False
+    default_preserve_media_in_history: bool = False
 
     def __post_init__(self):
         """初始化后从配置中读取默认值"""
@@ -81,7 +84,7 @@ class AI:
         """
         初始化AI服务
 
-        Args:
+        参数:
             config: AI 配置.
             history: 可选的初始对话历史.
         """
@@ -93,16 +96,65 @@ class AI:
         self.history = []
         logger.info("AI session history cleared.")
 
+    def _sanitize_message_for_history(self, message: LLMMessage) -> LLMMessage:
+        """
+        净化用于存入历史记录的消息。
+        将非文本的多模态内容部分替换为文本占位符，以避免重复处理。
+        """
+        if not isinstance(message.content, list):
+            return message
+
+        sanitized_message = copy.deepcopy(message)
+        content_list = sanitized_message.content
+        if not isinstance(content_list, list):
+            return sanitized_message
+
+        new_content_parts: list[LLMContentPart] = []
+        has_multimodal_content = False
+
+        for part in content_list:
+            if isinstance(part, LLMContentPart) and part.type == "text":
+                new_content_parts.append(part)
+            else:
+                has_multimodal_content = True
+
+        if has_multimodal_content:
+            placeholder = "[用户发送了媒体文件，内容已在首次分析时处理]"
+            text_part_found = False
+            for part in new_content_parts:
+                if part.type == "text":
+                    part.text = f"{placeholder} {part.text or ''}".strip()
+                    text_part_found = True
+                    break
+            if not text_part_found:
+                new_content_parts.insert(0, LLMContentPart.text_part(placeholder))
+
+        sanitized_message.content = new_content_parts
+        return sanitized_message
+
     async def chat(
         self,
         message: str | LLMMessage | list[LLMContentPart],
         *,
         model: ModelName = None,
+        preserve_media_in_history: bool | None = None,
         **kwargs: Any,
     ) -> str:
         """
         进行一次聊天对话。
         此方法会自动使用和更新会话内的历史记录。
+
+        参数:
+            message: 用户输入的消息。
+            model: 本次对话要使用的模型。
+            preserve_media_in_history: 是否在历史记录中保留原始多模态信息。
+                - True: 保留，用于深度多轮媒体分析。
+                - False: 不保留，替换为占位符，提高效率。
+                - None (默认): 使用AI实例配置的默认值。
+            **kwargs: 传递给模型的其他参数。
+
+        返回:
+            str: 模型的文本响应。
         """
         current_message: LLMMessage
         if isinstance(message, str):
@@ -127,7 +179,20 @@ class AI:
             final_messages, model, "聊天失败", kwargs
         )
 
-        self.history.append(current_message)
+        should_preserve = (
+            preserve_media_in_history
+            if preserve_media_in_history is not None
+            else self.config.default_preserve_media_in_history
+        )
+
+        if should_preserve:
+            logger.debug("深度分析模式：在历史记录中保留原始多模态消息。")
+            self.history.append(current_message)
+        else:
+            logger.debug("高效模式：净化历史记录中的多模态消息。")
+            sanitized_user_message = self._sanitize_message_for_history(current_message)
+            self.history.append(sanitized_user_message)
+
         self.history.append(LLMMessage.assistant_text_response(response.text))
 
         return response.text
@@ -140,7 +205,18 @@ class AI:
         timeout: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """代码执行"""
+        """
+        代码执行
+
+        参数:
+            prompt: 代码执行的提示词。
+            model: 要使用的模型名称。
+            timeout: 代码执行超时时间（秒）。
+            **kwargs: 传递给模型的其他参数。
+
+        返回:
+            dict[str, Any]: 包含执行结果的字典，包含text、code_executions和success字段。
+        """
         resolved_model = model or self.config.model or "Gemini/gemini-2.0-flash"
 
         config = CommonOverrides.gemini_code_execution()
@@ -168,7 +244,18 @@ class AI:
         instruction: str = "",
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """信息搜索 - 支持多模态输入"""
+        """
+        信息搜索 - 支持多模态输入
+
+        参数:
+            query: 搜索查询内容，支持文本或多模态消息。
+            model: 要使用的模型名称。
+            instruction: 搜索指令。
+            **kwargs: 传递给模型的其他参数。
+
+        返回:
+            dict[str, Any]: 包含搜索结果的字典，包含text、sources、queries和success字段
+        """
         resolved_model = model or self.config.model or "Gemini/gemini-2.0-flash"
         config = CommonOverrides.gemini_grounding()
 
@@ -217,63 +304,69 @@ class AI:
 
     async def analyze(
         self,
-        message: UniMessage,
+        message: UniMessage | None,
         *,
         instruction: str = "",
         model: ModelName = None,
-        tools: list[dict[str, Any]] | None = None,
+        use_tools: list[str] | None = None,
         tool_config: dict[str, Any] | None = None,
+        activated_tools: list[LLMTool] | None = None,
+        history: list[LLMMessage] | None = None,
         **kwargs: Any,
-    ) -> str | LLMResponse:
+    ) -> LLMResponse:
         """
         内容分析 - 接收 UniMessage 物件进行多模态分析和工具呼叫。
-        这是处理复杂互动的主要方法。
+
+        参数:
+            message: 要分析的消息内容（支持多模态）。
+            instruction: 分析指令。
+            model: 要使用的模型名称。
+            use_tools: 要使用的工具名称列表。
+            tool_config: 工具配置。
+            activated_tools: 已激活的工具列表。
+            history: 对话历史记录。
+            **kwargs: 传递给模型的其他参数。
+
+        返回:
+            LLMResponse: 模型的完整响应结果。
         """
-        content_parts = await unimsg_to_llm_parts(message)
+        content_parts = await unimsg_to_llm_parts(message or UniMessage())
 
         final_messages: list[LLMMessage] = []
+        if history:
+            final_messages.extend(history)
+
         if instruction:
-            final_messages.append(LLMMessage.system(instruction))
+            if not any(msg.role == "system" for msg in final_messages):
+                final_messages.insert(0, LLMMessage.system(instruction))
 
         if not content_parts:
-            if instruction:
+            if instruction and not history:
                 final_messages.append(LLMMessage.user(instruction))
-            else:
+            elif not history:
                 raise LLMException(
                     "分析内容为空或无法处理。", code=LLMErrorCode.API_REQUEST_FAILED
                 )
         else:
             final_messages.append(LLMMessage.user(content_parts))
 
-        llm_tools = None
-        if tools:
-            llm_tools = []
-            for tool_dict in tools:
-                if isinstance(tool_dict, dict):
-                    if "name" in tool_dict and "description" in tool_dict:
-                        llm_tool = LLMTool(
-                            type="function",
-                            function={
-                                "name": tool_dict["name"],
-                                "description": tool_dict["description"],
-                                "parameters": tool_dict.get("parameters", {}),
-                            },
-                        )
-                        llm_tools.append(llm_tool)
-                    else:
-                        llm_tools.append(LLMTool(**tool_dict))
-                else:
-                    llm_tools.append(tool_dict)
+        llm_tools: list[LLMTool] | None = activated_tools
+        if not llm_tools and use_tools:
+            try:
+                llm_tools = tool_registry.get_tools(use_tools)
+                logger.debug(f"已从注册表加载工具定义: {use_tools}")
+            except ValueError as e:
+                raise LLMException(
+                    f"加载工具定义失败: {e}",
+                    code=LLMErrorCode.CONFIGURATION_ERROR,
+                    cause=e,
+                )
 
         tool_choice = None
         if tool_config:
             mode = tool_config.get("mode", "auto")
-            if mode == "auto":
-                tool_choice = "auto"
-            elif mode == "any":
-                tool_choice = "any"
-            elif mode == "none":
-                tool_choice = "none"
+            if mode in ["auto", "any", "none"]:
+                tool_choice = mode
 
         response = await self._execute_generation(
             final_messages,
@@ -284,9 +377,7 @@ class AI:
             tool_choice=tool_choice,
         )
 
-        if response.tool_calls:
-            return response
-        return response.text
+        return response
 
     async def _execute_generation(
         self,
@@ -298,7 +389,7 @@ class AI:
         tool_choice: str | dict[str, Any] | None = None,
         base_config: LLMGenerationConfig | None = None,
     ) -> LLMResponse:
-        """通用的生成执行方法，封装重复的模型获取、配置合并和异常处理逻辑"""
+        """通用的生成执行方法，封装模型获取和单次API调用"""
         try:
             resolved_model_name = self._resolve_model_name(
                 model_name or self.config.model
@@ -311,7 +402,9 @@ class AI:
                 resolved_model_name, override_config=final_config_dict
             ) as model_instance:
                 return await model_instance.generate_response(
-                    messages, tools=llm_tools, tool_choice=tool_choice
+                    messages,
+                    tools=llm_tools,
+                    tool_choice=tool_choice,
                 )
         except LLMException:
             raise
@@ -380,7 +473,18 @@ class AI:
         task_type: EmbeddingTaskType | str = EmbeddingTaskType.RETRIEVAL_DOCUMENT,
         **kwargs: Any,
     ) -> list[list[float]]:
-        """生成文本嵌入向量"""
+        """
+        生成文本嵌入向量
+
+        参数:
+            texts: 要生成嵌入向量的文本或文本列表。
+            model: 要使用的嵌入模型名称。
+            task_type: 嵌入任务类型。
+            **kwargs: 传递给模型的其他参数。
+
+        返回:
+            list[list[float]]: 文本的嵌入向量列表。
+        """
         if isinstance(texts, str):
             texts = [texts]
         if not texts:
@@ -420,7 +524,17 @@ async def chat(
     model: ModelName = None,
     **kwargs: Any,
 ) -> str:
-    """聊天对话便捷函数"""
+    """
+    聊天对话便捷函数
+
+    参数:
+        message: 用户输入的消息。
+        model: 要使用的模型名称。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        str: 模型的文本响应。
+    """
     ai = AI()
     return await ai.chat(message, model=model, **kwargs)
 
@@ -432,7 +546,18 @@ async def code(
     timeout: int | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """代码执行便捷函数"""
+    """
+    代码执行便捷函数
+
+    参数:
+        prompt: 代码执行的提示词。
+        model: 要使用的模型名称。
+        timeout: 代码执行超时时间（秒）。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        dict[str, Any]: 包含执行结果的字典。
+    """
     ai = AI()
     return await ai.code(prompt, model=model, timeout=timeout, **kwargs)
 
@@ -444,43 +569,54 @@ async def search(
     instruction: str = "",
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """信息搜索便捷函数"""
+    """
+    信息搜索便捷函数
+
+    参数:
+        query: 搜索查询内容。
+        model: 要使用的模型名称。
+        instruction: 搜索指令。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        dict[str, Any]: 包含搜索结果的字典。
+    """
     ai = AI()
     return await ai.search(query, model=model, instruction=instruction, **kwargs)
 
 
 async def analyze(
-    message: UniMessage,
+    message: UniMessage | None,
     *,
     instruction: str = "",
     model: ModelName = None,
-    tools: list[dict[str, Any]] | None = None,
+    use_tools: list[str] | None = None,
     tool_config: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> str | LLMResponse:
-    """内容分析便捷函数"""
+    """
+    内容分析便捷函数
+
+    参数:
+        message: 要分析的消息内容。
+        instruction: 分析指令。
+        model: 要使用的模型名称。
+        use_tools: 要使用的工具名称列表。
+        tool_config: 工具配置。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        str | LLMResponse: 分析结果。
+    """
     ai = AI()
     return await ai.analyze(
         message,
         instruction=instruction,
         model=model,
-        tools=tools,
+        use_tools=use_tools,
         tool_config=tool_config,
         **kwargs,
     )
-
-
-async def analyze_with_images(
-    text: str,
-    images: list[str | Path | bytes] | str | Path | bytes,
-    *,
-    instruction: str = "",
-    model: ModelName = None,
-    **kwargs: Any,
-) -> str | LLMResponse:
-    """图片分析便捷函数"""
-    message = create_multimodal_message(text=text, images=images)
-    return await analyze(message, instruction=instruction, model=model, **kwargs)
 
 
 async def analyze_multimodal(
@@ -493,7 +629,21 @@ async def analyze_multimodal(
     model: ModelName = None,
     **kwargs: Any,
 ) -> str | LLMResponse:
-    """多模态分析便捷函数"""
+    """
+    多模态分析便捷函数
+
+    参数:
+        text: 文本内容。
+        images: 图片文件路径、字节数据或列表。
+        videos: 视频文件路径、字节数据或列表。
+        audios: 音频文件路径、字节数据或列表。
+        instruction: 分析指令。
+        model: 要使用的模型名称。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        str | LLMResponse: 分析结果。
+    """
     message = create_multimodal_message(
         text=text, images=images, videos=videos, audios=audios
     )
@@ -510,7 +660,21 @@ async def search_multimodal(
     model: ModelName = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """多模态搜索便捷函数"""
+    """
+    多模态搜索便捷函数
+
+    参数:
+        text: 文本内容。
+        images: 图片文件路径、字节数据或列表。
+        videos: 视频文件路径、字节数据或列表。
+        audios: 音频文件路径、字节数据或列表。
+        instruction: 搜索指令。
+        model: 要使用的模型名称。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        dict[str, Any]: 包含搜索结果的字典。
+    """
     message = create_multimodal_message(
         text=text, images=images, videos=videos, audios=audios
     )
@@ -525,6 +689,101 @@ async def embed(
     task_type: EmbeddingTaskType | str = EmbeddingTaskType.RETRIEVAL_DOCUMENT,
     **kwargs: Any,
 ) -> list[list[float]]:
-    """文本嵌入便捷函数"""
+    """
+    文本嵌入便捷函数
+
+    参数:
+        texts: 要生成嵌入向量的文本或文本列表。
+        model: 要使用的嵌入模型名称。
+        task_type: 嵌入任务类型。
+        **kwargs: 传递给模型的其他参数。
+
+    返回:
+        list[list[float]]: 文本的嵌入向量列表。
+    """
     ai = AI()
     return await ai.embed(texts, model=model, task_type=task_type, **kwargs)
+
+
+async def pipeline_chat(
+    message: UniMessage | str | list[LLMContentPart],
+    model_chain: list[ModelName],
+    *,
+    initial_instruction: str = "",
+    final_instruction: str = "",
+    **kwargs: Any,
+) -> LLMResponse:
+    """
+    AI模型链式调用，前一个模型的输出作为下一个模型的输入。
+
+    参数:
+        message: 初始输入消息（支持多模态）
+        model_chain: 模型名称列表
+        initial_instruction: 第一个模型的系统指令
+        final_instruction: 最后一个模型的系统指令
+        **kwargs: 传递给模型实例的其他参数
+
+    返回:
+        LLMResponse: 最后一个模型的响应结果
+    """
+    if not model_chain:
+        raise ValueError("模型链`model_chain`不能为空。")
+
+    current_content: str | list[LLMContentPart]
+    if isinstance(message, str):
+        current_content = message
+    elif isinstance(message, list):
+        current_content = message
+    else:
+        current_content = await unimsg_to_llm_parts(message)
+
+    final_response: LLMResponse | None = None
+
+    for i, model_name in enumerate(model_chain):
+        if not model_name:
+            raise ValueError(f"模型链中第 {i + 1} 个模型名称为空。")
+
+        is_first_step = i == 0
+        is_last_step = i == len(model_chain) - 1
+
+        messages_for_step: list[LLMMessage] = []
+        instruction_for_step = ""
+        if is_first_step and initial_instruction:
+            instruction_for_step = initial_instruction
+        elif is_last_step and final_instruction:
+            instruction_for_step = final_instruction
+
+        if instruction_for_step:
+            messages_for_step.append(LLMMessage.system(instruction_for_step))
+
+        messages_for_step.append(LLMMessage.user(current_content))
+
+        logger.info(
+            f"Pipeline Step [{i + 1}/{len(model_chain)}]: "
+            f"使用模型 '{model_name}' 进行处理..."
+        )
+        try:
+            async with await get_model_instance(model_name, **kwargs) as model:
+                response = await model.generate_response(messages_for_step)
+            final_response = response
+            current_content = response.text.strip()
+            if not current_content and not is_last_step:
+                logger.warning(
+                    f"模型 '{model_name}' 在中间步骤返回了空内容，流水线可能无法继续。"
+                )
+                break
+
+        except Exception as e:
+            logger.error(f"在模型链的第 {i + 1} 步 ('{model_name}') 出错: {e}", e=e)
+            raise LLMException(
+                f"流水线在模型 '{model_name}' 处执行失败: {e}",
+                code=LLMErrorCode.GENERATION_FAILED,
+                cause=e,
+            )
+
+    if final_response is None:
+        raise LLMException(
+            "AI流水线未能产生任何响应。", code=LLMErrorCode.GENERATION_FAILED
+        )
+
+    return final_response

@@ -10,10 +10,10 @@ from .api import (
     TaskType,
     analyze,
     analyze_multimodal,
-    analyze_with_images,
     chat,
     code,
     embed,
+    pipeline_chat,
     search,
     search_multimodal,
 )
@@ -35,6 +35,7 @@ from .manager import (
     list_model_identifiers,
     set_global_default_model_name,
 )
+from .tools import tool_registry
 from .types import (
     EmbeddingTaskType,
     LLMContentPart,
@@ -43,6 +44,7 @@ from .types import (
     LLMMessage,
     LLMResponse,
     LLMTool,
+    MCPCompatible,
     ModelDetail,
     ModelInfo,
     ModelProvider,
@@ -51,7 +53,7 @@ from .types import (
     ToolMetadata,
     UsageInfo,
 )
-from .utils import create_multimodal_message, unimsg_to_llm_parts
+from .utils import create_multimodal_message, message_to_unimessage, unimsg_to_llm_parts
 
 __all__ = [
     "AI",
@@ -65,6 +67,7 @@ __all__ = [
     "LLMMessage",
     "LLMResponse",
     "LLMTool",
+    "MCPCompatible",
     "ModelDetail",
     "ModelInfo",
     "ModelName",
@@ -76,7 +79,6 @@ __all__ = [
     "UsageInfo",
     "analyze",
     "analyze_multimodal",
-    "analyze_with_images",
     "chat",
     "clear_model_cache",
     "code",
@@ -88,9 +90,12 @@ __all__ = [
     "list_available_models",
     "list_embedding_models",
     "list_model_identifiers",
+    "message_to_unimessage",
+    "pipeline_chat",
     "register_llm_configs",
     "search",
     "search_multimodal",
     "set_global_default_model_name",
+    "tool_registry",
     "unimsg_to_llm_parts",
 ]

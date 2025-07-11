@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 import os
 from pathlib import Path
 import time
@@ -244,3 +244,20 @@ def is_number(text: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+class TimeUtils:
+    @classmethod
+    def get_day_start(cls, target_date: date | datetime | None = None) -> datetime:
+        """获取某天的0点时间
+
+        返回:
+            datetime: 今天某天的0点时间
+        """
+        if not target_date:
+            target_date = datetime.now()
+        return (
+            target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            if isinstance(target_date, datetime)
+            else datetime.combine(target_date, datetime.min.time())
+        )

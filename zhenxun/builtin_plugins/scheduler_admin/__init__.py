@@ -1,9 +1,11 @@
 from nonebot.plugin import PluginMetadata
 
-from zhenxun.configs.utils import PluginExtraData
+from zhenxun.configs.utils import PluginExtraData, RegisterConfig
 from zhenxun.utils.enum import PluginType
 
-from . import command  # noqa: F401
+from . import commands, handlers
+
+__all__ = ["commands", "handlers"]
 
 __plugin_meta__ = PluginMetadata(
     name="定时任务管理",
@@ -27,6 +29,8 @@ __plugin_meta__ = PluginMetadata(
   定时任务 恢复 <任务ID> | -p <插件> [-g <群号>] | -all
   定时任务 执行 <任务ID>
   定时任务 更新 <任务ID> [时间选项] [--kwargs <参数>]
+  # [修改] 增加说明
+  • 说明: -p 选项可单独使用，用于操作指定插件的所有任务
 
 📝 时间选项 (三选一):
   --cron "<分> <时> <日> <月> <周>"     # 例: --cron "0 8 * * *"
@@ -47,5 +51,35 @@ __plugin_meta__ = PluginMetadata(
         version="0.1.2",
         plugin_type=PluginType.SUPERUSER,
         is_show=False,
+        configs=[
+            RegisterConfig(
+                module="SchedulerManager",
+                key="ALL_GROUPS_CONCURRENCY_LIMIT",
+                value=5,
+                help="“所有群组”类型定时任务的并发执行数量限制",
+                type=int,
+            ),
+            RegisterConfig(
+                module="SchedulerManager",
+                key="JOB_MAX_RETRIES",
+                value=2,
+                help="定时任务执行失败时的最大重试次数",
+                type=int,
+            ),
+            RegisterConfig(
+                module="SchedulerManager",
+                key="JOB_RETRY_DELAY",
+                value=10,
+                help="定时任务执行重试的间隔时间（秒）",
+                type=int,
+            ),
+            RegisterConfig(
+                module="SchedulerManager",
+                key="SCHEDULER_TIMEZONE",
+                value="Asia/Shanghai",
+                help="定时任务使用的时区，默认为 Asia/Shanghai",
+                type=str,
+            ),
+        ],
     ).to_dict(),
 )

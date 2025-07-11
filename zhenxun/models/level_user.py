@@ -90,13 +90,14 @@ class LevelUser(Model):
         返回:
             bool: 是否大于level
         """
+        if level == 0:
+            return True
         if group_id:
             if user := await cls.get_or_none(user_id=user_id, group_id=group_id):
                 return user.user_level >= level
-        else:
-            if user_list := await cls.filter(user_id=user_id).all():
-                user = max(user_list, key=lambda x: x.user_level)
-                return user.user_level >= level
+        elif user_list := await cls.filter(user_id=user_id).all():
+            user = max(user_list, key=lambda x: x.user_level)
+            return user.user_level >= level
         return False
 
     @classmethod
@@ -119,8 +120,7 @@ class LevelUser(Model):
         return [
             # 将user_id改为user_id
             "ALTER TABLE level_users RENAME COLUMN user_qq TO user_id;",
-            "ALTER TABLE level_users "
-            "ALTER COLUMN user_id TYPE character varying(255);",
+            "ALTER TABLE level_users ALTER COLUMN user_id TYPE character varying(255);",
             # 将user_id字段类型改为character varying(255)
             "ALTER TABLE level_users "
             "ALTER COLUMN group_id TYPE character varying(255);",

@@ -49,12 +49,36 @@ class LLMHttpClient:
                         max_keepalive_connections=self.config.max_keepalive_connections,
                     )
                     timeout = httpx.Timeout(self.config.timeout)
+
+                    client_kwargs = {}
+                    if self.config.proxy:
+                        try:
+                            version_parts = httpx.__version__.split(".")
+                            major = int(
+                                "".join(c for c in version_parts[0] if c.isdigit())
+                            )
+                            minor = (
+                                int("".join(c for c in version_parts[1] if c.isdigit()))
+                                if len(version_parts) > 1
+                                else 0
+                            )
+                            if (major, minor) >= (0, 28):
+                                client_kwargs["proxy"] = self.config.proxy
+                            else:
+                                client_kwargs["proxies"] = self.config.proxy
+                        except (ValueError, IndexError):
+                            client_kwargs["proxies"] = self.config.proxy
+                            logger.warning(
+                                f"无法解析 httpx 版本 '{httpx.__version__}'，"
+                                "LLM模块将默认使用旧版 'proxies' 参数语法。"
+                            )
+
                     self._client = httpx.AsyncClient(
                         headers=headers,
                         limits=limits,
                         timeout=timeout,
-                        proxies=self.config.proxy,
                         follow_redirects=True,
+                        **client_kwargs,
                     )
         if self._client is None:
             raise LLMException(
@@ -156,7 +180,16 @@ async def create_llm_http_client(
     timeout: int = 180,
     proxy: str | None = None,
 ) -> LLMHttpClient:
-    """创建LLM HTTP客户端"""
+    """
+    创建LLM HTTP客户端
+
+    参数:
+        timeout: 超时时间（秒）。
+        proxy: 代理服务器地址。
+
+    返回:
+        LLMHttpClient: HTTP客户端实例。
+    """
     config = HttpClientConfig(timeout=timeout, proxy=proxy)
     return LLMHttpClient(config)
 
@@ -185,7 +218,20 @@ async def with_smart_retry(
     provider_name: str | None = None,
     **kwargs: Any,
 ) -> Any:
-    """智能重试装饰器 - 支持Key轮询和错误分类"""
+    """
+    智能重试装饰器 - 支持Key轮询和错误分类
+
+    参数:
+        func: 要重试的异步函数。
+        *args: 传递给函数的位置参数。
+        retry_config: 重试配置。
+        key_store: API密钥状态存储。
+        provider_name: 提供商名称。
+        **kwargs: 传递给函数的关键字参数。
+
+    返回:
+        Any: 函数执行结果。
+    """
     config = retry_config or RetryConfig()
     last_exception: Exception | None = None
     failed_keys: set[str] = set()
@@ -294,7 +340,17 @@ class KeyStatusStore:
         api_keys: list[str],
         exclude_keys: set[str] | None = None,
     ) -> str | None:
-        """获取下一个可用的API密钥（轮询策略）"""
+        """
+        获取下一个可用的API密钥（轮询策略）
+
+        参数:
+            provider_name: 提供商名称。
+            api_keys: API密钥列表。
+            exclude_keys: 要排除的密钥集合。
+
+        返回:
+            str | None: 可用的API密钥，如果没有可用密钥则返回None。
+        """
         if not api_keys:
             return None
 
@@ -338,7 +394,13 @@ class KeyStatusStore:
         logger.debug(f"记录API密钥成功使用: {self._get_key_id(api_key)}")
 
     async def record_failure(self, api_key: str, status_code: int | None):
-        """记录失败使用"""
+        """
+        记录失败使用
+
+        参数:
+            api_key: API密钥。
+            status_code: HTTP状态码。
+        """
         key_id = self._get_key_id(api_key)
         async with self._lock:
             if status_code in [401, 403]:
@@ -356,7 +418,15 @@ class KeyStatusStore:
         logger.info(f"重置API密钥状态: {self._get_key_id(api_key)}")
 
     async def get_key_stats(self, api_keys: list[str]) -> dict[str, dict]:
-        """获取密钥使用统计"""
+        """
+        获取密钥使用统计
+
+        参数:
+            api_keys: API密钥列表。
+
+        返回:
+            dict[str, dict]: 密钥统计信息字典。
+        """
         stats = {}
         async with self._lock:
             for key in api_keys:

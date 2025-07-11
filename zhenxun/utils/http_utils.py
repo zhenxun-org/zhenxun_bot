@@ -1,16 +1,15 @@
 import asyncio
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
+import os
 from pathlib import Path
 import time
-from typing import Any, ClassVar, Literal, cast
+from typing import Any, ClassVar, cast
 
 import aiofiles
 import httpx
-from httpx import AsyncHTTPTransport, HTTPStatusError, Proxy, Response
-from nonebot_plugin_alconna import UniMessage
-from nonebot_plugin_htmlrender import get_browser
-from playwright.async_api import Page
+from httpx import AsyncClient, AsyncHTTPTransport, HTTPStatusError, Proxy, Response
+import nonebot
 from rich.progress import (
     BarColumn,
     DownloadColumn,
@@ -18,13 +17,84 @@ from rich.progress import (
     TextColumn,
     TransferSpeedColumn,
 )
+import ujson as json
 
 from zhenxun.configs.config import BotConfig
 from zhenxun.services.log import logger
-from zhenxun.utils.message import MessageUtils
+from zhenxun.utils.decorator.retry import Retry
+from zhenxun.utils.exception import AllURIsFailedError
+from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.user_agent import get_user_agent
 
-CLIENT_KEY = ["use_proxy", "proxies", "proxy", "verify", "headers"]
+from .browser import AsyncPlaywright, BrowserIsNone  # noqa: F401
+
+_SENTINEL = object()
+
+driver = nonebot.get_driver()
+_client: AsyncClient | None = None
+
+
+@PriorityLifecycle.on_startup(priority=0)
+async def _():
+    """
+    在Bot启动时初始化全局httpx客户端。
+    """
+    global _client
+    client_kwargs = {}
+    if proxy_url := BotConfig.system_proxy or None:
+        try:
+            version_parts = httpx.__version__.split(".")
+            major = int("".join(c for c in version_parts[0] if c.isdigit()))
+            minor = (
+                int("".join(c for c in version_parts[1] if c.isdigit()))
+                if len(version_parts) > 1
+                else 0
+            )
+            if (major, minor) >= (0, 28):
+                client_kwargs["proxy"] = proxy_url
+            else:
+                client_kwargs["proxies"] = proxy_url
+        except (ValueError, IndexError):
+            client_kwargs["proxy"] = proxy_url
+            logger.warning(
+                f"无法解析 httpx 版本 '{httpx.__version__}'，"
+                "将默认使用新版 'proxy' 参数语法。"
+            )
+
+    _client = httpx.AsyncClient(
+        headers=get_user_agent(),
+        follow_redirects=True,
+        **client_kwargs,
+    )
+
+    logger.info("全局 httpx.AsyncClient 已启动。", "HTTPClient")
+
+
+@driver.on_shutdown
+async def _():
+    """
+    在Bot关闭时关闭全局httpx客户端。
+    """
+    if _client:
+        await _client.aclose()
+        logger.info("全局 httpx.AsyncClient 已关闭。", "HTTPClient")
+
+
+def get_client() -> AsyncClient:
+    """
+    获取全局 httpx.AsyncClient 实例。
+    """
+    global _client
+    if not _client:
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            raise RuntimeError("全局 httpx.AsyncClient 未初始化，请检查启动流程。")
+        # 在测试环境中创建临时客户端
+        logger.warning("在测试环境中创建临时HTTP客户端", "HTTPClient")
+        _client = httpx.AsyncClient(
+            headers=get_user_agent(),
+            follow_redirects=True,
+        )
+    return _client
 
 
 def get_async_client(
@@ -33,6 +103,10 @@ def get_async_client(
     verify: bool = False,
     **kwargs,
 ) -> httpx.AsyncClient:
+    """
+    [向后兼容] 创建 httpx.AsyncClient 实例的工厂函数。
+    此函数完全保留了旧版本的接口，确保现有代码无需修改即可使用。
+    """
     transport = kwargs.pop("transport", None) or AsyncHTTPTransport(verify=verify)
     if proxies:
         http_proxy = proxies.get("http://")
@@ -62,6 +136,30 @@ def get_async_client(
 
 
 class AsyncHttpx:
+    """
+    一个高级的、健壮的异步HTTP客户端工具类。
+
+    设计理念:
+    - **全局共享客户端**: 默认情况下，所有请求都通过一个在应用启动时初始化的全局
+      `httpx.AsyncClient` 实例发出。这个实例共享连接池，提高了效率和性能。
+    - **向后兼容与灵活性**: 完全兼容旧的API，同时提供了两种方式来处理需要
+      特殊网络配置（如不同代理、超时）的请求：
+        1. **单次请求覆盖**: 在调用 `get`, `post` 等方法时，直接传入 `proxies`,
+           `timeout` 等参数，将为该次请求创建一个临时的、独立的客户端。
+        2. **临时客户端上下文**: 使用 `temporary_client()` 上下文管理器，可以
+           获取一个独立的、可配置的客户端，用于执行一系列需要相同特殊配置的请求。
+    - **健壮性**: 内置了自动重试、多镜像URL回退（fallback）机制，并提供了便捷的
+      JSON解析和文件下载方法。
+    """
+
+    CLIENT_KEY: ClassVar[list[str]] = [
+        "use_proxy",
+        "proxies",
+        "proxy",
+        "verify",
+        "headers",
+    ]
+
     default_proxy: ClassVar[dict[str, str] | None] = (
         {
             "http://": BotConfig.system_proxy,
@@ -72,154 +170,345 @@ class AsyncHttpx:
     )
 
     @classmethod
-    @asynccontextmanager
-    async def _create_client(
-        cls,
-        *,
-        use_proxy: bool = True,
-        proxies: dict[str, str] | None = None,
-        proxy: str | None = None,
-        headers: dict[str, str] | None = None,
-        verify: bool = False,
-        **kwargs,
-    ) -> AsyncGenerator[httpx.AsyncClient, None]:
-        """创建一个私有的、配置好的 httpx.AsyncClient 上下文管理器。
+    def _prepare_temporary_client_config(cls, client_kwargs: dict) -> dict:
+        """
+        [向后兼容] 处理旧式的客户端kwargs，将其转换为get_async_client可用的配置。
+        主要负责处理 use_proxy 标志，这是为了兼容旧版本代码中使用的 use_proxy 参数。
+        """
+        final_config = client_kwargs.copy()
 
-        说明:
-            此方法用于内部统一创建客户端，处理代理和请求头逻辑，减少代码重复。
+        use_proxy = final_config.pop("use_proxy", True)
+
+        if "proxies" not in final_config and "proxy" not in final_config:
+            final_config["proxies"] = cls.default_proxy if use_proxy else None
+        return final_config
+
+    @classmethod
+    def _split_kwargs(cls, kwargs: dict) -> tuple[dict, dict]:
+        """[优化] 分离客户端配置和请求参数，使逻辑更清晰。"""
+        client_kwargs = {k: v for k, v in kwargs.items() if k in cls.CLIENT_KEY}
+        request_kwargs = {k: v for k, v in kwargs.items() if k not in cls.CLIENT_KEY}
+        return client_kwargs, request_kwargs
+
+    @classmethod
+    @asynccontextmanager
+    async def _get_active_client_context(
+        cls, client: AsyncClient | None = None, **kwargs
+    ) -> AsyncGenerator[AsyncClient, None]:
+        """
+          内部辅助方法，根据 kwargs 决定并提供一个活动的 HTTP 客户端。
+        - 如果 kwargs 中有客户端配置，则创建并返回一个临时客户端。
+        - 否则，返回传入的 client 或全局客户端。
+        - 自动处理临时客户端的关闭。
+        """
+        if kwargs:
+            logger.debug(f"为单次请求创建临时客户端，配置: {kwargs}")
+            temp_client_config = cls._prepare_temporary_client_config(kwargs)
+            async with get_async_client(**temp_client_config) as temp_client:
+                yield temp_client
+        else:
+            yield client or get_client()
+
+    @Retry.simple(log_name="内部HTTP请求")
+    async def _execute_request_inner(
+        self, client: AsyncClient, method: str, url: str, **kwargs
+    ) -> Response:
+        """
+        [内部] 执行单次HTTP请求的私有核心方法，被重试装饰器包裹。
+        """
+        return await client.request(method, url, **kwargs)
+
+    @classmethod
+    async def _single_request(
+        cls, method: str, url: str, *, client: AsyncClient | None = None, **kwargs
+    ) -> Response:
+        """
+        执行单次HTTP请求的私有方法，内置了默认的重试逻辑。
+        """
+        client_kwargs, request_kwargs = cls._split_kwargs(kwargs)
+
+        async with cls._get_active_client_context(
+            client=client, **client_kwargs
+        ) as active_client:
+            response = await cls()._execute_request_inner(
+                active_client, method, url, **request_kwargs
+            )
+            response.raise_for_status()
+            return response
+
+    @classmethod
+    async def _execute_with_fallbacks(
+        cls,
+        urls: str | list[str],
+        worker: Callable[..., Awaitable[Any]],
+        *,
+        client: AsyncClient | None = None,
+        **kwargs,
+    ) -> Any:
+        """
+        通用执行器，按顺序尝试多个URL，直到成功。
 
         参数:
-            use_proxy: 是否使用在类中定义的默认代理。
-            proxies: 手动指定的代理，会覆盖默认代理。
-            proxy: 单个代理,用于兼容旧版本，不再使用
-            headers: 需要合并到客户端的自定义请求头。
-            verify: 是否验证 SSL 证书。
-            **kwargs: 其他所有传递给 httpx.AsyncClient 的参数。
-
-        返回:
-            AsyncGenerator[httpx.AsyncClient, None]: 生成器。
+            urls: 单个URL或URL列表。
+            worker: 一个接受单个URL和其他kwargs并执行请求的协程函数。
+            client: 可选的HTTP客户端。
+            **kwargs: 传递给worker的额外参数。
         """
-        proxies_to_use = proxies or (cls.default_proxy if use_proxy else None)
+        url_list = [urls] if isinstance(urls, str) else urls
+        exceptions = []
 
-        final_headers = get_user_agent()
-        if headers:
-            final_headers.update(headers)
+        for i, url in enumerate(url_list):
+            try:
+                result = await worker(url, client=client, **kwargs)
+                if i > 0:
+                    logger.info(
+                        f"成功从镜像 '{url}' 获取资源 "
+                        f"(在尝试了 {i} 个失败的镜像之后)。",
+                        "AsyncHttpx:FallbackExecutor",
+                    )
+                return result
+            except Exception as e:
+                exceptions.append(e)
+                if url != url_list[-1]:
+                    logger.warning(
+                        f"Worker '{worker.__name__}' on {url} failed, trying next. "
+                        f"Error: {e.__class__.__name__}",
+                        "AsyncHttpx:FallbackExecutor",
+                    )
 
-        async with get_async_client(
-            proxies=proxies_to_use,
-            proxy=proxy,
-            verify=verify,
-            headers=final_headers,
-            **kwargs,
-        ) as client:
-            yield client
+        raise AllURIsFailedError(url_list, exceptions)
 
     @classmethod
     async def get(
         cls,
         url: str | list[str],
         *,
+        follow_redirects: bool = True,
         check_status_code: int | None = None,
+        client: AsyncClient | None = None,
         **kwargs,
-    ) -> Response:  # sourcery skip: use-assigned-variable
+    ) -> Response:
         """发送 GET 请求，并返回第一个成功的响应。
 
         说明:
-            本方法是 httpx.get 的高级包装，增加了多链接尝试、自动重试和统一的代理管理。
-            如果提供 URL 列表，它将依次尝试直到成功为止。
+            本方法是 httpx.get 的高级包装，增加了多链接尝试、自动重试和统一的
+            客户端管理。如果提供 URL 列表，它将依次尝试直到成功为止。
+
+        用法建议:
+            - **常规使用**: `await AsyncHttpx.get(url)` 将使用全局客户端。
+            - **单次覆盖配置**: `await AsyncHttpx.get(url, timeout=5, proxies=None)`
+              将为本次请求创建一个独立的临时客户端。
 
         参数:
             url: 单个请求 URL 或一个 URL 列表。
+            follow_redirects: 是否跟随重定向。
             check_status_code: (可选) 若提供，将检查响应状态码是否匹配，否则抛出异常。
-            **kwargs: 其他所有传递给 httpx.get 的参数
-                    (如 `params`, `headers`, `timeout`等)。
+            client: (可选) 指定一个活动的HTTP客户端实例。若提供，则忽略
+                    `**kwargs`中的客户端配置。
+            **kwargs: 其他所有传递给 httpx.get 的参数 (如 `params`, `headers`,
+                      `timeout`)。如果包含 `proxies`, `verify` 等客户端配置参数，
+                      将创建一个临时客户端。
 
         返回:
-            Response: Response
+            Response: httpx 的响应对象。
+
+        Raises:
+            AllURIsFailedError: 当所有提供的URL都请求失败时抛出。
         """
-        urls = [url] if isinstance(url, str) else url
-        last_exception = None
-        for current_url in urls:
-            try:
-                logger.info(f"开始获取 {current_url}..")
-                client_kwargs = {k: v for k, v in kwargs.items() if k in CLIENT_KEY}
-                for key in CLIENT_KEY:
-                    kwargs.pop(key, None)
-                async with cls._create_client(**client_kwargs) as client:
-                    response = await client.get(current_url, **kwargs)
 
-                if check_status_code and response.status_code != check_status_code:
-                    raise HTTPStatusError(
-                        f"状态码错误: {response.status_code}!={check_status_code}",
-                        request=response.request,
-                        response=response,
-                    )
-                return response
-            except Exception as e:
-                last_exception = e
-                if current_url != urls[-1]:
-                    logger.warning(f"获取 {current_url} 失败, 尝试下一个", e=e)
+        async def worker(current_url: str, **worker_kwargs) -> Response:
+            logger.info(f"开始获取 {current_url}..", "AsyncHttpx:get")
+            response = await cls._single_request(
+                "GET", current_url, follow_redirects=follow_redirects, **worker_kwargs
+            )
+            if check_status_code and response.status_code != check_status_code:
+                raise HTTPStatusError(
+                    f"状态码错误: {response.status_code}!={check_status_code}",
+                    request=response.request,
+                    response=response,
+                )
+            return response
 
-        raise last_exception or Exception("所有URL都获取失败")
+        return await cls._execute_with_fallbacks(url, worker, client=client, **kwargs)
 
     @classmethod
-    async def head(cls, url: str, **kwargs) -> Response:
-        """发送 HEAD 请求。
+    async def head(
+        cls, url: str | list[str], *, client: AsyncClient | None = None, **kwargs
+    ) -> Response:
+        """发送 HEAD 请求，并返回第一个成功的响应。"""
 
-        说明:
-            本方法是对 httpx.head 的封装，通常用于检查资源的元信息（如大小、类型）。
+        async def worker(current_url: str, **worker_kwargs) -> Response:
+            return await cls._single_request("HEAD", current_url, **worker_kwargs)
 
-        参数:
-            url: 请求的 URL。
-            **kwargs: 其他所有传递给 httpx.head 的参数
-                        (如 `headers`, `timeout`, `allow_redirects`)。
-
-        返回:
-            Response: Response
-        """
-        client_kwargs = {k: v for k, v in kwargs.items() if k in CLIENT_KEY}
-        for key in CLIENT_KEY:
-            kwargs.pop(key, None)
-        async with cls._create_client(**client_kwargs) as client:
-            return await client.head(url, **kwargs)
+        return await cls._execute_with_fallbacks(url, worker, client=client, **kwargs)
 
     @classmethod
-    async def post(cls, url: str, **kwargs) -> Response:
-        """发送 POST 请求。
+    async def post(
+        cls, url: str | list[str], *, client: AsyncClient | None = None, **kwargs
+    ) -> Response:
+        """发送 POST 请求，并返回第一个成功的响应。"""
 
-        说明:
-            本方法是对 httpx.post 的封装，提供了统一的代理和客户端管理。
+        async def worker(current_url: str, **worker_kwargs) -> Response:
+            return await cls._single_request("POST", current_url, **worker_kwargs)
 
-        参数:
-            url: 请求的 URL。
-            **kwargs: 其他所有传递给 httpx.post 的参数
-                        (如 `data`, `json`, `content` 等)。
-
-        返回:
-            Response: Response。
-        """
-        client_kwargs = {k: v for k, v in kwargs.items() if k in CLIENT_KEY}
-        for key in CLIENT_KEY:
-            kwargs.pop(key, None)
-        async with cls._create_client(**client_kwargs) as client:
-            return await client.post(url, **kwargs)
+        return await cls._execute_with_fallbacks(url, worker, client=client, **kwargs)
 
     @classmethod
-    async def get_content(cls, url: str, **kwargs) -> bytes:
-        """获取指定 URL 的二进制内容。
-
-        说明:
-            这是一个便捷方法，等同于调用 get() 后再访问 .content 属性。
-
-        参数:
-            url: 请求的 URL。
-            **kwargs: 所有传递给 get() 方法的参数。
-
-        返回:
-            bytes: 响应内容的二进制字节流 (bytes)。
-        """
-        res = await cls.get(url, **kwargs)
+    async def get_content(
+        cls, url: str | list[str], *, client: AsyncClient | None = None, **kwargs
+    ) -> bytes:
+        """获取指定 URL 的二进制内容。"""
+        res = await cls.get(url, client=client, **kwargs)
         return res.content
+
+    @classmethod
+    @Retry.api(
+        log_name="JSON请求",
+        exception=(json.JSONDecodeError,),
+        return_on_failure=_SENTINEL,
+    )
+    async def _request_and_parse_json(
+        cls, method: str, url: str, *, client: AsyncClient | None = None, **kwargs
+    ) -> Any:
+        """
+        [私有] 执行单个HTTP请求并解析JSON，用于内部统一处理。
+        """
+        async with cls._get_active_client_context(
+            client=client, **kwargs
+        ) as active_client:
+            _, request_kwargs = cls._split_kwargs(kwargs)
+            response = await active_client.request(method, url, **request_kwargs)
+            response.raise_for_status()
+            return response.json()
+
+    @classmethod
+    async def get_json(
+        cls,
+        url: str | list[str],
+        *,
+        default: Any = None,
+        raise_on_failure: bool = False,
+        client: AsyncClient | None = None,
+        **kwargs,
+    ) -> Any:
+        """
+        发送GET请求并自动解析为JSON，支持重试和多链接尝试。
+
+        说明:
+            这是一个高度便捷的方法，封装了请求、重试、JSON解析和错误处理。
+            它会在网络错误或JSON解析错误时自动重试。
+            如果所有尝试都失败，它会安全地返回一个默认值。
+
+        参数:
+            url: 单个请求 URL 或一个备用 URL 列表。
+            default: (可选) 当所有尝试都失败时返回的默认值，默认为None。
+            raise_on_failure: (可选) 如果为 True, 当所有尝试失败时将抛出
+                              `AllURIsFailedError` 异常, 默认为 False.
+            client: (可选) 指定的HTTP客户端。
+            **kwargs: 其他所有传递给 httpx.get 的参数。
+                      例如 `params`, `headers`, `timeout`等。
+
+        返回:
+            Any: 解析后的JSON数据，或在失败时返回 `default` 值。
+
+        Raises:
+            AllURIsFailedError: 当 `raise_on_failure` 为 True 且所有URL都请求失败时抛出
+        """
+
+        async def worker(current_url: str, **worker_kwargs):
+            logger.debug(f"开始GET JSON: {current_url}", "AsyncHttpx:get_json")
+            return await cls._request_and_parse_json(
+                "GET", current_url, **worker_kwargs
+            )
+
+        try:
+            result = await cls._execute_with_fallbacks(
+                url, worker, client=client, **kwargs
+            )
+            return default if result is _SENTINEL else result
+        except AllURIsFailedError as e:
+            logger.error(f"所有URL的JSON GET均失败: {e}", "AsyncHttpx:get_json")
+            if raise_on_failure:
+                raise e
+            return default
+
+    @classmethod
+    async def post_json(
+        cls,
+        url: str | list[str],
+        *,
+        json: Any = None,
+        data: Any = None,
+        default: Any = None,
+        raise_on_failure: bool = False,
+        client: AsyncClient | None = None,
+        **kwargs,
+    ) -> Any:
+        """
+        发送POST请求并自动解析为JSON，功能与 get_json 类似。
+
+        参数:
+            url: 单个请求 URL 或一个备用 URL 列表。
+            json: (可选) 作为请求体发送的JSON数据。
+            data: (可选) 作为请求体发送的表单数据。
+            default: (可选) 当所有尝试都失败时返回的默认值，默认为None。
+            raise_on_failure: (可选) 如果为 True, 当所有尝试失败时将抛出
+                              AllURIsFailedError 异常, 默认为 False.
+            client: (可选) 指定的HTTP客户端。
+            **kwargs: 其他所有传递给 httpx.post 的参数。
+
+        返回:
+            Any: 解析后的JSON数据，或在失败时返回 `default` 值。
+        """
+        if json is not None:
+            kwargs["json"] = json
+        if data is not None:
+            kwargs["data"] = data
+
+        async def worker(current_url: str, **worker_kwargs):
+            logger.debug(f"开始POST JSON: {current_url}", "AsyncHttpx:post_json")
+            return await cls._request_and_parse_json(
+                "POST", current_url, **worker_kwargs
+            )
+
+        try:
+            result = await cls._execute_with_fallbacks(
+                url, worker, client=client, **kwargs
+            )
+            return default if result is _SENTINEL else result
+        except AllURIsFailedError as e:
+            logger.error(f"所有URL的JSON POST均失败: {e}", "AsyncHttpx:post_json")
+            if raise_on_failure:
+                raise e
+            return default
+
+    @classmethod
+    @Retry.api(log_name="文件下载(流式)")
+    async def _stream_download(
+        cls, url: str, path: Path, *, client: AsyncClient | None = None, **kwargs
+    ) -> None:
+        """
+        执行单个流式下载的私有方法，被重试装饰器包裹。
+        """
+        async with cls._get_active_client_context(
+            client=client, **kwargs
+        ) as active_client:
+            async with active_client.stream("GET", url, **kwargs) as response:
+                response.raise_for_status()
+                total = int(response.headers.get("Content-Length", 0))
+
+                with Progress(
+                    TextColumn(path.name),
+                    "[progress.percentage]{task.percentage:>3.0f}%",
+                    BarColumn(bar_width=None),
+                    DownloadColumn(),
+                    TransferSpeedColumn(),
+                ) as progress:
+                    task_id = progress.add_task("Download", total=total)
+                    async with aiofiles.open(path, "wb") as f:
+                        async for chunk in response.aiter_bytes():
+                            await f.write(chunk)
+                            progress.update(task_id, advance=len(chunk))
 
     @classmethod
     async def download_file(
@@ -228,6 +517,7 @@ class AsyncHttpx:
         path: str | Path,
         *,
         stream: bool = False,
+        client: AsyncClient | None = None,
         **kwargs,
     ) -> bool:
         """下载文件到指定路径。
@@ -239,6 +529,7 @@ class AsyncHttpx:
             url: 单个文件 URL 或一个备用 URL 列表。
             path: 文件保存的本地路径。
             stream: (可选) 是否使用流式下载，适用于大文件，默认为 False。
+            client: (可选) 指定的HTTP客户端。
             **kwargs: 其他所有传递给 get() 方法或 httpx.stream() 的参数。
 
         返回:
@@ -247,49 +538,29 @@ class AsyncHttpx:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        urls = [url] if isinstance(url, str) else url
+        async def worker(current_url: str, **worker_kwargs) -> bool:
+            if not stream:
+                content = await cls.get_content(current_url, **worker_kwargs)
+                async with aiofiles.open(path, "wb") as f:
+                    await f.write(content)
+            else:
+                await cls._stream_download(current_url, path, **worker_kwargs)
 
-        for current_url in urls:
-            try:
-                if not stream:
-                    response = await cls.get(current_url, **kwargs)
-                    response.raise_for_status()
-                    async with aiofiles.open(path, "wb") as f:
-                        await f.write(response.content)
-                else:
-                    async with cls._create_client(**kwargs) as client:
-                        stream_kwargs = {
-                            k: v
-                            for k, v in kwargs.items()
-                            if k not in ["use_proxy", "proxy", "verify"]
-                        }
-                        async with client.stream(
-                            "GET", current_url, **stream_kwargs
-                        ) as response:
-                            response.raise_for_status()
-                            total = int(response.headers.get("Content-Length", 0))
+            logger.info(
+                f"下载 {current_url} 成功 -> {path.absolute()}",
+                "AsyncHttpx:download",
+            )
+            return True
 
-                            with Progress(
-                                TextColumn(path.name),
-                                "[progress.percentage]{task.percentage:>3.0f}%",
-                                BarColumn(bar_width=None),
-                                DownloadColumn(),
-                                TransferSpeedColumn(),
-                            ) as progress:
-                                task_id = progress.add_task("Download", total=total)
-                                async with aiofiles.open(path, "wb") as f:
-                                    async for chunk in response.aiter_bytes():
-                                        await f.write(chunk)
-                                        progress.update(task_id, advance=len(chunk))
-
-                logger.info(f"下载 {current_url} 成功 -> {path.absolute()}")
-                return True
-
-            except Exception as e:
-                logger.warning(f"下载 {current_url} 失败，尝试下一个。错误: {e}")
-
-        logger.error(f"所有URL {urls} 下载均失败 -> {path.absolute()}")
-        return False
+        try:
+            return await cls._execute_with_fallbacks(
+                url, worker, client=client, **kwargs
+            )
+        except AllURIsFailedError:
+            logger.error(
+                f"所有URL下载均失败 -> {path.absolute()}", "AsyncHttpx:download"
+            )
+            return False
 
     @classmethod
     async def gather_download_file(
@@ -346,7 +617,6 @@ class AsyncHttpx:
                 logger.error(f"并发下载任务 ({url_info}) 时发生错误", e=result)
                 final_results.append(False)
             else:
-                # download_file 返回的是 bool，可以直接附加
                 final_results.append(cast(bool, result))
 
         return final_results
@@ -395,86 +665,30 @@ class AsyncHttpx:
         _results = sorted(iter(_results), key=lambda r: r["elapsed_time"])
         return [result["url"] for result in _results]
 
-
-class AsyncPlaywright:
     @classmethod
     @asynccontextmanager
-    async def new_page(
-        cls, cookies: list[dict[str, Any]] | dict[str, Any] | None = None, **kwargs
-    ) -> AsyncGenerator[Page, None]:
-        """获取一个新页面
+    async def temporary_client(cls, **kwargs) -> AsyncGenerator[AsyncClient, None]:
+        """
+        创建一个临时的、可配置的HTTP客户端上下文，并直接返回该客户端实例。
+
+        此方法返回一个标准的 `httpx.AsyncClient`，它不使用全局连接池，
+        拥有独立的配置(如代理、headers、超时等)，并在退出上下文后自动关闭。
+        适用于需要用一套特殊网络配置执行一系列请求的场景。
+
+        用法:
+            async with AsyncHttpx.temporary_client(proxies=None, timeout=5) as client:
+                # client 是一个标准的 httpx.AsyncClient 实例
+                response1 = await client.get("http://some.internal.api/1")
+                response2 = await client.get("http://some.internal.api/2")
+                data = response2.json()
 
         参数:
-            cookies: cookies
+            **kwargs: 所有传递给 `httpx.AsyncClient` 构造函数的参数。
+                      例如: `proxies`, `headers`, `verify`, `timeout`,
+                      `follow_redirects`。
+
+        Yields:
+            httpx.AsyncClient: 一个配置好的、临时的客户端实例。
         """
-        browser = await get_browser()
-        ctx = await browser.new_context(**kwargs)
-        if cookies:
-            if isinstance(cookies, dict):
-                cookies = [cookies]
-            await ctx.add_cookies(cookies)  # type: ignore
-        page = await ctx.new_page()
-        try:
-            yield page
-        finally:
-            await page.close()
-            await ctx.close()
-
-    @classmethod
-    async def screenshot(
-        cls,
-        url: str,
-        path: Path | str,
-        element: str | list[str],
-        *,
-        wait_time: int | None = None,
-        viewport_size: dict[str, int] | None = None,
-        wait_until: (
-            Literal["domcontentloaded", "load", "networkidle"] | None
-        ) = "networkidle",
-        timeout: float | None = None,
-        type_: Literal["jpeg", "png"] | None = None,
-        user_agent: str | None = None,
-        cookies: list[dict[str, Any]] | dict[str, Any] | None = None,
-        **kwargs,
-    ) -> UniMessage | None:
-        """截图，该方法仅用于简单快捷截图，复杂截图请操作 page
-
-        参数:
-            url: 网址
-            path: 存储路径
-            element: 元素选择
-            wait_time: 等待截取超时时间
-            viewport_size: 窗口大小
-            wait_until: 等待类型
-            timeout: 超时限制
-            type_: 保存类型
-            user_agent: user_agent
-            cookies: cookies
-        """
-        if viewport_size is None:
-            viewport_size = {"width": 2560, "height": 1080}
-        if isinstance(path, str):
-            path = Path(path)
-        wait_time = wait_time * 1000 if wait_time else None
-        element_list = [element] if isinstance(element, str) else element
-        async with cls.new_page(
-            cookies,
-            viewport=viewport_size,
-            user_agent=user_agent,
-            **kwargs,
-        ) as page:
-            await page.goto(url, timeout=timeout, wait_until=wait_until)
-            card = page
-            for e in element_list:
-                if not card:
-                    return None
-                card = await card.wait_for_selector(e, timeout=wait_time)
-            if card:
-                await card.screenshot(path=path, timeout=timeout, type=type_)
-                return MessageUtils.build_message(path)
-        return None
-
-
-class BrowserIsNone(Exception):
-    pass
+        async with get_async_client(**kwargs) as client:
+            yield client

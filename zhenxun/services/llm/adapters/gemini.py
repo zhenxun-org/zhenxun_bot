@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from ..service import LLMModel
     from ..types.content import LLMMessage
     from ..types.enums import EmbeddingTaskType
-    from ..types.models import LLMToolCall
+    from ..types.models import LLMTool, LLMToolCall
 
 
 class GeminiAdapter(BaseAdapter):
@@ -38,30 +38,16 @@ class GeminiAdapter(BaseAdapter):
 
         return headers
 
-    def prepare_advanced_request(
+    async def prepare_advanced_request(
         self,
         model: "LLMModel",
         api_key: str,
         messages: list["LLMMessage"],
         config: "LLMGenerationConfig | None" = None,
-        tools: list[dict[str, Any]] | None = None,
+        tools: list["LLMTool"] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> RequestData:
         """准备高级请求"""
-        return self._prepare_request(
-            model, api_key, messages, config, tools, tool_choice
-        )
-
-    def _prepare_request(
-        self,
-        model: "LLMModel",
-        api_key: str,
-        messages: list["LLMMessage"],
-        config: "LLMGenerationConfig | None" = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-    ) -> RequestData:
-        """准备 Gemini API 请求 - 支持所有高级功能"""
         effective_config = config if config is not None else model._generation_config
 
         endpoint = self._get_gemini_endpoint(model, effective_config)
@@ -78,7 +64,8 @@ class GeminiAdapter(BaseAdapter):
                     system_instruction_parts = [{"text": msg.content}]
                 elif isinstance(msg.content, list):
                     system_instruction_parts = [
-                        part.convert_for_api("gemini") for part in msg.content
+                        await part.convert_for_api_async("gemini")
+                        for part in msg.content
                     ]
                 continue
 
@@ -87,7 +74,9 @@ class GeminiAdapter(BaseAdapter):
                     current_parts.append({"text": msg.content})
                 elif isinstance(msg.content, list):
                     for part_obj in msg.content:
-                        current_parts.append(part_obj.convert_for_api("gemini"))
+                        current_parts.append(
+                            await part_obj.convert_for_api_async("gemini")
+                        )
                 gemini_contents.append({"role": "user", "parts": current_parts})
 
             elif msg.role == "assistant" or msg.role == "model":
@@ -95,7 +84,9 @@ class GeminiAdapter(BaseAdapter):
                     current_parts.append({"text": msg.content})
                 elif isinstance(msg.content, list):
                     for part_obj in msg.content:
-                        current_parts.append(part_obj.convert_for_api("gemini"))
+                        current_parts.append(
+                            await part_obj.convert_for_api_async("gemini")
+                        )
 
                 if msg.tool_calls:
                     import json
@@ -154,16 +145,22 @@ class GeminiAdapter(BaseAdapter):
 
         all_tools_for_request = []
         if tools:
-            for tool_item in tools:
-                if isinstance(tool_item, dict):
-                    if "name" in tool_item and "description" in tool_item:
-                        all_tools_for_request.append(
-                            {"functionDeclarations": [tool_item]}
+            for tool in tools:
+                if tool.type == "function" and tool.function:
+                    all_tools_for_request.append(
+                        {"functionDeclarations": [tool.function]}
+                    )
+                elif tool.type == "mcp" and tool.mcp_session:
+                    if callable(tool.mcp_session):
+                        raise ValueError(
+                            "适配器接收到未激活的 MCP 会话工厂。"
+                            "会话工厂应该在 LLMModel.generate_response 中被激活。"
                         )
-                    else:
-                        all_tools_for_request.append(tool_item)
-                else:
-                    all_tools_for_request.append(tool_item)
+                    all_tools_for_request.append(
+                        tool.mcp_session.to_api_tool(api_type=self.api_type)
+                    )
+                elif tool.type == "google_search":
+                    all_tools_for_request.append({"googleSearch": {}})
 
         if effective_config:
             if getattr(effective_config, "enable_grounding", False):
@@ -183,11 +180,7 @@ class GeminiAdapter(BaseAdapter):
                     logger.debug("隐式启用代码执行工具。")
 
         if all_tools_for_request:
-            gemini_api_tools = self._convert_tools_to_gemini_format(
-                all_tools_for_request
-            )
-            if gemini_api_tools:
-                body["tools"] = gemini_api_tools
+            body["tools"] = all_tools_for_request
 
         final_tool_choice = tool_choice
         if final_tool_choice is None and effective_config:
@@ -240,38 +233,6 @@ class GeminiAdapter(BaseAdapter):
                 return f"/v1beta/models/{model.model_name}:generateContent"
 
         return f"/v1beta/models/{model.model_name}:generateContent"
-
-    def _convert_tools_to_gemini_format(
-        self, tools: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """转换工具格式为Gemini格式"""
-        gemini_tools = []
-
-        for tool in tools:
-            if tool.get("type") == "function":
-                func = tool["function"]
-                gemini_tool = {
-                    "functionDeclarations": [
-                        {
-                            "name": func["name"],
-                            "description": func.get("description", ""),
-                            "parameters": func.get("parameters", {}),
-                        }
-                    ]
-                }
-                gemini_tools.append(gemini_tool)
-            elif tool.get("type") == "code_execution":
-                gemini_tools.append(
-                    {"codeExecution": {"language": tool.get("language", "python")}}
-                )
-            elif tool.get("type") == "google_search":
-                gemini_tools.append({"googleSearch": {}})
-            elif "googleSearch" in tool:
-                gemini_tools.append({"googleSearch": tool["googleSearch"]})
-            elif "codeExecution" in tool:
-                gemini_tools.append({"codeExecution": tool["codeExecution"]})
-
-        return gemini_tools
 
     def _convert_tool_choice_to_gemini(
         self, tool_choice_value: str | dict[str, Any]
@@ -395,10 +356,11 @@ class GeminiAdapter(BaseAdapter):
             for category, threshold in custom_safety_settings.items():
                 safety_settings.append({"category": category, "threshold": threshold})
         else:
+            from ..config.providers import get_gemini_safety_threshold
+
+            threshold = get_gemini_safety_threshold()
             for category in safety_categories:
-                safety_settings.append(
-                    {"category": category, "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
-                )
+                safety_settings.append({"category": category, "threshold": threshold})
 
         return safety_settings if safety_settings else None
 

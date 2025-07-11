@@ -22,10 +22,8 @@ class LLMAdapterFactory:
 
         from .gemini import GeminiAdapter
         from .openai import OpenAIAdapter
-        from .zhipu import ZhipuAdapter
 
         cls.register_adapter(OpenAIAdapter())
-        cls.register_adapter(ZhipuAdapter())
         cls.register_adapter(GeminiAdapter())
 
     @classmethod
