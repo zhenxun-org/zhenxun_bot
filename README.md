@@ -287,6 +287,18 @@ DB_URL 是基于 Tortoise ORM 的数据库连接字符串，用于指定项目�
 
 [Zer](https://afdian.com/u/6bccdb2a60b411ec9ad452540025c377) [爱发电用户\_HTjk](https://afdian.com/u/6c7d0208064511ec8d7b52540025c377) [shenghuo2](https://afdian.com/u/bca13286102111eda2a052540025c377) [术樱](https://afdian.com/u/414da63a09a311ec8eb752540025c377) [飞火](https://afdian.com/u/404135f48ed711ec962152540025c377) [shenqi](https://afdian.net/u/fa923a8cfe3d11eba61752540025c377) [A_Kyuu](https://afdian.net/u/b83954fc2c1211eba9eb52540025c377) [疯狂混沌](https://afdian.net/u/789a2f9200cd11edb38352540025c377) [投冥](https://afdian.net/a/144514mm) [茶喵](https://afdian.net/u/fd22382eac4d11ecbfc652540025c377) [AemokpaTNR](https://afdian.net/u/1169bb8c8a9611edb0c152540025c377) [爱发电用户\_wrxn](https://afdian.net/u/4aa03d20db4311ecb1e752540025c377) [qqw](https://afdian.net/u/b71db4e2cc3e11ebb76652540025c377) [溫一壺月光下酒](https://afdian.net/u/ad667a5c650c11ed89bf52540025c377) [伝木](https://afdian.net/u/246b80683f9511edba7552540025c377) [阿奎](https://afdian.net/u/da41f72845d511ed930d52540025c377) [醉梦尘逸](https://afdian.net/u/bc11d2683cd011ed99b552540025c377) [Abc](https://afdian.net/u/870dc10a3cd311ed828852540025c377) [本喵无敌哒](https://afdian.net/u/dffaa9005bc911ebb69b52540025c377) [椎名冬羽](https://afdian.net/u/ca1ebd64395e11ed81b452540025c377) [kaito](https://afdian.net/u/a055e20a498811eab1f052540025c377) [笑柒 XIAO_Q7](https://afdian.net/u/4696db5c529111ec84ea52540025c377) [请问一份爱多少钱](https://afdian.net/u/f57ef6602dbd11ed977f52540025c377) [咸鱼鱼鱼鱼](https://afdian.net/u/8e39b9a400e011ed9f4a52540025c377) [Kafka](https://afdian.net/u/41d66798ef6911ecbc5952540025c377) [墨然](https://afdian.net/u/8aa5874a644d11eb8a6752540025c377) [爱发电用户\_T9e4](https://afdian.net/u/2ad1bb82f3a711eca22852540025c377) [笑柒 XIAO_Q7](https://afdian.net/u/4696db5c529111ec84ea52540025c377) [noahzark](https://afdian.net/a/noahzark) [腊条](https://afdian.net/u/f739c4d69eca11eba94b52540025c377) [ze roller](https://afdian.net/u/0e599e96257211ed805152540025c377) [爱发电用户\_4jrf](https://afdian.net/u/6b2cdcc817c611ed949152540025c377) [爱发电用户\_TBsd](https://afdian.net/u/db638b60217911ed9efd52540025c377) [烟寒若雨](https://afdian.net/u/067bd2161eec11eda62b52540025c377) [ln](https://afdian.net/u/b51914ba1c6611ed8a4e52540025c377) [爱发电用户\_b9S4](https://afdian.net/u/3d8f30581a2911edba6d52540025c377) [爱发电用户\_c58s](https://afdian.net/u/a6ad8dda195e11ed9a4152540025c377) [爱发电用户\_eNr9](https://afdian.net/u/05fdb41c0c9a11ed814952540025c377) [MangataAkihi](https://github.com/Sakuracio) [炀](https://afdian.net/u/69b76e9ec77b11ec874f52540025c377) [爱发电用户\_Bc6j](https://afdian.net/u/8546be24f44111eca64052540025c377) [大魔王](https://github.com/xipesoy) [CopilotLaLaLa](https://github.com/CopilotLaLaLa) [嘿小欧](https://afdian.net/u/daa4bec4f24911ec82e552540025c377) [回忆的秋千](https://afdian.net/u/e315d9c6f14f11ecbeef52540025c377) [十年くん](https://github.com/shinianj) [哇](https://afdian.net/u/9b266244f23911eca19052540025c377) [yajiwa](https://github.com/yajiwa) [爆金币](https://afdian.net/u/0d78879ef23711ecb22452540025c377)...
 
+### 特别赞助
+
+<div align=center>
+    
+<img width="60%" src="https://edgeone.ai/media/34fe3a45-492d-4ea4-ae5d-ea1087ca7b4b.png" />
+
+[亚洲最佳CDN、边缘和安全解决方案 - Tencent EdgeOne](https://edgeone.ai/zh?from=github)
+
+**本项目 CDN 加速及安全防护由 Tencent EdgeOne 赞助**
+
+</div>
+
 ## 📜 贡献指南
 
 欢迎查看我们的 [贡献指南](CONTRIBUTING.md) 和 [行为守则](CODE_OF_CONDUCT.md) 以了解如何参与贡献。
