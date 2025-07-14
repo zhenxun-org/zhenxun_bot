@@ -418,7 +418,7 @@ class CacheManager:
                     return self._cache_backend
                 except ImportError as e:
                     logger.error(
-                        "导入aiocache[reids]失败，将默认使用内存缓存...",
+                        "导入aiocache[redis]失败，将默认使用内存缓存...",
                         LOG_COMMAND,
                         e=e,
                     )
