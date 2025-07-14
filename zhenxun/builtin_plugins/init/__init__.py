@@ -4,13 +4,25 @@ import nonebot
 from nonebot.adapters import Bot
 
 from zhenxun.models.group_console import GroupConsole
+from zhenxun.services.cache import CacheException
 from zhenxun.services.log import logger
+from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.platform import PlatformUtils
 
 nonebot.load_plugins(str(Path(__file__).parent.resolve()))
 
+try:
+    from .__init_cache import register_cache_types
+except CacheException as e:
+    raise SystemError(f"ERROR：{e}")
 
 driver = nonebot.get_driver()
+
+
+@PriorityLifecycle.on_startup(priority=5)
+async def _():
+    register_cache_types()
+    logger.info("缓存类型注册完成")
 
 
 @driver.on_bot_connect

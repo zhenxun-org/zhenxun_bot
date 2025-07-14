@@ -1,4 +1,4 @@
-from typing import Any, cast, overload
+from typing import Any, ClassVar, cast, overload
 from typing_extensions import Self
 
 from tortoise import fields
@@ -6,8 +6,9 @@ from tortoise.backends.base.client import BaseDBAsyncClient
 
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.task_info import TaskInfo
+from zhenxun.services.cache import CacheRoot
 from zhenxun.services.db_context import Model
-from zhenxun.utils.enum import PluginType
+from zhenxun.utils.enum import CacheType, DbLockType, PluginType
 
 
 def add_disable_marker(name: str) -> str:
@@ -86,6 +87,16 @@ class GroupConsole(Model):
         table = "group_console"
         table_description = "群组信息表"
         unique_together = ("group_id", "channel_id")
+        indexes = [  # noqa: RUF012
+            ("group_id",)
+        ]
+
+    cache_type = CacheType.GROUPS
+    """缓存类型"""
+    cache_key_field = ("group_id", "channel_id")
+    """缓存键字段"""
+    enable_lock: ClassVar[list[DbLockType]] = [DbLockType.CREATE, DbLockType.UPSERT]
+    """开启锁"""
 
     @classmethod
     async def _get_task_modules(cls, *, default_status: bool) -> list[str]:
@@ -117,6 +128,18 @@ class GroupConsole(Model):
         )
 
     @classmethod
+    async def _update_cache(cls, instance):
+        """更新缓存
+
+        参数:
+            instance: 需要更新缓存的实例
+        """
+        if cache_type := cls.get_cache_type():
+            key = cls.get_cache_key(instance)
+            if key is not None:
+                await CacheRoot.invalidate_cache(cache_type, key)
+
+    @classmethod
     async def create(
         cls, using_db: BaseDBAsyncClient | None = None, **kwargs: Any
     ) -> Self:
@@ -128,6 +151,9 @@ class GroupConsole(Model):
 
         if task_modules or plugin_modules:
             await cls._update_modules(group, task_modules, plugin_modules, using_db)
+
+        # 更新缓存
+        await cls._update_cache(group)
 
         return group
 
@@ -180,6 +206,10 @@ class GroupConsole(Model):
         if task_modules or plugin_modules:
             await cls._update_modules(group, task_modules, plugin_modules, using_db)
 
+        # 更新缓存
+        if is_create:
+            await cls._update_cache(group)
+
         return group, is_create
 
     @classmethod
@@ -202,24 +232,39 @@ class GroupConsole(Model):
         if task_modules or plugin_modules:
             await cls._update_modules(group, task_modules, plugin_modules, using_db)
 
+        # 更新缓存
+        await cls._update_cache(group)
+
         return group, is_create
 
     @classmethod
     async def get_group(
-        cls, group_id: str, channel_id: str | None = None
+        cls,
+        group_id: str,
+        channel_id: str | None = None,
+        clean_duplicates: bool = True,
     ) -> Self | None:
         """获取群组
 
         参数:
             group_id: 群组id
-            channel_id: 频道id.
+            channel_id: 频道id
+            clean_duplicates: 是否删除重复的记录，仅保留最新的
 
         返回:
             Self: GroupConsole
         """
         if channel_id:
-            return await cls.get_or_none(group_id=group_id, channel_id=channel_id)
-        return await cls.get_or_none(group_id=group_id, channel_id__isnull=True)
+            return await cls.safe_get_or_none(
+                group_id=group_id,
+                channel_id=channel_id,
+                clean_duplicates=clean_duplicates,
+            )
+        return await cls.safe_get_or_none(
+            group_id=group_id,
+            channel_id__isnull=True,
+            clean_duplicates=clean_duplicates,
+        )
 
     @classmethod
     async def is_super_group(cls, group_id: str) -> bool:
@@ -303,6 +348,9 @@ class GroupConsole(Model):
         if update_fields:
             await group.save(update_fields=update_fields)
 
+        # 更新缓存
+        await cls._update_cache(group)
+
     @classmethod
     async def set_unblock_plugin(
         cls,
@@ -338,6 +386,9 @@ class GroupConsole(Model):
             update_fields.append("block_plugin")
         if update_fields:
             await group.save(update_fields=update_fields)
+
+        # 更新缓存
+        await cls._update_cache(group)
 
     @classmethod
     async def is_normal_block_plugin(
@@ -442,6 +493,9 @@ class GroupConsole(Model):
         if update_fields:
             await group.save(update_fields=update_fields)
 
+        # 更新缓存
+        await cls._update_cache(group)
+
     @classmethod
     async def set_unblock_task(
         cls,
@@ -476,6 +530,9 @@ class GroupConsole(Model):
         if update_fields:
             await group.save(update_fields=update_fields)
 
+        # 更新缓存
+        await cls._update_cache(group)
+
     @classmethod
     def _run_script(cls):
         return [
@@ -483,4 +540,6 @@ class GroupConsole(Model):
             " character varying(255) NOT NULL DEFAULT '';",
             "ALTER TABLE group_console ADD superuser_block_task"
             " character varying(255) NOT NULL DEFAULT '';",
+            "CREATE INDEX idx_group_console_group_id ON group_console(group_id);",
+            "CREATE INDEX idx_group_console_group_null_channel ON group_console(group_id) WHERE channel_id IS NULL;",  # 单独创建channel为空的索引 # noqa: E501
         ]

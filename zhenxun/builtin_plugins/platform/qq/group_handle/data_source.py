@@ -55,15 +55,17 @@ class GroupManager:
             if plugin_list := await PluginInfo.filter(default_status=False).all():
                 for plugin in plugin_list:
                     block_plugin += f"<{plugin.module},"
-            group_info = await bot.get_group_info(group_id=group_id, no_cache=True)
-            await GroupConsole.create(
+            group_info = await bot.get_group_info(group_id=group_id)
+            await GroupConsole.update_or_create(
                 group_id=group_info["group_id"],
-                group_name=group_info["group_name"],
-                max_member_count=group_info["max_member_count"],
-                member_count=group_info["member_count"],
-                group_flag=1,
-                block_plugin=block_plugin,
-                platform="qq",
+                defaults={
+                    "group_name": group_info["group_name"],
+                    "max_member_count": group_info["max_member_count"],
+                    "member_count": group_info["member_count"],
+                    "group_flag": 1,
+                    "block_plugin": block_plugin,
+                    "platform": "qq",
+                },
             )
 
     @classmethod
@@ -145,7 +147,7 @@ class GroupManager:
                     e=e,
                 )
                 raise ForceAddGroupError("强制拉群或未有群信息，退出群聊失败...") from e
-            await GroupConsole.filter(group_id=group_id).delete()
+            # await GroupConsole.filter(group_id=group_id).delete()
             raise ForceAddGroupError(f"触发强制入群保护，已成功退出群聊 {group_id}...")
         else:
             await cls.__handle_add_group(bot, group_id, group)

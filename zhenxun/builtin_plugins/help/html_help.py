@@ -21,6 +21,8 @@ class Item(BaseModel):
     """插件名称"""
     sta: int
     """插件状态"""
+    id: int
+    """插件id"""
 
 
 class PluginList(BaseModel):
@@ -80,10 +82,9 @@ def __handle_item(
             sta = 2
         if f"{plugin.module}," in group.block_plugin:
             sta = 1
-    if bot:
-        if f"{plugin.module}," in bot.block_plugins:
-            sta = 2
-    return Item(plugin_name=plugin.name, sta=sta)
+    if bot and f"{plugin.module}," in bot.block_plugins:
+        sta = 2
+    return Item(plugin_name=plugin.name, sta=sta, id=plugin.id)
 
 
 def build_plugin_data(classify: dict[str, list[Item]]) -> list[dict[str, str]]:
@@ -142,7 +143,7 @@ async def build_html_image(
         template_name="zhenxun_menu.html",
         templates={"plugin_list": plugin_list},
         pages={
-            "viewport": {"width": 1903, "height": 975},
+            "viewport": {"width": 1903, "height": 10},
             "base_url": f"file://{TEMPLATE_PATH}",
         },
         wait=2,

@@ -2,7 +2,7 @@ from tortoise import fields
 
 from zhenxun.models.goods_info import GoodsInfo
 from zhenxun.services.db_context import Model
-from zhenxun.utils.enum import GoldHandle
+from zhenxun.utils.enum import CacheType, GoldHandle
 from zhenxun.utils.exception import GoodsNotFound, InsufficientGold
 
 from .user_gold_log import UserGoldLog
@@ -29,6 +29,12 @@ class UserConsole(Model):
     class Meta:  # pyright: ignore [reportIncompatibleVariableOverride]
         table = "user_console"
         table_description = "用户数据表"
+        indexes = [("user_id",), ("uid",)]  # noqa: RUF012
+
+    cache_type = CacheType.USERS
+    """缓存类型"""
+    cache_key_field = "user_id"
+    """缓存键字段"""
 
     @classmethod
     async def get_user(cls, user_id: str, platform: str | None = None) -> "UserConsole":
@@ -193,3 +199,10 @@ class UserConsole(Model):
         if goods := await GoodsInfo.get_or_none(goods_name=name):
             return await cls.use_props(user_id, goods.uuid, num, platform)
         raise GoodsNotFound("未找到商品...")
+
+    @classmethod
+    async def _run_script(cls):
+        return [
+            "CREATE INDEX idx_user_console_user_id ON user_console(user_id);",
+            "CREATE INDEX idx_user_console_uid ON user_console(uid);",
+        ]

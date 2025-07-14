@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Literal, Type  # noqa: UP035
+from typing import Any, Literal
 
 from nonebot.compat import model_dump
 from pydantic import BaseModel, Field
@@ -65,7 +65,7 @@ class RegisterConfig(BaseModel):
     """配置注解"""
     default_value: Any | None = None
     """默认值"""
-    type: Type = str  # noqa: UP006
+    type: object = None
     """参数类型"""
     arg_parser: Callable | None = None
     """参数解析"""
@@ -155,8 +155,6 @@ class AICallableProperties(BaseModel):
     """参数类型"""
     description: str
     """参数描述"""
-    enums: list[str] | None = None
-    """参数枚举"""
 
 
 class AICallableParam(BaseModel):

@@ -49,6 +49,9 @@ async def _():
     try:
         for priority in priority_list:
             for func in priority_data[priority]:
+                logger.debug(
+                    f"执行优先级 [{priority}] on_startup 方法: {func.__module__}"
+                )
                 if is_coroutine_callable(func):
                     await func()
                 else:

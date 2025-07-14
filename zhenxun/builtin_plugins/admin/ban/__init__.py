@@ -87,12 +87,16 @@ __plugin_meta__ = PluginMetadata(
         smart_tools=[
             AICallableTag(
                 name="call_ban",
-                description="某人多次(至少三次)辱骂你，调用此方法进行封禁",
+                description="如果你讨厌某个人（好感度过低并让你感到困扰，或者多次辱骂你），调用此方法进行封禁，调用该方法后要告知用户被封禁和原因",
                 parameters=AICallableParam(
                     type="object",
                     properties={
                         "user_id": AICallableProperties(
                             type="string", description="用户的id"
+                        ),
+                        "duration": AICallableProperties(
+                            type="integer",
+                            description="封禁时长（选择的值只能是1-360），单位为分钟，如果频繁触发，按情况增加",
                         ),
                     },
                     required=["user_id"],

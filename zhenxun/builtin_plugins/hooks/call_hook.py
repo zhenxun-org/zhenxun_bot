@@ -9,6 +9,8 @@ from zhenxun.utils.enum import BotSentType
 from zhenxun.utils.manager.message_manager import MessageManager
 from zhenxun.utils.platform import PlatformUtils
 
+LOG_COMMAND = "MessageHook"
+
 
 def replace_message(message: Message) -> str:
     """将消息中的at、image、record、face替换为字符串
@@ -54,11 +56,11 @@ async def handle_api_result(
         if user_id and message_id:
             MessageManager.add(str(user_id), str(message_id))
             logger.debug(
-                f"收集消息id，user_id: {user_id}, msg_id: {message_id}", "msg_hook"
+                f"收集消息id，user_id: {user_id}, msg_id: {message_id}", LOG_COMMAND
             )
     except Exception as e:
         logger.warning(
-            f"收集消息id发生错误...data: {data}, result: {result}", "msg_hook", e=e
+            f"收集消息id发生错误...data: {data}, result: {result}", LOG_COMMAND, e=e
         )
     if not Config.get_config("hook", "RECORD_BOT_SENT_MESSAGES"):
         return
@@ -80,6 +82,6 @@ async def handle_api_result(
     except Exception as e:
         logger.warning(
             f"消息发送记录发生错误...data: {data}, result: {result}",
-            "msg_hook",
+            LOG_COMMAND,
             e=e,
         )

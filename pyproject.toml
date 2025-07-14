@@ -16,7 +16,7 @@ python = "^3.10"
 playwright = "^1.41.1"
 nonebot-adapter-onebot = "^2.3.1"
 nonebot-plugin-apscheduler = "^0.5"
-tortoise-orm = { extras = ["asyncpg"], version = "^0.20.0" }
+tortoise-orm = "^0.20.0"
 cattrs = "^23.2.3"
 ruamel-yaml = "^0.18.5"
 strenum = "^0.4.15"
@@ -39,13 +39,16 @@ dateparser = "^1.2.0"
 bilireq = "0.2.3post0"
 python-jose = { extras = ["cryptography"], version = "^3.3.0" }
 python-multipart = "^0.0.9"
-aiocache = "^0.12.2"
+aiocache = {extras = ["redis"], version = "^0.12.3"}
 py-cpuinfo = "^9.0.0"
 nonebot-plugin-alconna = "^0.54.0"
 tenacity = "^9.0.0"
 nonebot-plugin-uninfo = ">0.4.1"
 nonebot-plugin-waiter = "^0.8.1"
 multidict = ">=6.0.0,!=6.3.2"
+
+redis = { version = ">=5", optional = true }
+asyncpg = { version = ">=0.20.0", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 nonebug = "^0.4"
@@ -57,6 +60,9 @@ respx = "^0.21.1"
 ruff = "^0.8.0"
 pre-commit = "^4.0.0"
 
+[tool.poetry.extras]
+redis = ["redis"]
+postgresql = ["asyncpg"]
 
 [tool.nonebot]
 plugins = [
