@@ -357,7 +357,7 @@ SQLITE_CONFIG = {
 }
 
 
-def get_config(db_url: str) -> dict:
+def get_config() -> dict:
     """获取数据库配置"""
     parsed = urlparse(BotConfig.db_url)
 
@@ -426,7 +426,7 @@ async def init():
         raise DbUrlIsNode("\n" + error.strip())
     try:
         await Tortoise.init(
-            config=get_config(BotConfig.db_url),
+            config=get_config(),
         )
         if SCRIPT_METHOD:
             db = Tortoise.get_connection("default")
