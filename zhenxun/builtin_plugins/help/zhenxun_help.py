@@ -97,68 +97,10 @@ def build_plugin_data(classify: dict[str, list[Item]]) -> list[dict[str, str]]:
         }
         for menu, value in classify.items()
     ]
-    plugin_list = build_line_data(plugin_list)
-    plugin_list.insert(
-        0,
-        build_plugin_line(
-            menu_key if menu_key not in ["normal", "功能"] else "主要功能",
-            max_data,
-            30,
-            100,
-            True,
-        ),
-    )
-    return plugin_list
-
-
-def build_plugin_line(
-    name: str, items: list, left: int, width: int | None = None, is_max: bool = False
-) -> dict:
-    """构造插件行数据
-
-    参数:
-        name: 菜单名称
-        items: 插件名称列表
-        left: 左边距
-        width: 总插件长度.
-        is_max: 是否为最大长度的插件菜单
-
-    返回:
-        dict: 插件数据
-    """
-    _plugins = []
-    width = width or 50
-    if len(items) // 2 > 6 or is_max:
-        width = 100
-        plugin_list1 = []
-        plugin_list2 = []
-        for i in range(len(items)):
-            if i % 2:
-                plugin_list1.append(items[i])
-            else:
-                plugin_list2.append(items[i])
-        _plugins = [(30, 50, plugin_list1), (0, 50, plugin_list2)]
-    else:
-        _plugins = [(left, 100, items)]
-    return {"name": name, "items": _plugins, "width": width}
-
-
-def build_line_data(plugin_list: list[dict]) -> list[dict]:
-    """构造插件数据
-
-    参数:
-        plugin_list: 插件列表
-
-    返回:
-        list[dict]: 插件数据
-    """
-    left = 30
-    data = []
+    plugin_list.insert(0, {"name": menu_key, "items": max_data})
     for plugin in plugin_list:
-        data.append(build_plugin_line(plugin["name"], plugin["items"], left))
-        if len(plugin["items"]) // 2 <= 6:
-            left = 15 if left == 30 else 30
-    return data
+        plugin["items"].sort(key=lambda x: x.id)
+    return plugin_list
 
 
 async def build_zhenxun_image(

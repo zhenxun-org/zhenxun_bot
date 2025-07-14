@@ -52,4 +52,6 @@ async def classify_plugin(
             if not classify.get(menu):
                 classify[menu] = []
             classify[menu].append(handle(bot, plugin, group, is_detail))
+    for value in classify.values():
+        value.sort(key=lambda x: x.id)
     return classify
