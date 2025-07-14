@@ -3,7 +3,8 @@ import re
 
 import nonebot
 from nonebot.utils import is_coroutine_callable
-from tortoise import BaseDBAsyncClient, Tortoise
+from tortoise import Tortoise
+from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.connection import connections
 from tortoise.models import Model as Model_
 
@@ -76,7 +77,7 @@ class UnicodeSafeMixin(Model_):
         return instance
 
     @classmethod
-    def filter(cls, *args, **kwargs): # pyright: ignore[reportIncompatibleMethodOverride]
+    def filter(cls, *args, **kwargs):  # pyright: ignore[reportIncompatibleMethodOverride]
         for field in cls._unicode_safe_fields:
             if field in kwargs and isinstance(kwargs[field], str):
                 kwargs[field] = unicode_escape(kwargs[field])

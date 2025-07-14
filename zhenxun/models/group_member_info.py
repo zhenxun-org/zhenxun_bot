@@ -26,6 +26,7 @@ class GroupInfoUser(Model):
         table = "group_info_users"
         table_description = "群员信息数据表"
         unique_together = ("user_id", "group_id")
+
     _unicode_safe_fields = ["user_name", "nickname"]  # noqa: RUF012
 
     @classmethod
