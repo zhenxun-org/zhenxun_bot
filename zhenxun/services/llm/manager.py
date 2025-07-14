@@ -137,8 +137,8 @@ def get_configured_providers() -> list[ProviderConfig]:
             valid_providers.append(item)
         else:
             logger.warning(
-                f"配置文件中第 {i + 1} 项未能正确解析为 ProviderConfig 对象，"
-                f"已跳过。实际类型: {type(item)}"
+                f"配置文件中第 {i + 1} 项未能正确解析为 ProviderConfig 对象，已跳过。"
+                f"实际类型: {type(item)}"
             )
 
     return valid_providers

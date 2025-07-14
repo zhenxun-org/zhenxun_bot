@@ -46,17 +46,7 @@ class LLMModelBase(ABC):
         history: list[dict[str, str]] | None = None,
         **kwargs: Any,
     ) -> str:
-        """
-        生成文本
-
-        参数:
-            prompt: 输入提示词。
-            history: 对话历史记录。
-            **kwargs: 其他参数。
-
-        返回:
-            str: 生成的文本。
-        """
+        """生成文本"""
         pass
 
     @abstractmethod
@@ -68,19 +58,7 @@ class LLMModelBase(ABC):
         tool_choice: str | dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
-        """
-        生成高级响应
-
-        参数:
-            messages: 消息列表。
-            config: 生成配置。
-            tools: 工具列表。
-            tool_choice: 工具选择策略。
-            **kwargs: 其他参数。
-
-        返回:
-            LLMResponse: 模型响应。
-        """
+        """生成高级响应"""
         pass
 
     @abstractmethod
@@ -90,17 +68,7 @@ class LLMModelBase(ABC):
         task_type: EmbeddingTaskType | str = EmbeddingTaskType.RETRIEVAL_DOCUMENT,
         **kwargs: Any,
     ) -> list[list[float]]:
-        """
-        生成文本嵌入向量
-
-        参数:
-            texts: 文本列表。
-            task_type: 嵌入任务类型。
-            **kwargs: 其他参数。
-
-        返回:
-            list[list[float]]: 嵌入向量列表。
-        """
+        """生成文本嵌入向量"""
         pass
 
 
@@ -208,28 +176,8 @@ class LLMModel(LLMModelBase):
         http_client: "LLMHttpClient",
         failed_keys: set[str] | None = None,
         log_context: str = "API",
-    ) -> Any:
-        """
-        执行API调用的通用核心方法。
-
-        该方法封装了以下通用逻辑:
-        1. 选择API密钥。
-        2. 准备和记录请求。
-        3. 发送HTTP POST请求。
-        4. 处理HTTP错误和API特定错误。
-        5. 记录密钥使用状态。
-        6. 解析成功的响应。
-
-        参数:
-            prepare_request_func: 准备请求的函数。
-            parse_response_func: 解析响应的函数。
-            http_client: HTTP客户端。
-            failed_keys: 失败的密钥集合。
-            log_context: 日志上下文。
-
-        返回:
-            Any: 解析后的响应数据。
-        """
+    ) -> tuple[Any, str]:
+        """执行API调用的通用核心方法"""
         api_key = await self._select_api_key(failed_keys)
 
         try:
@@ -267,7 +215,9 @@ class LLMModel(LLMModelBase):
                 )
                 logger.debug(f"💥 完整错误响应: {error_text}")
 
-                await self.key_store.record_failure(api_key, http_response.status_code)
+                await self.key_store.record_failure(
+                    api_key, http_response.status_code, error_text
+                )
 
                 if http_response.status_code in [401, 403]:
                     error_code = LLMErrorCode.API_KEY_INVALID
@@ -298,7 +248,7 @@ class LLMModel(LLMModelBase):
 
             except Exception as e:
                 logger.error(f"解析 {log_context} 响应失败: {e}", e=e)
-                await self.key_store.record_failure(api_key, None)
+                await self.key_store.record_failure(api_key, None, str(e))
                 if isinstance(e, LLMException):
                     raise
                 else:
@@ -308,17 +258,15 @@ class LLMModel(LLMModelBase):
                         cause=e,
                     )
 
-            await self.key_store.record_success(api_key)
-            logger.debug(f"✅ API密钥使用成功: {masked_key}")
             logger.info(f"🎯 LLM响应解析完成 [{log_context}]")
-            return parsed_data
+            return parsed_data, api_key
 
         except LLMException:
             raise
         except Exception as e:
             error_log_msg = f"生成 {log_context.lower()} 时发生未预期错误: {e}"
             logger.error(error_log_msg, e=e)
-            await self.key_store.record_failure(api_key, None)
+            await self.key_store.record_failure(api_key, None, str(e))
             raise LLMException(
                 error_log_msg,
                 code=LLMErrorCode.GENERATION_FAILED
@@ -349,13 +297,14 @@ class LLMModel(LLMModelBase):
             adapter.validate_embedding_response(response_json)
             return adapter.parse_embedding_response(response_json)
 
-        return await self._perform_api_call(
+        parsed_data, api_key_used = await self._perform_api_call(
             prepare_request_func=prepare_request,
             parse_response_func=parse_response,
             http_client=http_client,
             failed_keys=failed_keys,
             log_context="Embedding",
         )
+        return parsed_data
 
     async def _execute_with_smart_retry(
         self,
@@ -394,8 +343,8 @@ class LLMModel(LLMModelBase):
         tool_choice: str | dict[str, Any] | None,
         http_client: LLMHttpClient,
         failed_keys: set[str] | None = None,
-    ) -> LLMResponse:
-        """执行单次请求 - 供重试机制调用，直接返回 LLMResponse"""
+    ) -> tuple[LLMResponse, str]:
+        """执行单次请求 - 供重试机制调用，直接返回 LLMResponse 和使用的 key"""
 
         async def prepare_request(api_key: str) -> RequestData:
             return await adapter.prepare_advanced_request(
@@ -441,19 +390,17 @@ class LLMModel(LLMModelBase):
                 cache_info=response_data.cache_info,
             )
 
-        return await self._perform_api_call(
+        parsed_data, api_key_used = await self._perform_api_call(
             prepare_request_func=prepare_request,
             parse_response_func=parse_response,
             http_client=http_client,
             failed_keys=failed_keys,
             log_context="Generation",
         )
+        return parsed_data, api_key_used
 
     async def close(self):
-        """
-        标记模型实例的当前使用周期结束。
-        共享的 HTTP 客户端由 LLMHttpClientManager 管理，不由 LLMModel 关闭。
-        """
+        """标记模型实例的当前使用周期结束"""
         if self._is_closed:
             return
         self._is_closed = True
@@ -487,17 +434,7 @@ class LLMModel(LLMModelBase):
         history: list[dict[str, str]] | None = None,
         **kwargs: Any,
     ) -> str:
-        """
-        生成文本 - 通过 generate_response 实现
-
-        参数:
-            prompt: 输入提示词。
-            history: 对话历史记录。
-            **kwargs: 其他参数。
-
-        返回:
-            str: 生成的文本。
-        """
+        """生成文本"""
         self._check_not_closed()
 
         messages: list[LLMMessage] = []
@@ -538,19 +475,7 @@ class LLMModel(LLMModelBase):
         tool_choice: str | dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
-        """
-        生成高级响应
-
-        参数:
-            messages: 消息列表。
-            config: 生成配置。
-            tools: 工具列表。
-            tool_choice: 工具选择策略。
-            **kwargs: 其他参数。
-
-        返回:
-            LLMResponse: 模型响应。
-        """
+        """生成高级响应"""
         self._check_not_closed()
 
         from .adapters import get_adapter_for_api_type
@@ -619,17 +544,7 @@ class LLMModel(LLMModelBase):
         task_type: EmbeddingTaskType | str = EmbeddingTaskType.RETRIEVAL_DOCUMENT,
         **kwargs: Any,
     ) -> list[list[float]]:
-        """
-        生成文本嵌入向量
-
-        参数:
-            texts: 文本列表。
-            task_type: 嵌入任务类型。
-            **kwargs: 其他参数。
-
-        返回:
-            list[list[float]]: 嵌入向量列表。
-        """
+        """生成文本嵌入向量"""
         self._check_not_closed()
         if not texts:
             return []

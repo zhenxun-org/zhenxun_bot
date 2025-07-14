@@ -1,11 +1,13 @@
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime
 import os
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
+from nonebot_plugin_uninfo import Uninfo
 import pypinyin
 import pytz
 
@@ -13,43 +15,53 @@ from zhenxun.configs.config import Config
 from zhenxun.services.log import logger
 
 
+@dataclass
+class EntityIDs:
+    user_id: str
+    """用户id"""
+    group_id: str | None
+    """群组id"""
+    channel_id: str | None
+    """频道id"""
+
+
 class ResourceDirManager:
     """
     临时文件管理器
     """
 
-    temp_path = []  # noqa: RUF012
+    temp_path: ClassVar[set[Path]] = set()
 
     @classmethod
-    def __tree_append(cls, path: Path):
-        """递归添加文件夹
-
-        参数:
-            path: 文件夹路径
-        """
+    def __tree_append(cls, path: Path, deep: int = 1, current: int = 0):
+        """递归添加文件夹"""
+        if current >= deep and deep != -1:
+            return
+        path = path.resolve()  # 标准化路径
         for f in os.listdir(path):
-            file = path / f
+            file = (path / f).resolve()  # 标准化子路径
             if file.is_dir():
                 if file not in cls.temp_path:
-                    cls.temp_path.append(file)
-                    logger.debug(f"添加临时文件夹: {path}")
-                cls.__tree_append(file)
+                    cls.temp_path.add(file)
+                    logger.debug(f"添加临时文件夹: {file}")
+                cls.__tree_append(file, deep, current + 1)
 
     @classmethod
-    def add_temp_dir(cls, path: str | Path, tree: bool = False):
+    def add_temp_dir(cls, path: str | Path, tree: bool = False, deep: int = 1):
         """添加临时清理文件夹，这些文件夹会被自动清理
 
         参数:
             path: 文件夹路径
             tree: 是否递归添加文件夹
+            deep: 深度, -1 为无限深度
         """
         if isinstance(path, str):
             path = Path(path)
         if path not in cls.temp_path:
-            cls.temp_path.append(path)
+            cls.temp_path.add(path)
             logger.debug(f"添加临时文件夹: {path}")
         if tree:
-            cls.__tree_append(path)
+            cls.__tree_append(path, deep)
 
 
 class CountLimiter:
@@ -228,6 +240,27 @@ def is_valid_date(date_text: str, separator: str = "-") -> bool:
         return True
     except ValueError:
         return False
+
+
+def get_entity_ids(session: Uninfo) -> EntityIDs:
+    """获取用户id，群组id，频道id
+
+    参数:
+        session: Uninfo
+
+    返回:
+        EntityIDs: 用户id，群组id，频道id
+    """
+    user_id = session.user.id
+    group_id = None
+    channel_id = None
+    if session.group:
+        if session.group.parent:
+            group_id = session.group.parent.id
+            channel_id = session.group.id
+        else:
+            group_id = session.group.id
+    return EntityIDs(user_id=user_id, group_id=group_id, channel_id=channel_id)
 
 
 def is_number(text: str) -> bool:

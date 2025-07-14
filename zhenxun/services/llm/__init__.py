@@ -5,14 +5,12 @@ LLM 服务模块 - 公共 API 入口
 """
 
 from .api import (
-    AI,
-    AIConfig,
-    TaskType,
     analyze,
     analyze_multimodal,
     chat,
     code,
     embed,
+    generate,
     pipeline_chat,
     search,
     search_multimodal,
@@ -35,6 +33,7 @@ from .manager import (
     list_model_identifiers,
     set_global_default_model_name,
 )
+from .session import AI, AIConfig
 from .tools import tool_registry
 from .types import (
     EmbeddingTaskType,
@@ -49,6 +48,7 @@ from .types import (
     ModelInfo,
     ModelProvider,
     ResponseFormat,
+    TaskType,
     ToolCategory,
     ToolMetadata,
     UsageInfo,
@@ -84,6 +84,7 @@ __all__ = [
     "code",
     "create_multimodal_message",
     "embed",
+    "generate",
     "get_cache_stats",
     "get_global_default_model_name",
     "get_model_instance",

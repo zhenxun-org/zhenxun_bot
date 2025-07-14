@@ -46,7 +46,7 @@ def _handle_config(plugin: Plugin, exists_module: list[str]):
                     reg_config.value,
                     help=reg_config.help,
                     default_value=reg_config.default_value,
-                    type=reg_config.type,
+                    type=reg_config.type,  # type: ignore
                     arg_parser=reg_config.arg_parser,
                     _override=False,
                 )

@@ -205,7 +205,7 @@ class Manager:
         self.cd_data: dict[str, PluginCdBlock] = {}
         if self.cd_file.exists():
             with open(self.cd_file, encoding="utf8") as f:
-                temp = _yaml.load(f)
+                temp = _yaml.load(f) or {}
                 if "PluginCdLimit" in temp.keys():
                     for k, v in temp["PluginCdLimit"].items():
                         if "." in k:
@@ -216,7 +216,7 @@ class Manager:
         self.block_data: dict[str, BaseBlock] = {}
         if self.block_file.exists():
             with open(self.block_file, encoding="utf8") as f:
-                temp = _yaml.load(f)
+                temp = _yaml.load(f) or {}
                 if "PluginBlockLimit" in temp.keys():
                     for k, v in temp["PluginBlockLimit"].items():
                         if "." in k:
@@ -227,7 +227,7 @@ class Manager:
         self.count_data: dict[str, PluginCountBlock] = {}
         if self.count_file.exists():
             with open(self.count_file, encoding="utf8") as f:
-                temp = _yaml.load(f)
+                temp = _yaml.load(f) or {}
                 if "PluginCountLimit" in temp.keys():
                     for k, v in temp["PluginCountLimit"].items():
                         if "." in k:

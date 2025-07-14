@@ -45,6 +45,17 @@ class ToolCategory(Enum):
     CUSTOM = auto()
 
 
+class TaskType(Enum):
+    """任务类型枚举"""
+
+    CHAT = "chat"
+    CODE = "code"
+    SEARCH = "search"
+    ANALYSIS = "analysis"
+    GENERATION = "generation"
+    MULTIMODAL = "multimodal"
+
+
 class LLMErrorCode(Enum):
     """LLM 服务相关的错误代码枚举"""
 

@@ -45,7 +45,7 @@ async def build_normal_image(group_id: str | None, is_detail: bool) -> BuildImag
             color="black" if idx % 2 else "white",
         )
         curr_h = 10
-        group = await GroupConsole.get_or_none(group_id=group_id)
+        group = await GroupConsole.get_group(group_id=group_id) if group_id else None
         for _, plugin in enumerate(plugin_list):
             text_color = (255, 255, 255) if idx % 2 else (0, 0, 0)
             if group and f"{plugin.module}," in group.block_plugin:
@@ -80,7 +80,7 @@ async def build_normal_image(group_id: str | None, is_detail: bool) -> BuildImag
     width, height = 10, 10
     for s in [
         "目前支持的功能列表:",
-        "可以通过 ‘帮助 [功能名称或功能Id]’ 来获取对应功能的使用方法",
+        "可以通过 '帮助 [功能名称或功能Id]' 来获取对应功能的使用方法",
     ]:
         text = await BuildImage.build_text_image(s, "HYWenHei-85W.ttf", 24)
         await result.paste(text, (width, height))

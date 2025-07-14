@@ -198,7 +198,7 @@ print(search_result['text'])
 当你需要进行有上下文的、连续的对话时，`AI` 类是你的最佳选择。
 
 ```python
-from zhenxun.services.llm.api import AI, AIConfig
+from zhenxun.services.llm import AI, AIConfig
 
 # 初始化一个AI会话，可以传入自定义配置
 ai_config = AIConfig(model="GLM/glm-4-flash", temperature=0.7)
@@ -395,7 +395,7 @@ async def my_tool_factory(config: MyToolConfig):
 在 `analyze` 或 `generate_response` 中使用 `use_tools` 参数。框架会自动处理整个调用流程。
 
 ```python
-from zhenxun.services.llm.api import analyze
+from zhenxun.services.llm import analyze
 from nonebot_plugin_alconna.uniseg import UniMessage
 
 response = await analyze(
@@ -442,7 +442,6 @@ from zhenxun.services.llm.manager import (
     get_key_usage_stats,
     reset_key_status
 )
-from zhenxun.services.llm import clear_model_cache, get_cache_stats
 
 # 列出所有在config.yaml中配置的可用模型
 models = list_available_models()
