@@ -194,7 +194,7 @@ async def build_zhenxun_image(
             }
         },
         pages={
-            "viewport": {"width": width, "height": 453},
+            "viewport": {"width": width, "height": 10},
             "base_url": f"file://{TEMPLATE_PATH}",
         },
         wait=2,
