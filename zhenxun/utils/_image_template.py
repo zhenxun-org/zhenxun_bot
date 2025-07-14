@@ -469,7 +469,7 @@ class Notebook:
             template_name="main.html",
             templates={"elements": self._data},
             pages={
-                "viewport": {"width": 700, "height": 1000},
+                "viewport": {"width": 700, "height": 10},
                 "base_url": f"file://{TEMPLATE_PATH}",
             },
             wait=2,

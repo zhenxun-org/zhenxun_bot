@@ -3,6 +3,7 @@ from typing import Literal, overload
 from tortoise import fields
 
 from zhenxun.services.db_context import Model
+from zhenxun.utils.enum import CacheType
 
 
 class BotConsole(Model):
@@ -28,6 +29,11 @@ class BotConsole(Model):
     class Meta:  # pyright: ignore [reportIncompatibleVariableOverride]
         table = "bot_console"
         table_description = "Bot数据表"
+
+    cache_type = CacheType.BOT
+    """缓存类型"""
+    cache_key_field = "bot_id"
+    """缓存键字段"""
 
     @staticmethod
     def format(name: str) -> str:

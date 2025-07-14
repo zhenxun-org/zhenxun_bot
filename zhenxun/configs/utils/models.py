@@ -155,8 +155,6 @@ class AICallableProperties(BaseModel):
     """参数类型"""
     description: str
     """参数描述"""
-    enums: list[str] | None = None
-    """参数枚举"""
 
 
 class AICallableParam(BaseModel):

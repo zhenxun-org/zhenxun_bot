@@ -53,9 +53,7 @@ class CommonUtils:
             if await GroupConsole.is_block_task(group_id, module):
                 """群组是否禁用被动"""
                 return True
-            if g := await GroupConsole.get_or_none(
-                group_id=group_id, channel_id__isnull=True
-            ):
+            if g := await GroupConsole.get_group(group_id=group_id):
                 """群组权限是否小于0"""
                 if g.level < 0:
                     return True

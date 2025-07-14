@@ -50,22 +50,31 @@ async def _(bot: Bot):
 
 
 SIGN_SQL = """
-select distinct on("user_id") t1.user_id, t1.checkin_count, t1.add_probability,
-t1.specify_probability, t1.impression
-from public.sign_group_users t1
-  join (
-    select user_id, max(t2.impression) as max_impression
-    from public.sign_group_users t2
-    group by user_id
-  ) t on t.user_id = t1.user_id and t.max_impression = t1.impression
+SELECT user_id, checkin_count, add_probability, specify_probability, impression
+FROM (
+    SELECT
+        t1.user_id,
+        t1.checkin_count,
+        t1.add_probability,
+        t1.specify_probability,
+        t1.impression,
+        ROW_NUMBER() OVER(PARTITION BY t1.user_id ORDER BY t1.impression DESC) AS rn
+    FROM sign_group_users t1
+    INNER JOIN (
+        SELECT user_id, MAX(impression) AS max_impression
+        FROM sign_group_users
+        GROUP BY user_id
+    ) t2 ON t2.user_id = t1.user_id AND t2.max_impression = t1.impression
+) t
+WHERE rn = 1
 """
 
 BAG_SQL = """
 select t1.user_id, t1.gold, t1.property
-from public.bag_users t1
+from bag_users t1
   join (
     select user_id, max(t2.gold) as max_gold
-    from public.bag_users t2
+    from bag_users t2
     group by user_id
   ) t on t.user_id = t1.user_id and t.max_gold = t1.gold
 """

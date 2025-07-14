@@ -1,3 +1,5 @@
+import asyncio
+
 import aiofiles
 import nonebot
 from nonebot import get_loaded_plugins
@@ -112,24 +114,29 @@ async def _():
         await _handle_setting(plugin, plugin_list, limit_list)
     create_list = []
     update_list = []
+    update_task_list = []
     for plugin in plugin_list:
         if plugin.module_path not in module2id:
             create_list.append(plugin)
         else:
             plugin.id = module2id[plugin.module_path]
-            await plugin.save(
-                update_fields=[
-                    "name",
-                    "author",
-                    "version",
-                    "admin_level",
-                    "plugin_type",
-                    "is_show",
-                ]
+            update_task_list.append(
+                plugin.save(
+                    update_fields=[
+                        "name",
+                        "author",
+                        "version",
+                        "admin_level",
+                        "plugin_type",
+                        "is_show",
+                    ]
+                )
             )
             update_list.append(plugin)
     if create_list:
         await PluginInfo.bulk_create(create_list, 10)
+    if update_task_list:
+        await asyncio.gather(*update_task_list)
     # if update_list:
     #     # TODO: 批量更新无法更新plugin_type: tortoise.exceptions.OperationalError:
     #           column "superuser" does not exist

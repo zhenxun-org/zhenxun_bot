@@ -20,6 +20,12 @@ class Item(BaseModel):
     """插件名称"""
     commands: list[str]
     """插件命令"""
+    id: str
+    """插件id"""
+    status: bool
+    """插件状态"""
+    has_superuser_help: bool
+    """插件是否拥有超级用户帮助"""
 
 
 def __handle_item(
@@ -39,23 +45,36 @@ def __handle_item(
     返回:
         Item: Item
     """
+    status = True
+    has_superuser_help = False
+    nb_plugin = nonebot.get_plugin_by_module_name(plugin.module_path)
+    if nb_plugin and nb_plugin.metadata and nb_plugin.metadata.extra:
+        extra_data = PluginExtraData(**nb_plugin.metadata.extra)
+        if extra_data.superuser_help:
+            has_superuser_help = True
     if not plugin.status:
         if plugin.block_type == BlockType.ALL:
-            plugin.name = f"{plugin.name}(不可用)"
+            status = False
         elif group and plugin.block_type == BlockType.GROUP:
-            plugin.name = f"{plugin.name}(不可用)"
+            status = False
         elif not group and plugin.block_type == BlockType.PRIVATE:
-            plugin.name = f"{plugin.name}(不可用)"
+            status = False
     elif group and f"{plugin.module}," in group.block_plugin:
-        plugin.name = f"{plugin.name}(不可用)"
+        status = False
     elif bot and f"{plugin.module}," in bot.block_plugins:
-        plugin.name = f"{plugin.name}(不可用)"
+        status = False
     commands = []
     nb_plugin = nonebot.get_plugin_by_module_name(plugin.module_path)
     if is_detail and nb_plugin and nb_plugin.metadata and nb_plugin.metadata.extra:
         extra_data = PluginExtraData(**nb_plugin.metadata.extra)
         commands = [cmd.command for cmd in extra_data.commands]
-    return Item(plugin_name=f"{plugin.id}-{plugin.name}", commands=commands)
+    return Item(
+        plugin_name=plugin.name,
+        commands=commands,
+        id=str(plugin.id),
+        status=status,
+        has_superuser_help=has_superuser_help,
+    )
 
 
 def build_plugin_data(classify: dict[str, list[Item]]) -> list[dict[str, str]]:
@@ -78,68 +97,10 @@ def build_plugin_data(classify: dict[str, list[Item]]) -> list[dict[str, str]]:
         }
         for menu, value in classify.items()
     ]
-    plugin_list = build_line_data(plugin_list)
-    plugin_list.insert(
-        0,
-        build_plugin_line(
-            menu_key if menu_key not in ["normal", "功能"] else "主要功能",
-            max_data,
-            30,
-            100,
-            True,
-        ),
-    )
-    return plugin_list
-
-
-def build_plugin_line(
-    name: str, items: list, left: int, width: int | None = None, is_max: bool = False
-) -> dict:
-    """构造插件行数据
-
-    参数:
-        name: 菜单名称
-        items: 插件名称列表
-        left: 左边距
-        width: 总插件长度.
-        is_max: 是否为最大长度的插件菜单
-
-    返回:
-        dict: 插件数据
-    """
-    _plugins = []
-    width = width or 50
-    if len(items) // 2 > 6 or is_max:
-        width = 100
-        plugin_list1 = []
-        plugin_list2 = []
-        for i in range(len(items)):
-            if i % 2:
-                plugin_list1.append(items[i])
-            else:
-                plugin_list2.append(items[i])
-        _plugins = [(30, 50, plugin_list1), (0, 50, plugin_list2)]
-    else:
-        _plugins = [(left, 100, items)]
-    return {"name": name, "items": _plugins, "width": width}
-
-
-def build_line_data(plugin_list: list[dict]) -> list[dict]:
-    """构造插件数据
-
-    参数:
-        plugin_list: 插件列表
-
-    返回:
-        list[dict]: 插件数据
-    """
-    left = 30
-    data = []
+    plugin_list.insert(0, {"name": menu_key, "items": max_data})
     for plugin in plugin_list:
-        data.append(build_plugin_line(plugin["name"], plugin["items"], left))
-        if len(plugin["items"]) // 2 <= 6:
-            left = 15 if left == 30 else 30
-    return data
+        plugin["items"].sort(key=lambda x: x.id)
+    return plugin_list
 
 
 async def build_zhenxun_image(
@@ -160,6 +121,7 @@ async def build_zhenxun_image(
     width = int(637 * 1.5) if is_detail else 637
     title_font = int(53 * 1.5) if is_detail else 53
     tip_font = int(19 * 1.5) if is_detail else 19
+    plugin_count = sum(len(plugin["items"]) for plugin in plugin_list)
     return await template_to_pic(
         template_path=str((TEMPLATE_PATH / "ss_menu").absolute()),
         template_name="main.html",
@@ -170,10 +132,11 @@ async def build_zhenxun_image(
                 "width": width,
                 "font_size": (title_font, tip_font),
                 "is_detail": is_detail,
+                "plugin_count": plugin_count,
             }
         },
         pages={
-            "viewport": {"width": width, "height": 453},
+            "viewport": {"width": width, "height": 10},
             "base_url": f"file://{TEMPLATE_PATH}",
         },
         wait=2,

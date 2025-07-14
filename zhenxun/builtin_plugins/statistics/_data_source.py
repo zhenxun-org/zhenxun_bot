@@ -44,9 +44,7 @@ class StatisticsManage:
             title = f"{user.user_name if user else user_id} {day_type}功能调用统计"
         elif group_id:
             """查群组"""
-            group = await GroupConsole.get_or_none(
-                group_id=group_id, channel_id__isnull=True
-            )
+            group = await GroupConsole.get_group(group_id=group_id)
             title = f"{group.group_name if group else group_id} {day_type}功能调用统计"
         else:
             title = "功能调用统计"

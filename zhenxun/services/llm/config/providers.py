@@ -17,6 +17,7 @@ from zhenxun.configs.utils import parse_as
 from zhenxun.services.log import logger
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
+from ..core import key_store
 from ..types.models import ModelDetail, ProviderConfig
 
 
@@ -502,12 +503,13 @@ def set_default_model(provider_model_name: str | None) -> bool:
 @PriorityLifecycle.on_startup(priority=10)
 async def _init_llm_config_on_startup():
     """
-    在服务启动时主动调用一次 get_llm_config，
-    以触发必要的初始化操作，例如创建默认的 mcp_tools.json 文件。
+    在服务启动时主动调用一次 get_llm_config 和 key_store.initialize，
+    以触发必要的初始化操作。
     """
-    logger.info("正在初始化 LLM 配置并检查 MCP 工具文件...")
+    logger.info("正在初始化 LLM 配置并加载密钥状态...")
     try:
         get_llm_config()
-        logger.info("LLM 配置初始化完成。")
+        await key_store.initialize()
+        logger.info("LLM 配置和密钥状态初始化完成。")
     except Exception as e:
-        logger.error(f"LLM 配置初始化时发生错误: {e}", e=e)
+        logger.error(f"LLM 配置或密钥状态初始化时发生错误: {e}", e=e)

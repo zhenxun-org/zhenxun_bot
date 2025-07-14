@@ -250,7 +250,7 @@ class ApiDataSource:
         返回:
             GroupDetail | None: 群组详情数据
         """
-        group = await GroupConsole.get_or_none(group_id=group_id)
+        group = await GroupConsole.get_group(group_id=group_id)
         if not group:
             return None
         like_plugin = await cls.__get_group_detail_like_plugin(group_id)

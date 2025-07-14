@@ -10,7 +10,13 @@ from .content import (
     LLMMessage,
     LLMResponse,
 )
-from .enums import EmbeddingTaskType, ModelProvider, ResponseFormat, ToolCategory
+from .enums import (
+    EmbeddingTaskType,
+    ModelProvider,
+    ResponseFormat,
+    TaskType,
+    ToolCategory,
+)
 from .exceptions import LLMErrorCode, LLMException, get_user_friendly_error_message
 from .models import (
     LLMCacheInfo,
@@ -52,6 +58,7 @@ __all__ = [
     "ModelProvider",
     "ProviderConfig",
     "ResponseFormat",
+    "TaskType",
     "ToolCategory",
     "ToolMetadata",
     "UsageInfo",
