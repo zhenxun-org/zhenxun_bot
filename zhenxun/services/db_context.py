@@ -404,7 +404,7 @@ def get_config(db_url: str) -> dict:
         config["connections"]["default"] = {
             "engine": "tortoise.backends.sqlite",
             "credentials": {
-                "file_path": parsed.path[1:] or ":memory:",
+                "file_path": parsed.path or ":memory:",
             },
             **SQLITE_CONFIG,
         }
