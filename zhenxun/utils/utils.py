@@ -2,6 +2,7 @@ from collections import defaultdict
 from datetime import date, datetime
 import os
 from pathlib import Path
+import re
 import time
 from typing import Any
 
@@ -261,3 +262,37 @@ class TimeUtils:
             if isinstance(target_date, datetime)
             else datetime.combine(target_date, datetime.min.time())
         )
+
+def unicode_escape(value: str) -> str:
+    """
+    将字符串转换为Unicode转义形式（仅处理未转义的特殊字符）
+    已经转义过的字符串保持不变
+    """
+    if not value:
+        return value
+
+    if re.search(r"\\u[0-9a-fA-F]{4}", value):
+        return value
+
+    return "".join(
+        char
+        if 0x20 <= ord(char) <= 0x7E or char in ("\n", "\r", "\t")
+        else f"\\u{ord(char):04x}"
+        for char in value
+    )
+
+
+def unicode_unescape(value: str) -> str:
+    """
+    安全还原字符串中的Unicode转义序列
+    如果不是有效转义序列，保留原样
+    """
+    if not value:
+        return value
+
+    # 仅处理有效的 \uXXXX 格式
+    return re.sub(
+        r"(?<!\\)\\u([0-9a-fA-F]{4})",  # 匹配未被转义的 \uXXXX
+        lambda m: chr(int(m.group(1), 16)),
+        value,
+    )
