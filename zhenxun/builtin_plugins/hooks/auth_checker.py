@@ -131,7 +131,9 @@ async def get_plugin_and_user(
 
     # 并行查询插件和用户数据
     plugin_task = plugin_dao.safe_get_or_none(module=module)
-    user_task = user_dao.safe_get_or_none(user_id=user_id)
+    user_task = user_dao.get_by_func_or_none(
+        UserConsole.get_user, False, user_id=user_id
+    )
 
     try:
         plugin, user = await with_timeout(
@@ -155,7 +157,9 @@ async def get_plugin_and_user(
         )
     user = None
     try:
-        user = await user_dao.safe_get_or_none(user_id=user_id)
+        user = await user_dao.get_by_func_or_none(
+            UserConsole.get_user, False, user_id=user_id
+        )
     except IntegrityError as e:
         raise PermissionExemption("重复创建用户，已跳过该次权限检查...") from e
     if not user:
