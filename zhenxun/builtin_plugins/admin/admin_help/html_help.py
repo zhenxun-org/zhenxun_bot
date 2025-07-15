@@ -16,7 +16,8 @@ async def get_task() -> dict[str, str] | None:
             "name": "被动技能",
             "description": "控制群组中的被动技能状态",
             "usage": "通过 开启/关闭群被动 来控制群被动 <br>"
-            + " 示例：开启/关闭群被动早晚安 <br> ---------- <br> "
+            + " 示例：开启/关闭群被动早晚安 <br> 示例：开启/关闭全部群被动"
+            + " <br> ---------- <br> "
             + "<br>".join([task.name for task in task_list]),
         }
     return None
@@ -47,7 +48,7 @@ async def build_html_help():
             }
         },
         pages={
-            "viewport": {"width": 1024, "height": 1024},
+            "viewport": {"width": 824, "height": 10},
             "base_url": f"file://{TEMPLATE_PATH}",
         },
         wait=2,

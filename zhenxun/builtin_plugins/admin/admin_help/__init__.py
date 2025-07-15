@@ -25,6 +25,11 @@ __plugin_meta__ = PluginMetadata(
         version="0.1",
         plugin_type=PluginType.ADMIN,
         admin_level=1,
+        introduction="""这是 群主/群管理 的帮助列表，里面记录了群组内开关功能的
+        方法帮助以及群管特权方法，建议首次时在群组中发送 '管理员帮助' 查看""",
+        precautions=[
+            "只有群主/群管理 才能使用哦，群主拥有6级权限，管理员拥有5级权限！"
+        ],
         configs=[
             RegisterConfig(
                 key="type",

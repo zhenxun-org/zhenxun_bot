@@ -344,6 +344,16 @@ class ShopManage:
         if goods_name.isdigit():
             try:
                 user = await UserConsole.get_user(user_id=session.user.id)
+                goods_list = await GoodsInfo.filter(uuid__in=user.props.keys()).all()
+                goods_by_uuid = {item.uuid: item for item in goods_list}
+                props_str = str(user.props)
+                user.props = {
+                    uuid: count
+                    for uuid, count in user.props.items()
+                    if count > 0 and goods_by_uuid.get(uuid)
+                }
+                if props_str != str(user.props):
+                    await user.save(update_fields=["props"])
                 uuid = list(user.props.keys())[int(goods_name)]
                 goods_info = await GoodsInfo.get_or_none(uuid=uuid)
             except IndexError:
@@ -501,11 +511,14 @@ class ShopManage:
 
         goods_list = await GoodsInfo.filter(uuid__in=user.props.keys()).all()
         goods_by_uuid = {item.uuid: item for item in goods_list}
+        props_str = str(user.props)
         user.props = {
             uuid: count
             for uuid, count in user.props.items()
             if count > 0 and goods_by_uuid.get(uuid)
         }
+        if props_str != str(user.props):
+            await user.save(update_fields=["props"])
 
         table_rows = []
         for i, prop_uuid in enumerate(user.props):
