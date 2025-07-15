@@ -21,7 +21,12 @@ __plugin_meta__ = PluginMetadata(
         author="HibiKier",
         version="0.1",
         menu_type="其他",
-        superuser_help="重载自我介绍",
+        superuser_help="""
+        在data/bot_profile/bot_id/profile.txt 中编辑BOT自我介绍
+        在data/bot_profile/bot_id/bot_id.png  中编辑BOT头像
+        指令：
+            重载自我介绍
+        """.strip(),
     ).to_dict(),
 )
 

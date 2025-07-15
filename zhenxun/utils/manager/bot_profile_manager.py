@@ -92,6 +92,7 @@ class BotProfileManager:
         bot_profile_file = bot_file_path / "profile.txt"
         if not bot_profile_file.exists():
             logger.debug(f"BOT自我介绍文件不存在: {bot_profile_file}, 跳过读取")
+            bot_file_path.touch()
             return
         async with aiofiles.open(bot_profile_file, encoding="utf-8") as f:
             introduction = await f.read()
