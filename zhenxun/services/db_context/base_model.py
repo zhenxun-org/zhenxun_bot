@@ -1,56 +1,20 @@
 import asyncio
 from collections.abc import Iterable
 import contextlib
-import time
 from typing import Any, ClassVar
 from typing_extensions import Self
-from urllib.parse import urlparse
 
-from nonebot import get_driver
-from nonebot.utils import is_coroutine_callable
-from tortoise import Tortoise
 from tortoise.backends.base.client import BaseDBAsyncClient
-from tortoise.connection import connections
 from tortoise.exceptions import IntegrityError, MultipleObjectsReturned
 from tortoise.models import Model as TortoiseModel
 from tortoise.transactions import in_transaction
 
-from zhenxun.configs.config import BotConfig
 from zhenxun.services.cache import CacheRoot
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import DbLockType
-from zhenxun.utils.exception import HookPriorityException
-from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
-driver = get_driver()
-
-SCRIPT_METHOD = []
-MODELS: list[str] = []
-
-# 数据库操作超时设置（秒）
-DB_TIMEOUT_SECONDS = 3.0
-
-# 性能监控阈值（秒）
-SLOW_QUERY_THRESHOLD = 0.5
-
-LOG_COMMAND = "DbContext"
-
-
-async def with_db_timeout(
-    coro, timeout: float = DB_TIMEOUT_SECONDS, operation: str | None = None
-):
-    """带超时控制的数据库操作"""
-    start_time = time.time()
-    try:
-        result = await asyncio.wait_for(coro, timeout=timeout)
-        elapsed = time.time() - start_time
-        if elapsed > SLOW_QUERY_THRESHOLD and operation:
-            logger.warning(f"慢查询: {operation} 耗时 {elapsed:.3f}s", LOG_COMMAND)
-        return result
-    except asyncio.TimeoutError:
-        if operation:
-            logger.error(f"数据库操作超时: {operation} (>{timeout}s)", LOG_COMMAND)
-        raise
+from .config import LOG_COMMAND, db_model
+from .utils import with_db_timeout
 
 
 class Model(TortoiseModel):
@@ -63,11 +27,11 @@ class Model(TortoiseModel):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        if cls.__module__ not in MODELS:
-            MODELS.append(cls.__module__)
+        if cls.__module__ not in db_model.models:
+            db_model.models.append(cls.__module__)
 
         if func := getattr(cls, "_run_script", None):
-            SCRIPT_METHOD.append((cls.__module__, func))
+            db_model.script_method.append((cls.__module__, func))
 
     @classmethod
     def get_cache_type(cls) -> str | None:
@@ -322,144 +286,3 @@ class Model(TortoiseModel):
                 f"数据库操作异常: {cls.__name__}.safe_get_or_none, {e!s}", LOG_COMMAND
             )
             raise
-
-
-class DbUrlIsNode(HookPriorityException):
-    """
-    数据库链接地址为空
-    """
-
-    pass
-
-
-class DbConnectError(Exception):
-    """
-    数据库连接错误
-    """
-
-    pass
-
-
-POSTGRESQL_CONFIG = {
-    "max_size": 30,  # 最大连接数
-    "min_size": 5,  # 最小保持的连接数（可选）
-}
-
-
-MYSQL_CONFIG = {
-    "max_connections": 20,  # 最大连接数
-    "connect_timeout": 30,  # 连接超时（可选）
-}
-
-SQLITE_CONFIG = {
-    "journal_mode": "WAL",  # 提高并发写入性能
-    "timeout": 30,  # 锁等待超时（可选）
-}
-
-
-def get_config() -> dict:
-    """获取数据库配置"""
-    parsed = urlparse(BotConfig.db_url)
-
-    # 基础配置
-    config = {
-        "connections": {
-            "default": BotConfig.db_url  # 默认直接使用连接字符串
-        },
-        "apps": {
-            "models": {
-                "models": MODELS,
-                "default_connection": "default",
-            }
-        },
-        "timezone": "Asia/Shanghai",
-    }
-
-    # 根据数据库类型应用高级配置
-    if parsed.scheme.startswith("postgres"):
-        config["connections"]["default"] = {
-            "engine": "tortoise.backends.asyncpg",
-            "credentials": {
-                "host": parsed.hostname,
-                "port": parsed.port or 5432,
-                "user": parsed.username,
-                "password": parsed.password,
-                "database": parsed.path[1:],
-            },
-            **POSTGRESQL_CONFIG,
-        }
-    elif parsed.scheme == "mysql":
-        config["connections"]["default"] = {
-            "engine": "tortoise.backends.mysql",
-            "credentials": {
-                "host": parsed.hostname,
-                "port": parsed.port or 3306,
-                "user": parsed.username,
-                "password": parsed.password,
-                "database": parsed.path[1:],
-            },
-            **MYSQL_CONFIG,
-        }
-    elif parsed.scheme == "sqlite":
-        config["connections"]["default"] = {
-            "engine": "tortoise.backends.sqlite",
-            "credentials": {
-                "file_path": parsed.path or ":memory:",
-            },
-            **SQLITE_CONFIG,
-        }
-    return config
-
-
-@PriorityLifecycle.on_startup(priority=1)
-async def init():
-    if not BotConfig.db_url:
-        # raise DbUrlIsNode("数据库配置为空，请在.env.dev中配置DB_URL...")
-        error = f"""
-**********************************************************************
-🌟 **************************** 配置为空 ************************* 🌟
-🚀 请打开 WebUi 进行基础配置 🚀
-🌐 配置地址：http://{driver.config.host}:{driver.config.port}/#/configure 🌐
-***********************************************************************
-***********************************************************************
-        """
-        raise DbUrlIsNode("\n" + error.strip())
-    try:
-        await Tortoise.init(
-            config=get_config(),
-        )
-        if SCRIPT_METHOD:
-            db = Tortoise.get_connection("default")
-            logger.debug(
-                "即将运行SCRIPT_METHOD方法, 合计 "
-                f"<u><y>{len(SCRIPT_METHOD)}</y></u> 个..."
-            )
-            sql_list = []
-            for module, func in SCRIPT_METHOD:
-                try:
-                    sql = await func() if is_coroutine_callable(func) else func()
-                    if sql:
-                        sql_list += sql
-                except Exception as e:
-                    logger.debug(f"{module} 执行SCRIPT_METHOD方法出错...", e=e)
-            for sql in sql_list:
-                logger.debug(f"执行SQL: {sql}")
-                try:
-                    await asyncio.wait_for(
-                        db.execute_query_dict(sql), timeout=DB_TIMEOUT_SECONDS
-                    )
-                    # await TestSQL.raw(sql)
-                except Exception as e:
-                    logger.debug(f"执行SQL: {sql} 错误...", e=e)
-            if sql_list:
-                logger.debug("SCRIPT_METHOD方法执行完毕!")
-        logger.debug("开始生成数据库表结构...")
-        await Tortoise.generate_schemas()
-        logger.debug("数据库表结构生成完毕!")
-        logger.info("Database loaded successfully!")
-    except Exception as e:
-        raise DbConnectError(f"数据库连接错误... e:{e}") from e
-
-
-async def disconnect():
-    await connections.close_all()

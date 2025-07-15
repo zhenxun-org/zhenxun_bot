@@ -8,7 +8,7 @@ from zhenxun.utils.echart_utils import ChartUtils
 from zhenxun.utils.echart_utils.models import Barh
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.image_utils import BuildImage
-from zhenxun.utils.utils import TimeUtils
+from zhenxun.utils.time_utils import TimeUtils
 
 
 class StatisticsManage:
