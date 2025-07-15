@@ -263,6 +263,10 @@ class PluginExtraData(BaseModel):
     """是否显示在菜单中"""
     smart_tools: list[AICallableTag] | None = None
     """智能模式函数工具集"""
+    introduction: str | None = None
+    """BOT自我介绍时插件的自我介绍"""
+    precautions: list[str] | None = None
+    """BOT自我介绍时插件的注意事项"""
 
     def to_dict(self, **kwargs):
         return model_dump(self, **kwargs)

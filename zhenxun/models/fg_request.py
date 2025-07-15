@@ -6,9 +6,13 @@ from tortoise import fields
 from zhenxun.configs.config import BotConfig
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.services.db_context import Model
+from zhenxun.services.log import logger
 from zhenxun.utils.common_utils import SqlUtils
 from zhenxun.utils.enum import RequestHandleType, RequestType
 from zhenxun.utils.exception import NotFoundError
+from zhenxun.utils.manager.bot_profile_manager import BotProfileManager
+from zhenxun.utils.message import MessageUtils
+from zhenxun.utils.platform import PlatformUtils
 
 
 class FgRequest(Model):
@@ -123,6 +127,26 @@ class FgRequest(Model):
                 await bot.set_friend_add_request(
                     flag=req.flag, approve=handle_type == RequestHandleType.APPROVE
                 )
+                if BotProfileManager.is_auto_send_profile():
+                    file_path = await BotProfileManager.build_bot_profile_image(
+                        bot.self_id
+                    )
+                    if file_path:
+                        await PlatformUtils.send_message(
+                            bot,
+                            req.user_id,
+                            None,
+                            MessageUtils.build_message(
+                                [
+                                    f"你好，我是{BotConfig.self_nickname}， "
+                                    "初次见面，希望我们可以好好相处！",
+                                    file_path,
+                                ]
+                            ),
+                        )
+                        logger.info(
+                            "添加好友自动发送BOT自我介绍图片", session=req.user_id
+                        )
             else:
                 await GroupConsole.update_or_create(
                     group_id=req.group_id, defaults={"group_flag": 1}

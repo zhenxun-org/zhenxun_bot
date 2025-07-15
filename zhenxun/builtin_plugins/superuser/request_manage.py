@@ -163,15 +163,20 @@ async def _(
             req = await FgRequest.ignore(handle_id)
     except NotFoundError:
         await MessageUtils.build_message("未发现此id的请求...").finish(reply_to=True)
-    except Exception:
-        await MessageUtils.build_message("其他错误, 可能flag已失效...").finish(
+    except Exception as e:
+        logger.error(f"处理请求失败 ID: {handle_id}", session=session, e=e)
+        await MessageUtils.build_message(f"其他错误, 可能flag已失效...: {e}").finish(
             reply_to=True
         )
     logger.info(
         f"处理请求 Id: {req.id if req else ''}", arparma.header_result, session=session
     )
     await MessageUtils.build_message("成功处理请求!").send(reply_to=True)
-    if req and handle_type == RequestHandleType.APPROVE:
+    if (
+        req
+        and req.request_type == RequestType.GROUP
+        and handle_type == RequestHandleType.APPROVE
+    ):
         await bot.send_private_msg(
             user_id=req.user_id,
             message=f"管理员已同意此次群组邀请，请不要让{BotConfig.self_nickname}受委屈哦（狠狠监控）"

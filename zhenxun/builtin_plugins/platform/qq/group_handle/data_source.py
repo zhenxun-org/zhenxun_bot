@@ -10,7 +10,7 @@ from nonebot_plugin_uninfo import Uninfo
 import ujson as json
 
 from zhenxun.builtin_plugins.platform.qq.exception import ForceAddGroupError
-from zhenxun.configs.config import Config
+from zhenxun.configs.config import BotConfig, Config
 from zhenxun.configs.path_config import DATA_PATH, IMAGE_PATH
 from zhenxun.models.fg_request import FgRequest
 from zhenxun.models.group_console import GroupConsole
@@ -20,6 +20,7 @@ from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.services.log import logger
 from zhenxun.utils.common_utils import CommonUtils
 from zhenxun.utils.enum import RequestHandleType
+from zhenxun.utils.manager.bot_profile_manager import BotProfileManager
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.platform import PlatformUtils
 from zhenxun.utils.utils import FreqLimiter
@@ -153,6 +154,17 @@ class GroupManager:
             await cls.__handle_add_group(bot, group_id, group)
             """刷新群管理员权限"""
             await cls.__refresh_level(bot, group_id)
+            if BotProfileManager.is_auto_send_profile():
+                file_path = await BotProfileManager.build_bot_profile_image(bot.self_id)
+                if file_path:
+                    await MessageUtils.build_message(
+                        [
+                            f"嗨，大家好，我是{BotConfig.self_nickname}， "
+                            "希望我们可以友好相处（眨眼眨眼）！",
+                            file_path,
+                        ]
+                    ).send()
+                    logger.info("加入群组自动发送BOT自我介绍图片", session=group_id)
 
     @classmethod
     def get_path(cls, session: Uninfo) -> Path | None:
