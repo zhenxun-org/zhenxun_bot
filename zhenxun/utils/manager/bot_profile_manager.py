@@ -14,6 +14,7 @@ from zhenxun.configs.path_config import DATA_PATH, TEMPLATE_PATH
 from zhenxun.configs.utils.models import PluginExtraData
 from zhenxun.models.statistics import Statistics
 from zhenxun.models.user_console import UserConsole
+from zhenxun.services.log import logger
 from zhenxun.utils._build_image import BuildImage
 from zhenxun.utils.platform import PlatformUtils
 
@@ -89,6 +90,9 @@ class BotProfileManager:
         bot_file_path = PROFILE_PATH / f"{bot_id}"
         bot_file_path.mkdir(parents=True, exist_ok=True)
         bot_profile_file = bot_file_path / "profile.txt"
+        if not bot_profile_file.exists():
+            logger.debug(f"BOT自我介绍文件不存在: {bot_profile_file}, 跳过读取")
+            return
         async with aiofiles.open(bot_profile_file, encoding="utf-8") as f:
             introduction = await f.read()
         avatar = bot_file_path / f"{bot_id}.png"
