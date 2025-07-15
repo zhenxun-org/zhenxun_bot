@@ -23,8 +23,13 @@ from .config import (
 from .exceptions import DbConnectError, DbUrlIsNode
 from .utils import with_db_timeout
 
+MODELS = db_model.models
+SCRIPT_METHOD = db_model.script_method
+
 __all__ = [
     "DB_TIMEOUT_SECONDS",
+    "MODELS",
+    "SCRIPT_METHOD",
     "SLOW_QUERY_THRESHOLD",
     "DbConnectError",
     "DbUrlIsNode",
@@ -93,6 +98,10 @@ def get_config() -> dict:
 
 @PriorityLifecycle.on_startup(priority=1)
 async def init():
+    global MODELS, SCRIPT_METHOD
+
+    MODELS = db_model.models
+    SCRIPT_METHOD = db_model.script_method
     if not BotConfig.db_url:
         error = prompt.format(host=driver.config.host, port=driver.config.port)
         raise DbUrlIsNode("\n" + error.strip())
