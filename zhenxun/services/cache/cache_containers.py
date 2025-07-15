@@ -54,11 +54,7 @@ class CacheDict:
             key: 字典键
             value: 字典值
         """
-        # 计算过期时间
-        expire_time = 0
-        if self.expire > 0:
-            expire_time = time.time() + self.expire
-
+        expire_time = time.time() + self.expire if self.expire > 0 else 0
         self._data[key] = CacheData(value=value, expire_time=expire_time)
 
     def __delitem__(self, key: str) -> None:
@@ -274,12 +270,11 @@ class CacheList:
             self.clear()
             raise IndexError(f"列表索引 {index} 超出范围")
 
-        if 0 <= index < len(self._data):
-            del self._data[index]
-            # 更新过期时间
-            self._update_expire_time()
-        else:
+        if not 0 <= index < len(self._data):
             raise IndexError(f"列表索引 {index} 超出范围")
+        del self._data[index]
+        # 更新过期时间
+        self._update_expire_time()
 
     def __len__(self) -> int:
         """获取列表长度
@@ -427,6 +422,7 @@ class CacheList:
             self.clear()
             return 0
 
+        # sourcery skip: simplify-constant-sum
         return sum(1 for item in self._data if item.value == value)
 
     def _is_expired(self) -> bool:
@@ -435,10 +431,7 @@ class CacheList:
 
     def _update_expire_time(self) -> None:
         """更新过期时间"""
-        if self.expire > 0:
-            self._expire_time = time.time() + self.expire
-        else:
-            self._expire_time = 0
+        self._expire_time = time.time() + self.expire if self.expire > 0 else 0
 
     def __str__(self) -> str:
         """字符串表示

@@ -54,19 +54,20 @@ class PluginInitManager:
     @classmethod
     async def install_all(cls):
         """运行所有插件安装方法"""
-        if cls.plugins:
-            for module_path, model in cls.plugins.items():
-                if model.install:
-                    class_ = model.class_()
-                    try:
-                        logger.debug(f"开始执行: {module_path}:install 方法")
-                        if is_coroutine_callable(class_.install):
-                            await class_.install()
-                        else:
-                            class_.install()  # type: ignore
-                            logger.debug(f"执行: {module_path}:install 完成")
-                    except Exception as e:
-                        logger.error(f"执行: {module_path}:install 失败", e=e)
+        if not cls.plugins:
+            return
+        for module_path, model in cls.plugins.items():
+            if model.install:
+                class_ = model.class_()
+                try:
+                    logger.debug(f"开始执行: {module_path}:install 方法")
+                    if is_coroutine_callable(class_.install):
+                        await class_.install()
+                    else:
+                        class_.install()  # type: ignore
+                        logger.debug(f"执行: {module_path}:install 完成")
+                except Exception as e:
+                    logger.error(f"执行: {module_path}:install 失败", e=e)
 
     @classmethod
     async def install(cls, module_path: str):

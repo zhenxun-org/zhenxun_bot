@@ -5,7 +5,7 @@ import nonebot
 from nonebot.adapters import Bot
 from nonebot.drivers import Driver
 from tortoise import Tortoise
-from tortoise.exceptions import OperationalError
+from tortoise.exceptions import IntegrityError, OperationalError
 import ujson as json
 
 from zhenxun.models.bot_connect_log import BotConnectLog
@@ -30,9 +30,12 @@ async def _(bot: Bot):
         bot_id=bot.self_id, platform=bot.adapter, connect_time=datetime.now(), type=1
     )
     if not await BotConsole.exists(bot_id=bot.self_id):
-        await BotConsole.create(
-            bot_id=bot.self_id, platform=PlatformUtils.get_platform(bot)
-        )
+        try:
+            await BotConsole.create(
+                bot_id=bot.self_id, platform=PlatformUtils.get_platform(bot)
+            )
+        except IntegrityError as e:
+            logger.warning(f"记录bot: {bot.self_id} 数据已存在...", e=e)
 
 
 @driver.on_bot_disconnect
