@@ -49,11 +49,14 @@ class Config(BaseModel):
 
 class MessageUtils:
     @classmethod
-    def __build_message(cls, msg_list: list[MESSAGE_TYPE]) -> list[Text | Image]:
+    def __build_message(
+        cls, msg_list: list[MESSAGE_TYPE], format_args: dict | None = None
+    ) -> list[Text | Image]:
         """构造消息
 
         参数:
             msg_list: 消息列表
+            format_args: 用于格式化字符串的参数字典.
 
         返回:
             list[Text | Text]: 构造完成的消息列表
@@ -65,7 +68,15 @@ class MessageUtils:
                 if msg.startswith("base64://"):
                     message_list.append(Image(raw=BytesIO(base64.b64decode(msg[9:]))))
                 else:
-                    message_list.append(Text(msg))
+                    formatted_msg = msg
+                    if format_args:
+                        try:
+                            formatted_msg = msg.format_map(format_args)
+                        except (KeyError, IndexError) as e:
+                            logger.debug(
+                                f"格式化字符串 '{msg}' 失败 ({e})，将使用原始文本。"
+                            )
+                    message_list.append(Text(formatted_msg))
             elif isinstance(msg, int | float):
                 message_list.append(Text(str(msg)))
             elif isinstance(msg, Path):
@@ -90,12 +101,15 @@ class MessageUtils:
 
     @classmethod
     def build_message(
-        cls, msg_list: MESSAGE_TYPE | list[MESSAGE_TYPE | list[MESSAGE_TYPE]]
+        cls,
+        msg_list: MESSAGE_TYPE | list[MESSAGE_TYPE | list[MESSAGE_TYPE]],
+        format_args: dict | None = None,
     ) -> UniMessage:
         """构造消息
 
         参数:
             msg_list: 消息列表
+            format_args: 用于格式化字符串的参数字典.
 
         返回:
             UniMessage: 构造完成的消息列表
@@ -105,7 +119,7 @@ class MessageUtils:
             msg_list = [msg_list]
         for m in msg_list:
             _data = m if isinstance(m, list) else [m]
-            message_list += cls.__build_message(_data)  # type: ignore
+            message_list += cls.__build_message(_data, format_args)
         return UniMessage(message_list)
 
     @classmethod

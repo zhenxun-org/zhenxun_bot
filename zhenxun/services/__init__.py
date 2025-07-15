@@ -18,7 +18,7 @@ require("nonebot_plugin_htmlrender")
 require("nonebot_plugin_uninfo")
 require("nonebot_plugin_waiter")
 
-from .db_context import Model, disconnect
+from .db_context import Model, disconnect, with_db_timeout
 from .llm import (
     AI,
     AIConfig,
@@ -80,4 +80,5 @@ __all__ = [
     "search_multimodal",
     "set_global_default_model_name",
     "tool_registry",
+    "with_db_timeout",
 ]

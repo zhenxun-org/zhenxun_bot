@@ -11,14 +11,11 @@ from zhenxun.models.plugin_limit import PluginLimit
 from zhenxun.services.db_context import DB_TIMEOUT_SECONDS
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import LimitWatchType, PluginLimitType
+from zhenxun.utils.limiters import CountLimiter, FreqLimiter, UserBlockLimiter
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.message import MessageUtils
-from zhenxun.utils.utils import (
-    CountLimiter,
-    FreqLimiter,
-    UserBlockLimiter,
-    get_entity_ids,
-)
+from zhenxun.utils.time_utils import TimeUtils
+from zhenxun.utils.utils import get_entity_ids
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .exception import SkipPluginException
@@ -273,9 +270,16 @@ class LimitManager:
             key_type = channel_id or group_id
         if is_limit and not limiter.check(key_type):
             if limit.result:
+                format_kwargs = {}
+                if isinstance(limiter, FreqLimiter):
+                    left_time = limiter.left_time(key_type)
+                    cd_str = TimeUtils.format_duration(left_time)
+                    format_kwargs = {"cd": cd_str}
                 try:
                     await asyncio.wait_for(
-                        MessageUtils.build_message(limit.result).send(),
+                        MessageUtils.build_message(
+                            limit.result, format_args=format_kwargs
+                        ).send(),
                         timeout=DB_TIMEOUT_SECONDS,
                     )
                 except asyncio.TimeoutError:

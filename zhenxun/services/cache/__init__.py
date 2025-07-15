@@ -63,6 +63,7 @@ from functools import wraps
 from typing import Any, ClassVar, Generic, TypeVar, get_type_hints
 
 from aiocache import Cache as AioCache
+from aiocache import SimpleMemoryCache
 from aiocache.base import BaseCache
 from aiocache.serializers import JsonSerializer
 import nonebot
@@ -392,22 +393,14 @@ class CacheManager:
     def cache_backend(self) -> BaseCache | AioCache:
         """获取缓存后端"""
         if self._cache_backend is None:
-            try:
-                from aiocache import RedisCache, SimpleMemoryCache
+            ttl = cache_config.redis_expire
+            if cache_config.cache_mode == CacheMode.NONE:
+                ttl = 0
+                logger.info("缓存功能已禁用，使用非持久化内存缓存", LOG_COMMAND)
+            elif cache_config.cache_mode == CacheMode.REDIS and cache_config.redis_host:
+                try:
+                    from aiocache import RedisCache
 
-                if cache_config.cache_mode == CacheMode.NONE:
-                    # 使用内存缓存但禁用持久化
-                    self._cache_backend = SimpleMemoryCache(
-                        serializer=JsonSerializer(),
-                        namespace=CACHE_KEY_PREFIX,
-                        timeout=30,
-                        ttl=0,  # 设置为0，不缓存
-                    )
-                    logger.info("缓存功能已禁用，使用非持久化内存缓存", LOG_COMMAND)
-                elif (
-                    cache_config.cache_mode == CacheMode.REDIS
-                    and cache_config.redis_host
-                ):
                     # 使用Redis缓存
                     self._cache_backend = RedisCache(
                         serializer=JsonSerializer(),
@@ -419,27 +412,25 @@ class CacheManager:
                         password=cache_config.redis_password,
                     )
                     logger.info(
-                        f"使用Redis缓存，地址: {cache_config.redis_host}", LOG_COMMAND
+                        f"使用Redis缓存，地址: {cache_config.redis_host}",
+                        LOG_COMMAND,
                     )
-                else:
-                    # 默认使用内存缓存
-                    self._cache_backend = SimpleMemoryCache(
-                        serializer=JsonSerializer(),
-                        namespace=CACHE_KEY_PREFIX,
-                        timeout=30,
-                        ttl=cache_config.redis_expire,
+                    return self._cache_backend
+                except ImportError as e:
+                    logger.error(
+                        "导入aiocache[redis]失败，将默认使用内存缓存...",
+                        LOG_COMMAND,
+                        e=e,
                     )
-                    logger.info("使用内存缓存", LOG_COMMAND)
-            except ImportError:
-                logger.error("导入aiocache模块失败，使用内存缓存", LOG_COMMAND)
-                # 使用内存缓存
-                self._cache_backend = AioCache(
-                    cache_class=AioCache.MEMORY,
-                    serializer=JsonSerializer(),
-                    namespace=CACHE_KEY_PREFIX,
-                    timeout=30,
-                    ttl=cache_config.redis_expire,
-                )
+            else:
+                logger.info("使用内存缓存", LOG_COMMAND)
+            # 默认使用内存缓存
+            self._cache_backend = SimpleMemoryCache(
+                serializer=JsonSerializer(),
+                namespace=CACHE_KEY_PREFIX,
+                timeout=30,
+                ttl=ttl,
+            )
         return self._cache_backend
 
     @property

@@ -1,3 +1,17 @@
+from nonebot.exception import IgnoredException
+
+
+class CooldownError(IgnoredException):
+    """
+    冷却异常，用于在冷却时中断事件处理。
+    继承自 IgnoredException，不会在控制台留下错误堆栈。
+    """
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
 class HookPriorityException(BaseException):
     """
     钩子优先级异常
