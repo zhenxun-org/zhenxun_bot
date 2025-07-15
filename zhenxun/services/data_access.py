@@ -147,10 +147,14 @@ class DataAccess(Generic[T]):
             return str(kwargs[self.key_field])
         return None
 
-    async def safe_get_or_none(self, *args, **kwargs) -> T | None:
-        """安全的获取单条数据
+    async def _get_with_cache(
+        self, db_query_func, allow_not_exist: bool = True, *args, **kwargs
+    ) -> T | None:
+        """带缓存的通用获取方法
 
         参数:
+            db_query_func: 数据库查询函数
+            allow_not_exist: 是否允许数据不存在
             *args: 查询参数
             **kwargs: 查询参数
 
@@ -161,8 +165,8 @@ class DataAccess(Generic[T]):
         if not self.cache_type or cache_config.cache_mode == CacheMode.NONE:
             logger.debug(f"{self.model_cls.__name__} 直接从数据库获取数据: {kwargs}")
             return await with_db_timeout(
-                self.model_cls.safe_get_or_none(*args, **kwargs),
-                operation=f"{self.model_cls.__name__}.safe_get_or_none",
+                db_query_func(*args, **kwargs),
+                operation=f"{self.model_cls.__name__}.{db_query_func.__name__}",
             )
 
         # 尝试从缓存获取
@@ -184,7 +188,12 @@ class DataAccess(Generic[T]):
                     logger.debug(
                         f"{self.model_cls.__name__} 从缓存获取到空结果: {cache_key}"
                     )
-                    return None
+                    if allow_not_exist:
+                        logger.debug(
+                            f"{self.model_cls.__name__} 从缓存获取"
+                            f"到空结果: {cache_key}, 允许数据不存在，返回None"
+                        )
+                        return None
                 elif data:
                     # 缓存命中
                     self._cache_stats[self.cache_type]["hits"] += 1
@@ -201,7 +210,7 @@ class DataAccess(Generic[T]):
 
         # 如果缓存中没有，从数据库获取
         logger.debug(f"{self.model_cls.__name__} 从数据库获取数据: {kwargs}")
-        data = await self.model_cls.safe_get_or_none(*args, **kwargs)
+        data = await db_query_func(*args, **kwargs)
 
         # 如果获取到数据，存入缓存
         if data:
@@ -238,92 +247,52 @@ class DataAccess(Generic[T]):
 
         return data
 
-    async def get_or_none(self, *args, **kwargs) -> T | None:
+    async def get_or_none(
+        self, allow_not_exist: bool = True, *args, **kwargs
+    ) -> T | None:
         """获取单条数据
 
         参数:
+            allow_not_exist: 是否允许数据不存在
             *args: 查询参数
             **kwargs: 查询参数
 
         返回:
             Optional[T]: 查询结果，如果不存在返回None
         """
-        # 如果没有缓存类型，直接从数据库获取
-        if not self.cache_type or cache_config.cache_mode == CacheMode.NONE:
-            logger.debug(f"{self.model_cls.__name__} 直接从数据库获取数据: {kwargs}")
-            return await with_db_timeout(
-                self.model_cls.get_or_none(*args, **kwargs),
-                operation=f"{self.model_cls.__name__}.get_or_none",
-            )
+        return await self._get_with_cache(
+            self.model_cls.get_or_none, allow_not_exist, *args, **kwargs
+        )
 
-        # 尝试从缓存获取
-        cache_key = None
-        try:
-            # 尝试构建缓存键
-            cache_key = self._build_cache_key_from_kwargs(**kwargs)
+    async def safe_get_or_none(
+        self, allow_not_exist: bool = True, *args, **kwargs
+    ) -> T | None:
+        """安全的获取单条数据
 
-            # 如果成功构建缓存键，尝试从缓存获取
-            if cache_key is not None:
-                data = await self.cache.get(cache_key)
-                if data == self._NULL_RESULT:
-                    # 空结果缓存命中
-                    self._cache_stats[self.cache_type]["null_hits"] += 1
-                    logger.debug(
-                        f"{self.model_cls.__name__} 从缓存获取到空结果: {cache_key}"
-                    )
-                    return None
-                elif data:
-                    # 缓存命中
-                    self._cache_stats[self.cache_type]["hits"] += 1
-                    logger.debug(
-                        f"{self.model_cls.__name__} 从缓存获取数据成功: {cache_key}"
-                    )
-                    return cast(T, data)
-                else:
-                    # 缓存未命中
-                    self._cache_stats[self.cache_type]["misses"] += 1
-                    logger.debug(f"{self.model_cls.__name__} 缓存未命中: {cache_key}")
-        except Exception as e:
-            logger.error(f"{self.model_cls.__name__} 从缓存获取数据失败: {kwargs}", e=e)
+        参数:
+            allow_not_exist: 是否允许数据不存在
+            *args: 查询参数
+            **kwargs: 查询参数
 
-        # 如果缓存中没有，从数据库获取
-        logger.debug(f"{self.model_cls.__name__} 从数据库获取数据: {kwargs}")
-        data = await self.model_cls.get_or_none(*args, **kwargs)
+        返回:
+            Optional[T]: 查询结果，如果不存在返回None
+        """
+        return await self._get_with_cache(
+            self.model_cls.safe_get_or_none, allow_not_exist, *args, **kwargs
+        )
 
-        # 如果获取到数据，存入缓存
-        if data:
-            try:
-                cache_key = self._build_cache_key_for_item(data)
-                # 生成缓存键
-                if cache_key is not None:
-                    # 存入缓存
-                    await self.cache.set(cache_key, data)
-                    self._cache_stats[self.cache_type]["sets"] += 1
-                    logger.debug(
-                        f"{self.model_cls.__name__} 数据已存入缓存: {cache_key}"
-                    )
-            except Exception as e:
-                logger.error(
-                    f"{self.model_cls.__name__} 存入缓存失败，参数: {kwargs}", e=e
-                )
-        elif cache_key is not None:
-            # 如果没有获取到数据，缓存空结果
-            try:
-                # 存入空结果缓存，使用较短的过期时间
-                await self.cache.set(
-                    cache_key, self._NULL_RESULT, expire=self._NULL_RESULT_TTL
-                )
-                self._cache_stats[self.cache_type]["null_sets"] += 1
-                logger.debug(
-                    f"{self.model_cls.__name__} 空结果已存入缓存: {cache_key},"
-                    f" TTL={self._NULL_RESULT_TTL}秒"
-                )
-            except Exception as e:
-                logger.error(
-                    f"{self.model_cls.__name__} 存入空结果缓存失败，参数: {kwargs}", e=e
-                )
+    async def get_by_func_or_none(
+        self, func, allow_not_exist: bool = True, *args, **kwargs
+    ) -> T | None:
+        """根据函数获取数据
 
-        return data
+        参数:
+            func: 函数
+            allow_not_exist: 是否允许数据不存在
+            *args: 查询参数
+            **kwargs: 查询参数
+        """
+        return await self._get_with_cache(func, allow_not_exist, *args, **kwargs)
 
     async def clear_cache(self, **kwargs) -> bool:
         """只清除缓存，不影响数据库数据

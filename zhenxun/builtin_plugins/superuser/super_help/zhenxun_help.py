@@ -51,7 +51,7 @@ async def build_html_help():
             }
         },
         pages={
-            "viewport": {"width": 1024, "height": 1024},
+            "viewport": {"width": 824, "height": 10},
             "base_url": f"file://{TEMPLATE_PATH}",
         },
         wait=2,
