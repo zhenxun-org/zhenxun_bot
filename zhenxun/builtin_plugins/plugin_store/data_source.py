@@ -198,7 +198,9 @@ class StoreManager:
         except ValueError as e:
             return str(e)
         db_plugin_list = await cls.get_loaded_plugins("module")
-        plugin_info = next(p for p in plugin_list if p.module == plugin_key)
+        plugin_info = next((p for p in plugin_list if p.module == plugin_key), None)
+        if plugin_info is None:
+            return f"未找到插件 {plugin_key}"
         if plugin_info.module in [p[0] for p in db_plugin_list]:
             return f"插件 {plugin_info.name} 已安装，无需重复安装"
         is_external = True
@@ -307,7 +309,9 @@ class StoreManager:
             plugin_key = await cls._resolve_plugin_key(plugin_id)
         except ValueError as e:
             return str(e)
-        plugin_info = next(p for p in plugin_list if p.module == plugin_key)
+        plugin_info = next((p for p in plugin_list if p.module == plugin_key), None)
+        if plugin_info is None:
+            return f"未找到插件 {plugin_key}"
         path = BASE_PATH
         if plugin_info.github_url:
             path = BASE_PATH / "plugins"
@@ -383,7 +387,9 @@ class StoreManager:
             plugin_key = await cls._resolve_plugin_key(plugin_id)
         except ValueError as e:
             return str(e)
-        plugin_info = next(p for p in plugin_list if p.module == plugin_key)
+        plugin_info = next((p for p in plugin_list if p.module == plugin_key), None)
+        if plugin_info is None:
+            return f"未找到插件 {plugin_key}"
         logger.info(f"尝试更新插件 {plugin_info.name}", LOG_COMMAND)
         db_plugin_list = await cls.get_loaded_plugins("module", "version")
         suc_plugin = {p[0]: (p[1] or "Unknown") for p in db_plugin_list}
