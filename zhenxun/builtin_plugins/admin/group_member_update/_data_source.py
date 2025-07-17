@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 
 import nonebot
 from nonebot.adapters import Bot
@@ -32,7 +33,9 @@ class MemberUpdateManage:
         """
         driver = nonebot.get_driver()
         default_auth = Config.get_config("admin_bot_manage", "ADMIN_DEFAULT_AUTH")
-        nickname = member.nick or member.user.name or ""
+        nickname = re.sub(
+            r"[\x00-\x09\x0b-\x1f\x7f-\x9f]", "", member.nick or member.user.name or ""
+        )
         role = member.role
         db_user_uid = [u.user_id for u in db_user]
         uid2name = {u.user_id: u.user_name for u in db_user}
