@@ -1,4 +1,7 @@
-class DbUrlIsNode(Exception):
+from zhenxun.utils.exception import HookPriorityException
+
+
+class DbUrlIsNode(HookPriorityException):
     """
     数据库链接地址为空
     """
