@@ -76,6 +76,7 @@ class BotProfileManager:
                 _f = PROFILE_IMAGE_PATH / f
                 if _f.is_file():
                     _f.unlink()
+        cls._bot_data.clear()
 
     @classmethod
     async def _read_profile(cls, bot_id: str):

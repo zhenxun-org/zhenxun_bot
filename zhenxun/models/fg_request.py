@@ -1,3 +1,4 @@
+import asyncio
 from typing_extensions import Self
 
 from nonebot.adapters import Bot
@@ -132,6 +133,7 @@ class FgRequest(Model):
                         bot.self_id
                     )
                     if file_path:
+                        await asyncio.sleep(2)
                         await PlatformUtils.send_message(
                             bot,
                             req.user_id,
