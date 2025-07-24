@@ -1,0 +1,26 @@
+name: Force Sync to Aliyun
+on:
+  push:
+    branches: ["main"]
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global http.postBuffer 524288000  
+          git config --global core.compression 0
+
+      - name: Add aliyun remote
+        run: |
+          git remote add aliyun https://${{secrets.ALIYUN_ACCOUNT}}:${{secrets.ALIYUN_PASSWORD}}@codeup.aliyun.com/67a361cf556e6cdab537117a/zhenxun-org/zhenxun_bot.git
+          git fetch aliyun main --force  # 强制更新本地引用
+
+      - name: Force push
+        run: git push --progress --force aliyun HEAD:main
