@@ -161,7 +161,6 @@ class UpdateManager:
                 logger.debug(f"恢复旧的webui文件夹 {BACKUP_PATH}", COMMAND)
                 BACKUP_PATH.rename(WEBUI_PATH)
             raise e
-        return ""
 
     @classmethod
     async def check_version(cls) -> str:

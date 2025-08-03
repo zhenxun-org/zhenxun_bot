@@ -207,12 +207,12 @@ class RepoFileManager:
         )
         if repo_type is None:
             try:
-                return await self.get_aliyun_file_content(
-                    repo_name, file_path, branch, ignore_error
-                )
-            except Exception:
                 return await self.get_github_file_content(
                     repo_url, file_path, ignore_error
+                )
+            except Exception:
+                return await self.get_aliyun_file_content(
+                    repo_name, file_path, branch, ignore_error
                 )
 
         try:
@@ -257,17 +257,17 @@ class RepoFileManager:
         )
         try:
             if repo_type is None:
-                # 尝试阿里云，失败则尝试GitHub
+                # 尝试GitHub，失败则尝试阿里云
                 try:
-                    return await self._list_aliyun_directory_files(
-                        repo_name, directory_path, branch, recursive
+                    return await self._list_github_directory_files(
+                        repo_url, directory_path, branch, recursive
                     )
                 except Exception as e:
                     logger.warning(
-                        "获取阿里云目录文件失败，尝试GitHub", LOG_COMMAND, e=e
+                        "获取GitHub目录文件失败，尝试阿里云", LOG_COMMAND, e=e
                     )
-                    return await self._list_github_directory_files(
-                        repo_url, directory_path, branch, recursive
+                    return await self._list_aliyun_directory_files(
+                        repo_name, directory_path, branch, recursive
                     )
             if repo_type == RepoType.GITHUB:
                 return await self._list_github_directory_files(
@@ -526,6 +526,7 @@ class RepoFileManager:
                     content_bytes = content.encode("utf-8")
                 else:
                     content_bytes = content
+                logger.warning(f"写入文件: {local_path}")
                 async with aiofiles.open(local_path, "wb") as f:
                     await f.write(content_bytes)
             result.success = True

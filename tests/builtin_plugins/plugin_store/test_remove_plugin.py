@@ -96,7 +96,7 @@ async def test_plugin_not_exist_remove(
         ctx.receive_event(bot=bot, event=event)
         ctx.should_call_send(
             event=event,
-            message=Message(message="插件ID不存在..."),
+            message=Message(message="移除插件 Id: -1 失败 e: 插件ID不存在..."),
             result=None,
             bot=bot,
         )

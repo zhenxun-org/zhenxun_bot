@@ -164,7 +164,7 @@ class StoreManager:
     @classmethod
     async def get_plugin_by_value(
         cls, index_or_module: str, is_update: bool = False
-    ) -> StorePluginInfo:
+    ) -> tuple[StorePluginInfo, bool]:
         """获取插件信息
 
         参数:
@@ -177,19 +177,30 @@ class StoreManager:
 
         返回:
             StorePluginInfo: 插件信息
+            bool: 是否是外部插件
         """
         plugin_list, extra_plugin_list = await cls.get_data()
-        all_plugin_list = plugin_list + extra_plugin_list
+        plugin_info = None
+        is_external = False
         db_plugin_list = await cls.get_loaded_plugins("module")
         plugin_key = await cls._resolve_plugin_key(index_or_module)
-        plugin_info = next((p for p in all_plugin_list if p.module == plugin_key), None)
+        for p in plugin_list:
+            if p.module == plugin_key:
+                is_external = False
+                plugin_info = p
+                break
+        for p in extra_plugin_list:
+            if p.module == plugin_key:
+                is_external = True
+                plugin_info = p
+                break
         if not plugin_info:
             raise PluginStoreException(f"插件不存在: {plugin_key}")
         if not is_update and plugin_info.module in [p[0] for p in db_plugin_list]:
             raise PluginStoreException(f"插件 {plugin_info.name} 已安装，无需重复安装")
         if plugin_info.module not in [p[0] for p in db_plugin_list] and is_update:
             raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法更新")
-        return plugin_info
+        return plugin_info, is_external
 
     @classmethod
     async def add_plugin(cls, index_or_module: str) -> str:
@@ -201,11 +212,9 @@ class StoreManager:
         返回:
             str: 返回消息
         """
-        plugin_info = await cls.get_plugin_by_value(index_or_module)
-        is_external = True
+        plugin_info, is_external = await cls.get_plugin_by_value(index_or_module)
         if plugin_info.github_url is None:
             plugin_info.github_url = DEFAULT_GITHUB_URL
-            is_external = False
         version_split = plugin_info.version.split("-")
         if len(version_split) > 1:
             github_url_split = plugin_info.github_url.split("/tree/")
@@ -301,7 +310,7 @@ class StoreManager:
         返回:
             str: 返回消息
         """
-        plugin_info = await cls.get_plugin_by_value(index_or_module)
+        plugin_info, _ = await cls.get_plugin_by_value(index_or_module)
         path = BASE_PATH
         if plugin_info.github_url:
             path = BASE_PATH / "plugins"
@@ -373,17 +382,15 @@ class StoreManager:
         返回:
             str: 返回消息
         """
-        plugin_info = await cls.get_plugin_by_value(index_or_module, True)
+        plugin_info, is_external = await cls.get_plugin_by_value(index_or_module, True)
         logger.info(f"尝试更新插件 {plugin_info.name}", LOG_COMMAND)
         db_plugin_list = await cls.get_loaded_plugins("module", "version")
         suc_plugin = {p[0]: (p[1] or "Unknown") for p in db_plugin_list}
         logger.debug(f"当前插件列表: {suc_plugin}", LOG_COMMAND)
         if cls.check_version_is_new(plugin_info, suc_plugin):
             return f"插件 {plugin_info.name} 已是最新版本"
-        is_external = True
         if plugin_info.github_url is None:
             plugin_info.github_url = DEFAULT_GITHUB_URL
-            is_external = False
         await cls.install_plugin_with_repo(
             plugin_info.github_url,
             plugin_info.module_path,
@@ -402,8 +409,9 @@ class StoreManager:
         返回:
             str: 返回消息
         """
-        plugin_list: list[StorePluginInfo] = await cls.get_data()
-        plugin_name_list = [p.name for p in plugin_list]
+        plugin_list, extra_plugin_list = await cls.get_data()
+        all_plugin_list = plugin_list + extra_plugin_list
+        plugin_name_list = [p.name for p in all_plugin_list]
         update_failed_list = []
         update_success_list = []
         result = "--已更新{}个插件 {}个失败 {}个成功--"

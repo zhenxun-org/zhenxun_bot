@@ -207,7 +207,7 @@ def init_mocker_path(mocker: MockerFixture, tmp_path: Path):
     )
 
     mocker.patch(
-        "zhenxun.builtin_plugins.auto_update._data_source.install_requirement",
+        "zhenxun.utils.manager.virtual_env_package_manager.VirtualEnvPackageManager.install_requirement",
         return_value=None,
     )
     mock_tmp_path = mocker.patch(
