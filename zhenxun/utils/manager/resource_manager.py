@@ -34,13 +34,13 @@ class ResourceManager:
     ):
         if (FONT_PATH.exists() and os.listdir(FONT_PATH)) and not force:
             return
-        if cls.TMP_PATH.exists():
-            logger.debug(
-                "resources临时文件夹已存在，移除resources临时文件夹", LOG_COMMAND
-            )
-            await clean_git(cls.TMP_PATH)
-            shutil.rmtree(cls.TMP_PATH, ignore_errors=True)
         if is_zip:
+            if cls.TMP_PATH.exists():
+                logger.debug(
+                    "resources临时文件夹已存在，移除resources临时文件夹", LOG_COMMAND
+                )
+                await clean_git(cls.TMP_PATH)
+                shutil.rmtree(cls.TMP_PATH, ignore_errors=True)
             cls.TMP_PATH.mkdir(parents=True, exist_ok=True)
             try:
                 await cls.__download_resources()
@@ -49,9 +49,9 @@ class ResourceManager:
                 logger.error("获取resources资源包失败", LOG_COMMAND, e=e)
         else:
             if git_source == "ali":
-                await AliyunRepoManager.update(cls.GITHUB_URL, cls.TMP_PATH)
+                await AliyunRepoManager.update(cls.GITHUB_URL, cls.RESOURCE_PATH)
             else:
-                await GithubRepoManager.update(cls.GITHUB_URL, cls.TMP_PATH)
+                await GithubRepoManager.update(cls.GITHUB_URL, cls.RESOURCE_PATH)
             cls.UNZIP_PATH = cls.TMP_PATH / "resources"
             cls.file_handle()
         if cls.TMP_PATH.exists():
@@ -63,7 +63,7 @@ class ResourceManager:
     def file_handle(cls):
         if not cls.UNZIP_PATH:
             return
-        cls.__recursive_folder(cls.UNZIP_PATH, "resources")
+        cls.__recursive_folder(cls.UNZIP_PATH, ".")
 
     @classmethod
     def __recursive_folder(cls, dir: Path, parent_path: str):

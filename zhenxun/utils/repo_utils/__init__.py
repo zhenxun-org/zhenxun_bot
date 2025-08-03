@@ -24,6 +24,9 @@ from .models import (
     RepoFileInfo,
     RepoType,
     RepoUpdateResult,
+    SubmoduleConfig,
+    SubmoduleInfo,
+    SubmoduleUpdateResult,
 )
 from .utils import check_git, filter_files, glob_to_regex, run_git_command
 
@@ -53,6 +56,9 @@ __all__ = [
     "RepoType",
     "RepoUpdateError",
     "RepoUpdateResult",
+    "SubmoduleConfig",
+    "SubmoduleInfo",
+    "SubmoduleUpdateResult",
     "check_git",
     "filter_files",
     "glob_to_regex",
