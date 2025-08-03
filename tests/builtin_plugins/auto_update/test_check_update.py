@@ -324,7 +324,7 @@ async def test_check_update_release(
         ctx.should_call_api(
             "send_msg",
             _v11_private_message_send(
-                message="检测真寻已更新，版本更新：v0.2.2 -> v0.2.2\n开始更新...",
+                message="检测真寻已更新，版本更新：v0.2.2\n开始更新...",
                 user_id=UserId.SUPERUSER,
             ),
         )
@@ -420,8 +420,7 @@ async def test_check_update_main(
         ctx.should_call_api(
             "send_msg",
             _v11_private_message_send(
-                message="检测真寻已更新，版本更新：v0.2.2 -> v0.2.2-e6f17c4\n"
-                "开始更新...",
+                message="检测真寻已更新，版本更新：v0.2.2\n开始更新...",
                 user_id=UserId.SUPERUSER,
             ),
         )
