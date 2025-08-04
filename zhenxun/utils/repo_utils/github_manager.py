@@ -29,11 +29,7 @@ from .models import (
     RepoFileInfo,
     RepoType,
     RepoUpdateResult,
-    SubmoduleConfig,
-    SubmoduleInfo,
-    SubmoduleUpdateResult,
 )
-from .submodule_manager import SubmoduleManager
 
 
 class GithubManager(BaseRepoManager):
@@ -47,7 +43,6 @@ class GithubManager(BaseRepoManager):
             config: 配置，如果为None则使用默认配置
         """
         super().__init__(config)
-        self.submodule_manager = SubmoduleManager(self)
 
     async def update_repo(
         self,
@@ -529,158 +524,3 @@ class GithubManager(BaseRepoManager):
                 raise RepoDownloadError("下载文件失败")
 
         raise RepoDownloadError("下载文件失败: 超过最大重试次数")
-
-    # 子模块相关方法
-    async def init_submodules(
-        self,
-        main_repo_path: Path,
-        submodule_configs: list[SubmoduleConfig],
-    ) -> bool:
-        """
-        初始化子模块
-
-        参数:
-            main_repo_path: 主仓库路径
-            submodule_configs: 子模块配置列表
-
-        返回:
-            bool: 是否成功
-        """
-        return await self.submodule_manager.init_submodules(
-            main_repo_path, submodule_configs
-        )
-
-    async def update_submodules(
-        self,
-        main_repo_path: Path,
-        submodule_configs: list[SubmoduleConfig],
-    ) -> list[SubmoduleUpdateResult]:
-        """
-        更新子模块
-
-        参数:
-            main_repo_path: 主仓库路径
-            submodule_configs: 子模块配置列表
-
-        返回:
-            list[SubmoduleUpdateResult]: 更新结果列表
-        """
-        return await self.submodule_manager.update_submodules(
-            main_repo_path, submodule_configs
-        )
-
-    async def get_submodule_info(
-        self,
-        main_repo_path: Path,
-        submodule_configs: list[SubmoduleConfig],
-    ) -> list[SubmoduleInfo]:
-        """
-        获取子模块信息
-
-        参数:
-            main_repo_path: 主仓库路径
-            submodule_configs: 子模块配置列表
-
-        返回:
-            list[SubmoduleInfo]: 子模块信息列表
-        """
-        return await self.submodule_manager.get_submodule_info(
-            main_repo_path, submodule_configs
-        )
-
-    def save_submodule_configs(
-        self,
-        main_repo_path: Path,
-        submodule_configs: list[SubmoduleConfig],
-    ) -> bool:
-        """
-        保存子模块配置到文件
-
-        参数:
-            main_repo_path: 主仓库路径
-            submodule_configs: 子模块配置列表
-
-        返回:
-            bool: 是否成功
-        """
-        return self.submodule_manager.save_submodule_configs(
-            main_repo_path, submodule_configs
-        )
-
-    async def load_submodule_configs(
-        self, main_repo_path: Path
-    ) -> list[SubmoduleConfig]:
-        """
-        从文件加载子模块配置
-
-        参数:
-            main_repo_path: 主仓库路径
-
-        返回:
-            list[SubmoduleConfig]: 子模块配置列表
-        """
-        return await self.submodule_manager.load_submodule_configs(main_repo_path)
-
-    async def update_with_submodules(
-        self,
-        repo_url: str,
-        local_path: Path,
-        branch: str = "main",
-        submodule_configs: list[SubmoduleConfig] | None = None,
-        use_git: bool = True,
-        force: bool = False,
-        include_patterns: list[str] | None = None,
-        exclude_patterns: list[str] | None = None,
-    ) -> RepoUpdateResult:
-        """
-        更新仓库并处理子模块
-
-        参数:
-            repo_url: 仓库URL，格式为 https://github.com/owner/repo
-            local_path: 本地保存路径
-            branch: 分支名称
-            submodule_configs: 子模块配置列表
-            use_git: 是否使用Git命令更新
-            force: 是否强制更新
-            include_patterns: 包含的文件模式列表
-            exclude_patterns: 排除的文件模式列表
-
-        返回:
-            RepoUpdateResult: 更新结果
-        """
-        # 更新主仓库
-        result = await self.update(
-            repo_url,
-            local_path,
-            branch,
-            use_git,
-            force,
-            include_patterns,
-            exclude_patterns,
-        )
-
-        # 如果没有子模块配置，直接返回结果
-        if not submodule_configs:
-            return result
-
-        # 处理子模块
-        try:
-            submodule_results = await self.update_submodules(
-                local_path, submodule_configs
-            )
-            result.submodule_results = submodule_results
-
-            # 检查子模块更新是否成功
-            failed_submodules = [r for r in submodule_results if not r.success]
-            if failed_submodules:
-                logger.warning(
-                    "部分子模块更新失败:"
-                    f" {[r.submodule_name for r in failed_submodules]}",
-                    LOG_COMMAND,
-                )
-
-        except Exception as e:
-            logger.error(f"处理子模块时发生错误: {e}", LOG_COMMAND)
-            result.error_message += f"; 子模块处理失败: {e}"
-
-        return result

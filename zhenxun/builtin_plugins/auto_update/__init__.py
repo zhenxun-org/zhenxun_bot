@@ -16,10 +16,6 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.configs.utils import PluginExtraData
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
-from zhenxun.utils.manager.resource_manager import (
-    DownloadResourceException,
-    ResourceManager,
-)
 from zhenxun.utils.message import MessageUtils
 
 from ._data_source import UpdateManager
@@ -68,7 +64,6 @@ _matcher = on_alconna(
         Option("-f|--force", action=store_true, help_text="强制更新"),
         Option("-s", Args["source?", ["git", "ali"]], help_text="更新源"),
         Option("-z|--zip", action=store_true, help_text="下载zip文件"),
-        Option("-t", Args["update_type?", ["git", "download"]], help_text="更新方式"),
     ),
     priority=1,
     block=True,
@@ -86,39 +81,52 @@ async def _(
     force: Query[bool] = Query("force", False),
     source: Query[str] = Query("source", "ali"),
     zip: Query[bool] = Query("zip", False),
-    update_type: Query[str] = Query("update_type", "git"),
 ):
     result = ""
     await MessageUtils.build_message("正在进行检查更新...").send(reply_to=True)
-    if ver_type.result in {"main", "release"}:
+    ver_type_str = ver_type.result
+    source_str = source.result
+    if ver_type_str in {"main", "release"}:
         if not ver_type.available:
-            result = await UpdateManager.check_version()
+            result += await UpdateManager.check_version()
             logger.info("查看当前版本...", "检查更新", session=session)
             await MessageUtils.build_message(result).finish()
         try:
-            result = await UpdateManager.update(
+            result += await UpdateManager.update_zhenxun(
                 bot,
                 session.user.id,
-                ver_type.result,
+                ver_type_str,  # type: ignore
                 force.result,
-                source.result,
+                source_str,  # type: ignore
                 zip.result,
-                update_type.result,
             )
+            await MessageUtils.build_message(result).finish(reply_to=True)
         except Exception as e:
             logger.error("版本更新失败...", "检查更新", session=session, e=e)
             await MessageUtils.build_message(f"更新版本失败...e: {e}").finish()
     elif ver_type.result == "webui":
-        result = await UpdateManager.update_webui(zip.result, source.result)
+        if zip.result:
+            source_str = None
+        try:
+            result += await UpdateManager.update_webui(
+                source_str,  # type: ignore
+                "dist",
+            )
+        except Exception as e:
+            logger.error("WebUI更新失败...", "检查更新", session=session, e=e)
+            result += "\nWebUI更新错误..."
     if resource.result or ver_type.result == "resource":
         try:
-            await ResourceManager.init_resources(True, zip.result, source.result)
-            result += "\n资源文件更新成功！"
-        except DownloadResourceException:
-            result += "\n资源更新下载失败..."
+            if zip.result:
+                source_str = None
+            result += await UpdateManager.update_resources(
+                source_str,  # type: ignore
+                "main",
+                force.result,
+            )
         except Exception as e:
             logger.error("资源更新下载失败...", "检查更新", session=session, e=e)
-            result += "\n资源更新未知错误..."
+            result += "\n资源更新错误..."
     if result:
         await MessageUtils.build_message(result.strip()).finish()
     await MessageUtils.build_message("更新版本失败...").finish()

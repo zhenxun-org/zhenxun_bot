@@ -16,62 +16,6 @@ class RepoType(str, Enum):
 
 
 @dataclass
-class SubmoduleConfig:
-    """子模块配置"""
-
-    # 子模块名称
-    name: str
-    # 子模块路径（相对于主仓库）
-    path: str
-    # 子模块仓库URL
-    repo_url: str
-    # 分支名称
-    branch: str = "main"
-    # 是否启用
-    enabled: bool = True
-    # 包含的文件模式列表
-    include_patterns: list[str] | None = None
-    # 排除的文件模式列表
-    exclude_patterns: list[str] | None = None
-
-
-@dataclass
-class SubmoduleInfo:
-    """子模块信息"""
-
-    # 子模块配置
-    config: SubmoduleConfig
-    # 当前版本
-    current_version: str = ""
-    # 最新版本
-    latest_version: str = ""
-    # 最后更新时间
-    last_update: datetime | None = None
-    # 更新状态
-    update_status: str = "unknown"  # unknown, up_to_date, outdated, error
-
-
-@dataclass
-class SubmoduleUpdateResult:
-    """子模块更新结果"""
-
-    # 子模块名称
-    submodule_name: str
-    # 子模块路径
-    submodule_path: str
-    # 旧版本
-    old_version: str
-    # 新版本
-    new_version: str
-    # 是否成功
-    success: bool = False
-    # 错误消息
-    error_message: str = ""
-    # 变更的文件列表
-    changed_files: list[str] = field(default_factory=list)
-
-
-@dataclass
 class RepoFileInfo:
     """仓库文件信息"""
 
@@ -123,8 +67,6 @@ class RepoUpdateResult:
     error_message: str = ""
     # 变更的文件列表
     changed_files: list[str] = field(default_factory=list)
-    # 子模块更新结果
-    submodule_results: list[SubmoduleUpdateResult] = field(default_factory=list)
 
 
 @dataclass

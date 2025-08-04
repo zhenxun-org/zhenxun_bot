@@ -57,11 +57,13 @@ async def run_git_command(
     """
     try:
         full_command = f"git {command}"
+        # 将Path对象转换为字符串
+        cwd_str = str(cwd) if cwd else None
         process = await asyncio.create_subprocess_shell(
             full_command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
+            cwd=cwd_str,
         )
         stdout_bytes, stderr_bytes = await process.communicate()
 
