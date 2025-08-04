@@ -1,5 +1,3 @@
-# ruff: noqa: ASYNC230
-
 from pathlib import Path
 
 from respx import MockRouter

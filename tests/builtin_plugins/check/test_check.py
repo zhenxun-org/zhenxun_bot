@@ -136,20 +136,20 @@ async def test_check(
         + f"- {mock_psutil.cpu_freq.return_value.current}Ghz "
         + f"[{mock_psutil.cpu_count.return_value} core]",
         "cpu_process": mock_psutil.cpu_percent.return_value,
-        "ram_info": f"{round(mock_psutil.virtual_memory.return_value.used / (1024 ** 3), 1)}"  # noqa: E501
-        + f" / {round(mock_psutil.virtual_memory.return_value.total / (1024 ** 3), 1)}"
+        "ram_info": f"{round(mock_psutil.virtual_memory.return_value.used / (1024**3), 1)}"  # noqa: E501
+        + f" / {round(mock_psutil.virtual_memory.return_value.total / (1024**3), 1)}"
         + " GB",
         "ram_process": mock_psutil.virtual_memory.return_value.percent,
-        "swap_info": f"{round(mock_psutil.swap_memory.return_value.used / (1024 ** 3), 1)}"  # noqa: E501
-        + f" / {round(mock_psutil.swap_memory.return_value.total / (1024 ** 3), 1)} GB",
+        "swap_info": f"{round(mock_psutil.swap_memory.return_value.used / (1024**3), 1)}"  # noqa: E501
+        + f" / {round(mock_psutil.swap_memory.return_value.total / (1024**3), 1)} GB",
         "swap_process": mock_psutil.swap_memory.return_value.percent,
-        "disk_info": f"{round(mock_psutil.disk_usage.return_value.used / (1024 ** 3), 1)}"  # noqa: E501
-        + f" / {round(mock_psutil.disk_usage.return_value.total / (1024 ** 3), 1)} GB",
+        "disk_info": f"{round(mock_psutil.disk_usage.return_value.used / (1024**3), 1)}"  # noqa: E501
+        + f" / {round(mock_psutil.disk_usage.return_value.total / (1024**3), 1)} GB",
         "disk_process": mock_psutil.disk_usage.return_value.percent,
         "brand_raw": cpuinfo_get_cpu_info["brand_raw"],
         "baidu": "red",
         "google": "red",
-        "system": f"{platform_uname.system} " f"{platform_uname.release}",
+        "system": f"{platform_uname.system} {platform_uname.release}",
         "version": __get_version(),
         "plugin_count": len(nonebot.get_loaded_plugins()),
         "nickname": BotConfig.self_nickname,
@@ -244,8 +244,7 @@ async def test_check_arm(
                 "brand_raw": "",
                 "baidu": "red",
                 "google": "red",
-                "system": f"{platform_uname_arm.system} "
-                f"{platform_uname_arm.release}",
+                "system": f"{platform_uname_arm.system} {platform_uname_arm.release}",
                 "version": __get_version(),
                 "plugin_count": len(nonebot.get_loaded_plugins()),
                 "nickname": BotConfig.self_nickname,
