@@ -57,6 +57,7 @@ async def get_fastest_release_formats() -> list[str]:
 async def get_fastest_release_source_formats() -> list[str]:
     """获取最快的发行版源码下载地址格式"""
     formats: dict[str, str] = {
+        "https://github.bibk.top": "https://github.bibk.top/{owner}/{repo}/releases/download/{version}/{filename}",
         "https://codeload.github.com/": RELEASE_SOURCE_FORMAT,
         "https://p.102333.xyz/": f"https://p.102333.xyz/{RELEASE_SOURCE_FORMAT}",
     }

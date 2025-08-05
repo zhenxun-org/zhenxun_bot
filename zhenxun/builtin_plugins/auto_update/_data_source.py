@@ -4,10 +4,13 @@ from nonebot.adapters import Bot
 
 from zhenxun.services.log import logger
 from zhenxun.utils.manager.virtual_env_package_manager import VirtualEnvPackageManager
-from zhenxun.utils.manager.zhenxun_repo_manager import ZhenxunRepoManager
+from zhenxun.utils.manager.zhenxun_repo_manager import (
+    ZhenxunRepoConfig,
+    ZhenxunRepoManager,
+)
 from zhenxun.utils.platform import PlatformUtils
 
-from .config import LOG_COMMAND, REQUIREMENTS_FILE, VERSION_FILE
+LOG_COMMAND = "AutoUpdate"
 
 
 class UpdateManager:
@@ -127,7 +130,9 @@ class UpdateManager:
             await PlatformUtils.send_superuser(
                 bot, "真寻更新完成，开始安装依赖...", user_id
             )
-            await VirtualEnvPackageManager.install_requirement(REQUIREMENTS_FILE)
+            await VirtualEnvPackageManager.install_requirement(
+                ZhenxunRepoConfig.REQUIREMENTS_FILE
+            )
             return (
                 f"版本更新完成！\n版本: {cur_version} -> {new_version}\n"
                 "请重新启动真寻以完成更新!"
@@ -147,7 +152,9 @@ class UpdateManager:
             await PlatformUtils.send_superuser(
                 bot, "真寻更新完成，开始安装依赖...", user_id
             )
-            await VirtualEnvPackageManager.install_requirement(REQUIREMENTS_FILE)
+            await VirtualEnvPackageManager.install_requirement(
+                ZhenxunRepoConfig.REQUIREMENTS_FILE
+            )
             return (
                 f"版本更新完成！\n"
                 f"版本: {cur_version} -> {result.new_version}\n"
@@ -164,7 +171,9 @@ class UpdateManager:
             str: 当前版本号
         """
         _version = "v0.0.0"
-        if VERSION_FILE.exists():
-            if text := VERSION_FILE.open(encoding="utf8").readline():
+        if ZhenxunRepoConfig.ZHENXUN_BOT_VERSION_FILE.exists():
+            if text := ZhenxunRepoConfig.ZHENXUN_BOT_VERSION_FILE.open(
+                encoding="utf8"
+            ).readline():
                 _version = text.split(":")[-1].strip()
         return _version
