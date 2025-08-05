@@ -100,7 +100,6 @@ async def _(
                 source_str,  # type: ignore
                 zip.result,
             )
-            await MessageUtils.build_message(result).finish(reply_to=True)
         except Exception as e:
             logger.error("版本更新失败...", "检查更新", session=session, e=e)
             await MessageUtils.build_message(f"更新版本失败...e: {e}").finish()

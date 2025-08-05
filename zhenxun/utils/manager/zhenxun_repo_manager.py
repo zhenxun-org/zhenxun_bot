@@ -45,11 +45,11 @@ class ZhenxunRepoConfig:
     ZHENXUN_BOT_BACKUP_PATH = Path() / "backup"
     # 需要替换的文件夹
     ZHENXUN_BOT_UPDATE_FOLDERS: ClassVar[list[str]] = [
-        "builtin_plugins",
-        "services",
-        "utils",
-        "models",
-        "configs",
+        "zhenxun/builtin_plugins",
+        "zhenxun/services",
+        "zhenxun/utils",
+        "zhenxun/models",
+        "zhenxun/configs",
     ]
     ZHENXUN_BOT_VERSION_FILE_STRING = "__version__"
     ZHENXUN_BOT_VERSION_FILE = Path() / ZHENXUN_BOT_VERSION_FILE_STRING
@@ -262,11 +262,10 @@ class ZhenxunRepoManagerClass:
                     self.config.ZHENXUN_BOT_UNZIP_PATH / filename,
                     Path() / filename,
                 )
+            logger.debug("备份真寻更新文件完成!", LOG_COMMAND)
+            unzip_dir = next(self.config.ZHENXUN_BOT_UNZIP_PATH.iterdir())
             for folder in self.config.ZHENXUN_BOT_UPDATE_FOLDERS:
-                self.__copy_files(
-                    self.config.ZHENXUN_BOT_UNZIP_PATH / folder,
-                    self.config.ZHENXUN_BOT_CODE_PATH / folder,
-                )
+                self.__copy_files(unzip_dir / folder, Path() / folder)
             logger.debug("移动真寻更新文件完成!", LOG_COMMAND)
             if self.config.ZHENXUN_BOT_UNZIP_PATH.exists():
                 shutil.rmtree(self.config.ZHENXUN_BOT_UNZIP_PATH)

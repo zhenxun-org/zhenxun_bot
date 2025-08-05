@@ -86,7 +86,7 @@ from bag_users t1
 @PriorityLifecycle.on_startup(priority=5)
 async def _():
     if not ZhenxunRepoManager.check_resources_exists():
-        await ZhenxunRepoManager.resources_update(branch="test")
+        await ZhenxunRepoManager.resources_update()
     """签到与用户的数据迁移"""
     if goods_list := await GoodsInfo.filter(uuid__isnull=True).all():
         for goods in goods_list:
