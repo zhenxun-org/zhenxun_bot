@@ -207,12 +207,12 @@ class RepoFileManager:
         )
         if repo_type is None:
             try:
-                return await self.get_github_file_content(
-                    repo_url, file_path, ignore_error
-                )
-            except Exception:
                 return await self.get_aliyun_file_content(
                     repo_name, file_path, branch, ignore_error
+                )
+            except Exception:
+                return await self.get_github_file_content(
+                    repo_url, file_path, ignore_error
                 )
 
         try:
