@@ -103,7 +103,7 @@ class BanManage:
         session: EventSession,
         idx: int | None = None,
         is_superuser: bool = False,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str | None]:
         """unban目标用户
 
         参数:
@@ -114,7 +114,7 @@ class BanManage:
             is_superuser: 是否为超级用户操作
 
         返回:
-            tuple[bool, str]: 是否unban成功, 群组/用户id或提示
+            tuple[bool, str | Non]: 是否unban成功, 群组/用户id或提示
         """
         user_level = 9999
         if not is_superuser and user_id and session.id1:
@@ -126,10 +126,10 @@ class BanManage:
             if ban_data.ban_level > user_level:
                 return False, "unBan权限等级不足捏..."
             await ban_data.delete()
-            return (True, ban_data.user_id if ban_data.user_id else ban_data.group_id)
+            return True, ban_data.user_id or ban_data.group_id
         elif await BanConsole.check_ban_level(user_id, group_id, user_level):
             await BanConsole.unban(user_id, group_id)
-            return True, str(group_id)
+            return True, group_id
         return False, "该用户/群组不在黑名单中不足捏..."
 
     @classmethod
