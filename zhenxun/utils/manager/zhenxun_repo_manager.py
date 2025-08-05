@@ -384,9 +384,10 @@ class ZhenxunRepoManagerClass:
             tf = zipfile.ZipFile(self.config.RESOURCE_ZIP_FILE)
             tf.extractall(self.config.RESOURCE_UNZIP_PATH)
             logger.debug("解压文件压缩包完成...", LOG_COMMAND)
-            self.__copy_files(
-                self.config.RESOURCE_UNZIP_PATH, self.config.RESOURCE_PATH, True
-            )
+            unzip_dir = next(self.config.RESOURCE_UNZIP_PATH.iterdir())
+            self.__copy_files(unzip_dir, self.config.RESOURCE_PATH, True)
+            logger.debug("复制资源文件完成!", LOG_COMMAND)
+            shutil.rmtree(self.config.RESOURCE_UNZIP_PATH, ignore_errors=True)
         except Exception as e:
             logger.error("解压资源文件失败...", LOG_COMMAND, e=e)
             raise
