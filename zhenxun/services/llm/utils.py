@@ -5,6 +5,7 @@ LLM 模块的工具和转换函数
 import base64
 import copy
 from pathlib import Path
+from typing import Any
 
 from nonebot.adapters import Message as PlatformMessage
 from nonebot_plugin_alconna.uniseg import (
@@ -21,7 +22,7 @@ from nonebot_plugin_alconna.uniseg import (
 from zhenxun.services.log import logger
 from zhenxun.utils.http_utils import AsyncHttpx
 
-from .types import LLMContentPart
+from .types import LLMContentPart, LLMMessage
 
 
 async def unimsg_to_llm_parts(message: UniMessage) -> list[LLMContentPart]:
@@ -112,9 +113,9 @@ async def unimsg_to_llm_parts(message: UniMessage) -> list[LLMContentPart]:
 
         elif isinstance(seg, At):
             if seg.flag == "all":
-                part = LLMContentPart.text_part("[Mentioned Everyone]")
+                part = LLMContentPart.text_part("[提及所有人]")
             else:
-                part = LLMContentPart.text_part(f"[Mentioned user: {seg.target}]")
+                part = LLMContentPart.text_part(f"[提及用户: {seg.target}]")
 
         elif isinstance(seg, Reply):
             if seg.msg:
@@ -126,15 +127,51 @@ async def unimsg_to_llm_parts(message: UniMessage) -> list[LLMContentPart]:
                         reply_text = str(seg.msg).strip()
                     if reply_text:
                         part = LLMContentPart.text_part(
-                            f'[Replied to: "{reply_text[:50]}..."]'
+                            f'[回复消息: "{reply_text[:50]}..."]'
                         )
                 except Exception:
-                    part = LLMContentPart.text_part("[Replied to a message]")
+                    part = LLMContentPart.text_part("[回复了一条消息]")
 
         if part:
             parts.append(part)
 
     return parts
+
+
+async def normalize_to_llm_messages(
+    message: str | UniMessage | LLMMessage | list[LLMContentPart] | list[LLMMessage],
+    instruction: str | None = None,
+) -> list[LLMMessage]:
+    """
+    将多种输入格式标准化为 LLMMessage 列表，并可选地添加系统指令。
+    这是处理 LLM 输入的核心工具函数。
+
+    参数:
+        message: 要标准化的输入消息。
+        instruction: 可选的系统指令。
+
+    返回:
+        list[LLMMessage]: 标准化后的消息列表。
+    """
+    messages = []
+    if instruction:
+        messages.append(LLMMessage.system(instruction))
+
+    if isinstance(message, LLMMessage):
+        messages.append(message)
+    elif isinstance(message, list) and all(isinstance(m, LLMMessage) for m in message):
+        messages.extend(message)
+    elif isinstance(message, str):
+        messages.append(LLMMessage.user(message))
+    elif isinstance(message, UniMessage):
+        content_parts = await unimsg_to_llm_parts(message)
+        messages.append(LLMMessage.user(content_parts))
+    elif isinstance(message, list):
+        messages.append(LLMMessage.user(message))  # type: ignore
+    else:
+        raise TypeError(f"不支持的消息类型: {type(message)}")
+
+    return messages
 
 
 def create_multimodal_message(
@@ -282,3 +319,37 @@ def _sanitize_request_body_for_logging(body: dict) -> dict:
     except Exception as e:
         logger.warning(f"日志净化失败: {e}，将记录原始请求体。")
         return body
+
+
+def sanitize_schema_for_llm(schema: Any, api_type: str) -> Any:
+    """
+    递归地净化 JSON Schema，移除特定 LLM API 不支持的关键字。
+
+    参数:
+        schema: 要净化的 JSON Schema (可以是字典、列表或其它类型)。
+        api_type: 目标 API 的类型，例如 'gemini'。
+
+    返回:
+        Any: 净化后的 JSON Schema。
+    """
+    if isinstance(schema, dict):
+        schema_copy = {}
+        for key, value in schema.items():
+            if api_type == "gemini":
+                unsupported_keys = ["exclusiveMinimum", "exclusiveMaximum", "default"]
+                if key in unsupported_keys:
+                    continue
+
+                if key == "format" and isinstance(value, str):
+                    supported_formats = ["enum", "date-time"]
+                    if value not in supported_formats:
+                        continue
+
+            schema_copy[key] = sanitize_schema_for_llm(value, api_type)
+        return schema_copy
+
+    elif isinstance(schema, list):
+        return [sanitize_schema_for_llm(item, api_type) for item in schema]
+
+    else:
+        return schema

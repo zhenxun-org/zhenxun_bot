@@ -6,9 +6,10 @@ LLM 模型实现类
 
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from contextlib import AsyncExitStack
 import json
-from typing import Any
+from typing import Any, TypeVar
+
+from pydantic import BaseModel
 
 from zhenxun.services.log import logger
 
@@ -28,33 +29,25 @@ from .types import (
     LLMException,
     LLMMessage,
     LLMResponse,
-    LLMTool,
     ModelDetail,
     ProviderConfig,
+    ToolExecutable,
 )
 from .types.capabilities import ModelCapabilities, ModelModality
 from .utils import _sanitize_request_body_for_logging
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class LLMModelBase(ABC):
     """LLM模型抽象基类"""
 
     @abstractmethod
-    async def generate_text(
-        self,
-        prompt: str,
-        history: list[dict[str, str]] | None = None,
-        **kwargs: Any,
-    ) -> str:
-        """生成文本"""
-        pass
-
-    @abstractmethod
     async def generate_response(
         self,
         messages: list[LLMMessage],
         config: LLMGenerationConfig | None = None,
-        tools: list[LLMTool] | None = None,
+        tools: dict[str, ToolExecutable] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
@@ -311,7 +304,7 @@ class LLMModel(LLMModelBase):
         adapter,
         messages: list[LLMMessage],
         config: LLMGenerationConfig | None,
-        tools: list[LLMTool] | None,
+        tools: dict[str, ToolExecutable] | None,
         tool_choice: str | dict[str, Any] | None,
         http_client: LLMHttpClient,
     ):
@@ -339,7 +332,7 @@ class LLMModel(LLMModelBase):
         adapter,
         messages: list[LLMMessage],
         config: LLMGenerationConfig | None,
-        tools: list[LLMTool] | None,
+        tools: dict[str, ToolExecutable] | None,
         tool_choice: str | dict[str, Any] | None,
         http_client: LLMHttpClient,
         failed_keys: set[str] | None = None,
@@ -428,65 +421,22 @@ class LLMModel(LLMModelBase):
         if self._is_closed:
             raise RuntimeError(f"LLMModel实例已关闭: {self}")
 
-    async def generate_text(
-        self,
-        prompt: str,
-        history: list[dict[str, str]] | None = None,
-        **kwargs: Any,
-    ) -> str:
-        """生成文本"""
-        self._check_not_closed()
-
-        messages: list[LLMMessage] = []
-
-        if history:
-            for msg in history:
-                role = msg.get("role", "user")
-                content_text = msg.get("content", "")
-                messages.append(LLMMessage(role=role, content=content_text))
-
-        messages.append(LLMMessage.user(prompt))
-
-        model_fields = getattr(LLMGenerationConfig, "model_fields", {})
-        request_specific_config_dict = {
-            k: v for k, v in kwargs.items() if k in model_fields
-        }
-        request_specific_config = None
-        if request_specific_config_dict:
-            request_specific_config = LLMGenerationConfig(
-                **request_specific_config_dict
-            )
-
-        for key in request_specific_config_dict:
-            kwargs.pop(key, None)
-
-        response = await self.generate_response(
-            messages,
-            config=request_specific_config,
-            **kwargs,
-        )
-        return response.text
-
     async def generate_response(
         self,
         messages: list[LLMMessage],
         config: LLMGenerationConfig | None = None,
-        tools: list[LLMTool] | None = None,
+        tools: dict[str, ToolExecutable] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
-        """生成高级响应"""
+        """
+        生成高级响应。
+        此方法现在只执行 *单次* LLM API 调用，并将结果（包括工具调用请求）返回。
+        """
         self._check_not_closed()
 
         from .adapters import get_adapter_for_api_type
         from .config.generation import create_generation_config_from_kwargs
-
-        adapter = get_adapter_for_api_type(self.api_type)
-        if not adapter:
-            raise LLMException(
-                f"未找到适用于 API 类型 '{self.api_type}' 的适配器",
-                code=LLMErrorCode.CONFIGURATION_ERROR,
-            )
 
         final_request_config = self._generation_config or LLMGenerationConfig()
         if kwargs:
@@ -500,43 +450,19 @@ class LLMModel(LLMModelBase):
             merged_dict.update(config.to_dict())
             final_request_config = LLMGenerationConfig(**merged_dict)
 
+        adapter = get_adapter_for_api_type(self.api_type)
         http_client = await self._get_http_client()
 
-        async with AsyncExitStack() as stack:
-            activated_tools = []
-            if tools:
-                for tool in tools:
-                    if tool.type == "mcp" and callable(tool.mcp_session):
-                        func_obj = getattr(tool.mcp_session, "func", None)
-                        tool_name = (
-                            getattr(func_obj, "__name__", "unknown")
-                            if func_obj
-                            else "unknown"
-                        )
-                        logger.debug(f"正在激活 MCP 工具会话: {tool_name}")
+        response, _ = await self._execute_with_smart_retry(
+            adapter,
+            messages,
+            final_request_config,
+            tools,
+            tool_choice,
+            http_client,
+        )
 
-                        active_session = await stack.enter_async_context(
-                            tool.mcp_session()
-                        )
-
-                        activated_tools.append(
-                            LLMTool.from_mcp_session(
-                                session=active_session, annotations=tool.annotations
-                            )
-                        )
-                    else:
-                        activated_tools.append(tool)
-
-            llm_response = await self._execute_with_smart_retry(
-                adapter,
-                messages,
-                final_request_config,
-                activated_tools if activated_tools else None,
-                tool_choice,
-                http_client,
-            )
-
-        return llm_response
+        return response
 
     async def generate_embeddings(
         self,

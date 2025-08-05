@@ -12,6 +12,7 @@ from zhenxun.services.llm.core import KeyStatus
 from zhenxun.services.llm.manager import (
     reset_key_status,
 )
+from zhenxun.services.llm.types import LLMMessage
 
 
 class DataSource:
@@ -58,7 +59,7 @@ class DataSource:
         start_time = time.monotonic()
         try:
             async with await get_model_instance(model_name_str) as model:
-                await model.generate_text("你好")
+                await model.generate_response([LLMMessage.user("你好")])
             end_time = time.monotonic()
             latency = (end_time - start_time) * 1000
             return (

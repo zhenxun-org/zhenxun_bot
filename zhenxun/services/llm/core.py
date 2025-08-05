@@ -335,10 +335,10 @@ async def with_smart_retry(
             latency = (time.monotonic() - start_time) * 1000
 
             if key_store and isinstance(result, tuple) and len(result) == 2:
-                final_result, api_key_used = result
+                _, api_key_used = result
                 if api_key_used:
                     await key_store.record_success(api_key_used, latency)
-                return final_result
+                return result
             else:
                 return result
 

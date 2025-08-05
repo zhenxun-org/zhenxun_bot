@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from zhenxun.services.log import logger
+from zhenxun.utils.pydantic_compat import model_dump
 
 from ..types.enums import ResponseFormat
 from ..types.exceptions import LLMErrorCode, LLMException
@@ -45,6 +46,9 @@ class ModelConfigOverride(BaseModel):
     thinking_budget: float | None = Field(
         default=None, ge=0.0, le=1.0, description="思考预算"
     )
+    include_thoughts: bool | None = Field(
+        default=None, description="是否在响应中包含思维过程（Gemini专用）"
+    )
     safety_settings: dict[str, str] | None = Field(default=None, description="安全设置")
     response_modalities: list[str] | None = Field(
         default=None, description="响应模态类型"
@@ -62,22 +66,16 @@ class ModelConfigOverride(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """转换为字典，排除None值"""
+
+        model_data = model_dump(self, exclude_none=True)
+
         result = {}
-        model_data = getattr(self, "model_dump", lambda: {})()
-        if not model_data:
-            model_data = {}
-            for field_name, _ in self.__class__.__dict__.get(
-                "model_fields", {}
-            ).items():
-                value = getattr(self, field_name, None)
-                if value is not None:
-                    model_data[field_name] = value
         for key, value in model_data.items():
-            if value is not None:
-                if key == "custom_params" and isinstance(value, dict):
-                    result.update(value)
-                else:
-                    result[key] = value
+            if key == "custom_params" and isinstance(value, dict):
+                result.update(value)
+            else:
+                result[key] = value
+
         return result
 
     def merge_with_base_config(
@@ -157,6 +155,10 @@ class LLMGenerationConfig(ModelConfigOverride):
                         params["responseSchema"] = self.response_schema
                     logger.debug(f"为 {api_type} 启用 JSON MIME 类型输出模式")
 
+        if self.custom_params:
+            custom_mapped = apply_api_specific_mappings(self.custom_params, api_type)
+            params.update(custom_mapped)
+
         if api_type == "gemini":
             if (
                 self.response_format != ResponseFormat.JSON
@@ -169,16 +171,27 @@ class LLMGenerationConfig(ModelConfigOverride):
 
             if self.response_schema is not None and "responseSchema" not in params:
                 params["responseSchema"] = self.response_schema
-            if self.thinking_budget is not None:
-                params["thinkingBudget"] = self.thinking_budget
+
+            if self.thinking_budget is not None or self.include_thoughts is not None:
+                thinking_config = params.setdefault("thinkingConfig", {})
+
+                if self.thinking_budget is not None:
+                    max_budget = 24576
+                    budget_value = int(self.thinking_budget * max_budget)
+                    thinking_config["thinkingBudget"] = budget_value
+                    logger.debug(
+                        f"已将 thinking_budget (float: {self.thinking_budget}) "
+                        f"转换为 Gemini API 的整数格式: {budget_value}"
+                    )
+
+                if self.include_thoughts is not None:
+                    thinking_config["includeThoughts"] = self.include_thoughts
+                    logger.debug(f"已设置 includeThoughts: {self.include_thoughts}")
+
             if self.safety_settings is not None:
                 params["safetySettings"] = self.safety_settings
             if self.response_modalities is not None:
                 params["responseModalities"] = self.response_modalities
-
-        if self.custom_params:
-            custom_mapped = apply_api_specific_mappings(self.custom_params, api_type)
-            params.update(custom_mapped)
 
         logger.debug(f"为{api_type}转换配置参数: {len(params)}个参数")
         return params

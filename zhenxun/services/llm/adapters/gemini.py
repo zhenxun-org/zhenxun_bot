@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from zhenxun.services.log import logger
 
 from ..types.exceptions import LLMErrorCode, LLMException
+from ..utils import sanitize_schema_for_llm
 from .base import BaseAdapter, RequestData, ResponseData
 
 if TYPE_CHECKING:
@@ -14,7 +15,8 @@ if TYPE_CHECKING:
     from ..service import LLMModel
     from ..types.content import LLMMessage
     from ..types.enums import EmbeddingTaskType
-    from ..types.models import LLMTool, LLMToolCall
+    from ..types.models import LLMToolCall
+    from ..types.protocols import ToolExecutable
 
 
 class GeminiAdapter(BaseAdapter):
@@ -44,7 +46,7 @@ class GeminiAdapter(BaseAdapter):
         api_key: str,
         messages: list["LLMMessage"],
         config: "LLMGenerationConfig | None" = None,
-        tools: list["LLMTool"] | None = None,
+        tools: dict[str, "ToolExecutable"] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> RequestData:
         """准备高级请求"""
@@ -128,11 +130,22 @@ class GeminiAdapter(BaseAdapter):
                     )
                     tool_result_obj = {"raw_output": content_str}
 
+                if isinstance(tool_result_obj, list):
+                    logger.debug(
+                        f"工具 '{msg.name}' 的返回结果是列表，"
+                        f"正在为Gemini API包装为JSON对象。"
+                    )
+                    final_response_payload = {"result": tool_result_obj}
+                elif not isinstance(tool_result_obj, dict):
+                    final_response_payload = {"result": tool_result_obj}
+                else:
+                    final_response_payload = tool_result_obj
+
                 current_parts.append(
                     {
                         "functionResponse": {
                             "name": msg.name,
-                            "response": tool_result_obj,
+                            "response": final_response_payload,
                         }
                     }
                 )
@@ -145,22 +158,26 @@ class GeminiAdapter(BaseAdapter):
 
         all_tools_for_request = []
         if tools:
-            for tool in tools:
-                if tool.type == "function" and tool.function:
-                    all_tools_for_request.append(
-                        {"functionDeclarations": [tool.function]}
-                    )
-                elif tool.type == "mcp" and tool.mcp_session:
-                    if callable(tool.mcp_session):
-                        raise ValueError(
-                            "适配器接收到未激活的 MCP 会话工厂。"
-                            "会话工厂应该在 LLMModel.generate_response 中被激活。"
-                        )
-                    all_tools_for_request.append(
-                        tool.mcp_session.to_api_tool(api_type=self.api_type)
-                    )
-                elif tool.type == "google_search":
-                    all_tools_for_request.append({"googleSearch": {}})
+            import asyncio
+
+            from zhenxun.utils.pydantic_compat import model_dump
+
+            definition_tasks = [
+                executable.get_definition() for executable in tools.values()
+            ]
+            tool_definitions = await asyncio.gather(*definition_tasks)
+
+            function_declarations = []
+            for tool_def in tool_definitions:
+                tool_def.parameters = sanitize_schema_for_llm(
+                    tool_def.parameters, api_type="gemini"
+                )
+                function_declarations.append(model_dump(tool_def))
+
+            if function_declarations:
+                all_tools_for_request.append(
+                    {"functionDeclarations": function_declarations}
+                )
 
         if effective_config:
             if getattr(effective_config, "enable_grounding", False):
@@ -289,49 +306,21 @@ class GeminiAdapter(BaseAdapter):
         self, model: "LLMModel", config: "LLMGenerationConfig | None" = None
     ) -> dict[str, Any]:
         """构建Gemini生成配置"""
-        generation_config: dict[str, Any] = {}
-
         effective_config = config if config is not None else model._generation_config
 
-        if effective_config:
-            base_api_params = effective_config.to_api_params(
-                api_type="gemini", model_name=model.model_name
+        if not effective_config:
+            return {}
+
+        generation_config = effective_config.to_api_params(
+            api_type="gemini", model_name=model.model_name
+        )
+
+        if generation_config:
+            param_keys = list(generation_config.keys())
+            logger.debug(
+                f"构建Gemini生成配置完成，包含 {len(generation_config)} 个参数: "
+                f"{param_keys}"
             )
-            generation_config.update(base_api_params)
-
-            if getattr(effective_config, "response_mime_type", None):
-                generation_config["responseMimeType"] = (
-                    effective_config.response_mime_type
-                )
-
-            if getattr(effective_config, "response_schema", None):
-                generation_config["responseSchema"] = effective_config.response_schema
-
-            thinking_budget = getattr(effective_config, "thinking_budget", None)
-            if thinking_budget is not None:
-                if "thinkingConfig" not in generation_config:
-                    generation_config["thinkingConfig"] = {}
-                generation_config["thinkingConfig"]["thinkingBudget"] = thinking_budget
-
-            if getattr(effective_config, "response_modalities", None):
-                modalities = effective_config.response_modalities
-                if isinstance(modalities, list):
-                    generation_config["responseModalities"] = [
-                        m.upper() for m in modalities
-                    ]
-                elif isinstance(modalities, str):
-                    generation_config["responseModalities"] = [modalities.upper()]
-
-            generation_config = {
-                k: v for k, v in generation_config.items() if v is not None
-            }
-
-            if generation_config:
-                param_keys = list(generation_config.keys())
-                logger.debug(
-                    f"构建Gemini生成配置完成，包含 {len(generation_config)} 个参数: "
-                    f"{param_keys}"
-                )
 
         return generation_config
 
@@ -410,10 +399,16 @@ class GeminiAdapter(BaseAdapter):
 
             text_content = ""
             parsed_tool_calls: list["LLMToolCall"] | None = None
+            thought_summary_parts = []
+            answer_parts = []
 
             for part in parts:
                 if "text" in part:
-                    text_content += part["text"]
+                    answer_parts.append(part["text"])
+                elif "thought" in part:
+                    thought_summary_parts.append(part["thought"])
+                elif "thoughtSummary" in part:
+                    thought_summary_parts.append(part["thoughtSummary"])
                 elif "functionCall" in part:
                     if parsed_tool_calls is None:
                         parsed_tool_calls = []
@@ -445,11 +440,26 @@ class GeminiAdapter(BaseAdapter):
                     result = part["codeExecutionResult"]
                     if result.get("outcome") == "OK":
                         output = result.get("output", "")
-                        text_content += f"\n[代码执行结果]:\n{output}\n"
+                        answer_parts.append(f"\n[代码执行结果]:\n```\n{output}\n```\n")
                     else:
-                        text_content += (
+                        answer_parts.append(
                             f"\n[代码执行失败]: {result.get('outcome', 'UNKNOWN')}\n"
                         )
+
+            if thought_summary_parts:
+                full_thought_summary = "\n".join(thought_summary_parts).strip()
+                full_answer = "".join(answer_parts).strip()
+
+                formatted_parts = []
+                if full_thought_summary:
+                    formatted_parts.append(f"🤔 **思考过程**\n\n{full_thought_summary}")
+                if full_answer:
+                    separator = "\n\n---\n\n" if full_thought_summary else ""
+                    formatted_parts.append(f"{separator}✅ **回答**\n\n{full_answer}")
+
+                text_content = "".join(formatted_parts)
+            else:
+                text_content = "".join(answer_parts)
 
             usage_info = response_json.get("usageMetadata")
 

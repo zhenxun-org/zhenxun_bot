@@ -5,15 +5,13 @@ LLM 服务模块 - 公共 API 入口
 """
 
 from .api import (
-    analyze,
-    analyze_multimodal,
     chat,
     code,
     embed,
     generate,
-    pipeline_chat,
+    generate_structured,
+    run_with_tools,
     search,
-    search_multimodal,
 )
 from .config import (
     CommonOverrides,
@@ -34,7 +32,7 @@ from .manager import (
     set_global_default_model_name,
 )
 from .session import AI, AIConfig
-from .tools import tool_registry
+from .tools import function_tool, tool_provider_manager
 from .types import (
     EmbeddingTaskType,
     LLMContentPart,
@@ -42,8 +40,6 @@ from .types import (
     LLMException,
     LLMMessage,
     LLMResponse,
-    LLMTool,
-    MCPCompatible,
     ModelDetail,
     ModelInfo,
     ModelProvider,
@@ -66,8 +62,6 @@ __all__ = [
     "LLMGenerationConfig",
     "LLMMessage",
     "LLMResponse",
-    "LLMTool",
-    "MCPCompatible",
     "ModelDetail",
     "ModelInfo",
     "ModelName",
@@ -77,14 +71,14 @@ __all__ = [
     "ToolCategory",
     "ToolMetadata",
     "UsageInfo",
-    "analyze",
-    "analyze_multimodal",
     "chat",
     "clear_model_cache",
     "code",
     "create_multimodal_message",
     "embed",
+    "function_tool",
     "generate",
+    "generate_structured",
     "get_cache_stats",
     "get_global_default_model_name",
     "get_model_instance",
@@ -92,11 +86,10 @@ __all__ = [
     "list_embedding_models",
     "list_model_identifiers",
     "message_to_unimessage",
-    "pipeline_chat",
     "register_llm_configs",
+    "run_with_tools",
     "search",
-    "search_multimodal",
     "set_global_default_model_name",
-    "tool_registry",
+    "tool_provider_manager",
     "unimsg_to_llm_parts",
 ]

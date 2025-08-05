@@ -4,26 +4,37 @@ LLM 数据模型定义
 包含模型信息、配置、工具定义和响应数据的模型类。
 """
 
-from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from .enums import ModelProvider, ToolCategory
 
-if TYPE_CHECKING:
-    from .protocols import MCPCompatible
-
-    MCPSessionType = (
-        MCPCompatible | Callable[[], AbstractAsyncContextManager[MCPCompatible]] | None
-    )
-else:
-    MCPCompatible = object
-    MCPSessionType = Any
-
 ModelName = str | None
+
+
+class ToolDefinition(BaseModel):
+    """
+    一个结构化的工具定义模型，用于向LLM描述工具。
+    """
+
+    name: str = Field(..., description="工具的唯一名称标识")
+    description: str = Field(..., description="工具功能的清晰描述")
+    parameters: dict[str, Any] = Field(
+        default_factory=dict, description="符合JSON Schema规范的参数定义"
+    )
+
+
+class ToolResult(BaseModel):
+    """
+    一个结构化的工具执行结果模型。
+    """
+
+    output: Any = Field(..., description="返回给LLM的、可JSON序列化的原始输出")
+    display_content: str | None = Field(
+        default=None, description="用于日志或UI展示的人类可读的执行摘要"
+    )
 
 
 @dataclass(frozen=True)
@@ -105,55 +116,6 @@ class LLMToolCall(BaseModel):
 
     id: str
     function: LLMToolFunction
-
-
-class LLMTool(BaseModel):
-    """LLM 工具定义（支持 MCP 风格）"""
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    type: str = "function"
-    function: dict[str, Any] | None = None
-    mcp_session: MCPSessionType = None
-    annotations: dict[str, Any] | None = Field(default=None, description="工具注解")
-
-    def model_post_init(self, /, __context: Any) -> None:
-        """验证工具定义的有效性"""
-        _ = __context
-        if self.type == "function" and self.function is None:
-            raise ValueError("函数类型的工具必须包含 'function' 字段。")
-        if self.type == "mcp" and self.mcp_session is None:
-            raise ValueError("MCP 类型的工具必须包含 'mcp_session' 字段。")
-
-    @classmethod
-    def create(
-        cls,
-        name: str,
-        description: str,
-        parameters: dict[str, Any],
-        required: list[str] | None = None,
-        annotations: dict[str, Any] | None = None,
-    ) -> "LLMTool":
-        """创建函数工具"""
-        function_def = {
-            "name": name,
-            "description": description,
-            "parameters": {
-                "type": "object",
-                "properties": parameters,
-                "required": required or [],
-            },
-        }
-        return cls(type="function", function=function_def, annotations=annotations)
-
-    @classmethod
-    def from_mcp_session(
-        cls,
-        session: Any,
-        annotations: dict[str, Any] | None = None,
-    ) -> "LLMTool":
-        """从 MCP 会话创建工具"""
-        return cls(type="mcp", mcp_session=session, annotations=annotations)
 
 
 class LLMCodeExecution(BaseModel):

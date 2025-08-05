@@ -23,7 +23,6 @@ from .models import (
     LLMCodeExecution,
     LLMGroundingAttribution,
     LLMGroundingMetadata,
-    LLMTool,
     LLMToolCall,
     LLMToolFunction,
     ModelDetail,
@@ -31,9 +30,10 @@ from .models import (
     ModelName,
     ProviderConfig,
     ToolMetadata,
+    ToolResult,
     UsageInfo,
 )
-from .protocols import MCPCompatible
+from .protocols import ToolExecutable, ToolProvider
 
 __all__ = [
     "EmbeddingTaskType",
@@ -46,10 +46,8 @@ __all__ = [
     "LLMGroundingMetadata",
     "LLMMessage",
     "LLMResponse",
-    "LLMTool",
     "LLMToolCall",
     "LLMToolFunction",
-    "MCPCompatible",
     "ModelCapabilities",
     "ModelDetail",
     "ModelInfo",
@@ -60,7 +58,10 @@ __all__ = [
     "ResponseFormat",
     "TaskType",
     "ToolCategory",
+    "ToolExecutable",
     "ToolMetadata",
+    "ToolProvider",
+    "ToolResult",
     "UsageInfo",
     "get_model_capabilities",
     "get_user_friendly_error_message",

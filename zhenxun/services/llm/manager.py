@@ -86,14 +86,23 @@ def _cache_model(cache_key: str, model: LLMModel):
 
 
 def clear_model_cache():
-    """清空模型缓存"""
+    """
+    清空模型缓存，释放所有缓存的模型实例。
+
+    用于在内存不足或需要强制重新加载模型配置时清理缓存。
+    """
     global _model_cache
     _model_cache.clear()
     logger.info("已清空模型缓存")
 
 
 def get_cache_stats() -> dict[str, Any]:
-    """获取缓存统计信息"""
+    """
+    获取模型缓存的统计信息。
+
+    返回:
+        dict[str, Any]: 包含缓存大小、最大容量、TTL和已缓存模型列表的统计信息。
+    """
     return {
         "cache_size": len(_model_cache),
         "max_cache_size": _max_cache_size,
@@ -169,7 +178,13 @@ def find_model_config(
 
 
 def list_available_models() -> list[dict[str, Any]]:
-    """列出所有配置的可用模型"""
+    """
+    列出所有配置的可用模型及其详细信息。
+
+    返回:
+        list[dict[str, Any]]: 模型信息列表，每个字典包含提供商名称、模型名称、
+                             能力信息、是否为嵌入模型等详细信息。
+    """
     providers = get_configured_providers()
     model_list = []
     for provider in providers:
@@ -215,7 +230,13 @@ def list_model_identifiers() -> dict[str, list[str]]:
 
 
 def list_embedding_models() -> list[dict[str, Any]]:
-    """列出所有配置的嵌入模型"""
+    """
+    列出所有配置的嵌入模型。
+
+    返回:
+        list[dict[str, Any]]: 嵌入模型信息列表，从所有可用模型中筛选出
+                             支持嵌入功能的模型。
+    """
     all_models = list_available_models()
     return [model for model in all_models if model.get("is_embedding_model", False)]
 

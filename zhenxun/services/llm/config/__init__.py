@@ -14,7 +14,6 @@ from .generation import (
 from .presets import CommonOverrides
 from .providers import (
     LLMConfig,
-    ToolConfig,
     get_gemini_safety_threshold,
     get_llm_config,
     register_llm_configs,
@@ -27,7 +26,6 @@ __all__ = [
     "LLMConfig",
     "LLMGenerationConfig",
     "ModelConfigOverride",
-    "ToolConfig",
     "apply_api_specific_mappings",
     "create_generation_config_from_kwargs",
     "get_gemini_safety_threshold",
