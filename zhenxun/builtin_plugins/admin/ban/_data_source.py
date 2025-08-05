@@ -103,7 +103,7 @@ class BanManage:
         session: EventSession,
         idx: int | None = None,
         is_superuser: bool = False,
-    ) -> tuple[bool, str | None]:
+    ) -> tuple[bool, str]:
         """unban目标用户
 
         参数:
@@ -129,7 +129,7 @@ class BanManage:
             return True, ban_data.user_id or ban_data.group_id
         elif await BanConsole.check_ban_level(user_id, group_id, user_level):
             await BanConsole.unban(user_id, group_id)
-            return True, group_id
+            return True, group_id or ""
         return False, "该用户/群组不在黑名单中不足捏..."
 
     @classmethod
