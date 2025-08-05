@@ -62,7 +62,6 @@ async def test_search_plugin_author(
     """
     from zhenxun.builtin_plugins.plugin_store import _matcher
 
-
     mock_table_page = mocker.patch(
         "zhenxun.builtin_plugins.plugin_store.data_source.ImageTemplate.table_page"
     )

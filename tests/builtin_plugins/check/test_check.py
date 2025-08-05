@@ -100,6 +100,7 @@ async def test_check(
     测试自检
     """
     from zhenxun.builtin_plugins.check import _self_check_matcher
+
     (
         mock_psutil,
         mock_cpuinfo,
