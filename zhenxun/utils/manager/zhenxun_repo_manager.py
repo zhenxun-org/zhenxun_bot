@@ -65,7 +65,7 @@ class ZhenxunRepoConfig:
 
     # WEB UI 相关配置
     WEBUI_GIT = "https://github.com/HibiKier/zhenxun_bot_webui.git"
-    WEBUI_DIST_GITHUB_URL = "https://github.com/HibiKier/zhenxun_bot_webui/tree/dist"
+    WEBUI_DIST_GITHUB_URL = "https://github.com/HibiKier/zhenxun_bot_webui/tree/test"
     WEBUI_DOWNLOAD_FILE_STRING = "webui_assets.zip"
     WEBUI_DOWNLOAD_FILE = TEMP_PATH / WEBUI_DOWNLOAD_FILE_STRING
     WEBUI_UNZIP_PATH = TEMP_PATH / "web_ui"
@@ -85,6 +85,12 @@ class ZhenxunRepoConfig:
     REQUIREMENTS_FILE_STRING = "requirements.txt"
     REQUIREMENTS_FILE = Path() / REQUIREMENTS_FILE_STRING
 
+    PYPROJECT_FILE_STRING = "pyproject.toml"
+    PYPROJECT_FILE = Path() / PYPROJECT_FILE_STRING
+
+    PYPROJECT_LOCK_FILE_STRING = "poetry.lock"
+    PYPROJECT_LOCK_FILE = Path() / PYPROJECT_LOCK_FILE_STRING
+
 
 class ZhenxunRepoManagerClass:
     """真寻仓库管理器"""
@@ -99,6 +105,8 @@ class ZhenxunRepoManagerClass:
         参数:
             folder_path: 文件夹路径
         """
+        if not folder_path.exists():
+            return
         for filename in os.listdir(folder_path):
             file_path = folder_path / filename
             try:
@@ -347,7 +355,7 @@ class ZhenxunRepoManagerClass:
             bool: 是否存在
         """
         if self.config.RESOURCE_PATH.exists():
-            font_path = self.config.RESOURCE_PATH / "fonts"
+            font_path = self.config.RESOURCE_PATH / "font"
             if font_path.exists() and os.listdir(font_path):
                 return True
         return False
@@ -438,10 +446,16 @@ class ZhenxunRepoManagerClass:
 
     # ==================== Web UI 管理相关方法 ====================
 
+    def check_webui_exists(self) -> bool:
+        """检查 Web UI 资源是否存在"""
+        return bool(
+            self.config.WEBUI_PATH.exists() and os.listdir(self.config.WEBUI_PATH)
+        )
+
     async def webui_download_zip(self):
         """下载 WEBUI_ASSETS 资源"""
         download_url = await GithubUtils.parse_github_url(
-            self.config.WEBUI_GIT
+            self.config.WEBUI_DIST_GITHUB_URL
         ).get_archive_download_urls()
         logger.info("开始下载 WEBUI_ASSETS 资源...", LOG_COMMAND)
         if await AsyncHttpx.download_file(
@@ -469,16 +483,17 @@ class ZhenxunRepoManagerClass:
             str: 更新结果
         """
         if not self.config.WEBUI_DOWNLOAD_FILE.exists():
-            raise FileNotFoundError("备份webui文件夹不存在")
+            raise FileNotFoundError("webui文件压缩包不存在")
         tf = None
         try:
             self.__backup_webui()
             self.__clear_folder(self.config.WEBUI_PATH)
             tf = zipfile.ZipFile(self.config.WEBUI_DOWNLOAD_FILE)
             tf.extractall(self.config.WEBUI_UNZIP_PATH)
-            logger.debug("解压文件压缩包完成...", LOG_COMMAND)
-            self.__copy_files(self.config.WEBUI_UNZIP_PATH, self.config.WEBUI_PATH)
-            logger.debug("复制 WEBUI_ASSETS 成功!", LOG_COMMAND)
+            logger.debug("Web UI 解压文件压缩包完成...", LOG_COMMAND)
+            unzip_dir = next(self.config.WEBUI_UNZIP_PATH.iterdir())
+            self.__copy_files(unzip_dir, self.config.WEBUI_PATH)
+            logger.debug("Web UI 复制 WEBUI_ASSETS 成功!", LOG_COMMAND)
             shutil.rmtree(self.config.WEBUI_UNZIP_PATH, ignore_errors=True)
         except Exception as e:
             if self.config.WEBUI_BACKUP_PATH.exists():
@@ -497,7 +512,7 @@ class ZhenxunRepoManagerClass:
         await self.webui_unzip()
 
     async def webui_git_update(
-        self, source: Literal["git", "ali"], branch: str = "main", force: bool = False
+        self, source: Literal["git", "ali"], branch: str = "dist", force: bool = False
     ) -> RepoUpdateResult:
         """使用git或阿里云更新 Web UI
 
@@ -524,7 +539,7 @@ class ZhenxunRepoManagerClass:
     async def webui_update(
         self,
         source: Literal["git", "ali"] = "ali",
-        branch: str = "main",
+        branch: str = "dist",
         force: bool = False,
     ):
         """更新 Web UI

@@ -285,9 +285,8 @@ class BaseRepoManager(ABC):
             # 如果目录存在，检查是否是Git仓库
             # 首先检查目录本身是否有.git文件夹
             git_dir = local_path / ".git"
-            is_git_repo = git_dir.exists() and git_dir.is_dir()
 
-            if not is_git_repo:
+            if not git_dir.is_dir():
                 # 如果不是Git仓库，尝试初始化它
                 logger.info(f"目录 {local_path} 不是Git仓库，尝试初始化", LOG_COMMAND)
                 init_success, _, init_stderr = await run_git_command(

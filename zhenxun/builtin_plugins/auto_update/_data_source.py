@@ -34,7 +34,7 @@ class UpdateManager:
     async def update_webui(
         cls,
         source: Literal["git", "ali"] | None,
-        branch: str = "main",
+        branch: str = "dist",
         force: bool = False,
     ):
         """更新WebUI

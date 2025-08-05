@@ -8,16 +8,6 @@ if sys.version_info >= (3, 11):
 else:
     from strenum import StrEnum
 
-from zhenxun.configs.path_config import DATA_PATH, TEMP_PATH
-
-WEBUI_STRING = "web_ui"
-PUBLIC_STRING = "public"
-
-WEBUI_DATA_PATH = DATA_PATH / WEBUI_STRING
-PUBLIC_PATH = WEBUI_DATA_PATH / PUBLIC_STRING
-TMP_PATH = TEMP_PATH / WEBUI_STRING
-
-WEBUI_DIST_GITHUB_URL = "https://github.com/HibiKier/zhenxun_bot_webui/tree/dist"
 
 app = nonebot.get_app()
 

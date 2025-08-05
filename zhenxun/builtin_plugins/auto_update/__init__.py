@@ -110,7 +110,8 @@ async def _(
         try:
             result += await UpdateManager.update_webui(
                 source_str,  # type: ignore
-                "dist",
+                "test",
+                True,
             )
         except Exception as e:
             logger.error("WebUI更新失败...", "检查更新", session=session, e=e)
