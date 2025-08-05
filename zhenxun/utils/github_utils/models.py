@@ -318,6 +318,20 @@ class AliyunFileInfo:
     """仓库ID"""
 
     @classmethod
+    async def get_client(cls) -> devops20210625Client:
+        """获取阿里云客户端"""
+        config = open_api_models.Config(
+            access_key_id=Aliyun_AccessKey_ID,
+            access_key_secret=base64.b64decode(
+                Aliyun_Secret_AccessKey_encrypted.encode()
+            ).decode(),
+            endpoint=ALIYUN_ENDPOINT,
+            region_id=ALIYUN_REGION,
+        )
+
+        return devops20210625Client(config)
+
+    @classmethod
     async def get_file_content(
         cls, file_path: str, repo: str, ref: str = "main"
     ) -> str:
@@ -335,16 +349,8 @@ class AliyunFileInfo:
             repository_id = ALIYUN_REPO_MAPPING.get(repo)
             if not repository_id:
                 raise ValueError(f"未找到仓库 {repo} 对应的阿里云仓库ID")
-            config = open_api_models.Config(
-                access_key_id=Aliyun_AccessKey_ID,
-                access_key_secret=base64.b64decode(
-                    Aliyun_Secret_AccessKey_encrypted.encode()
-                ).decode(),
-                endpoint=ALIYUN_ENDPOINT,
-                region_id=ALIYUN_REGION,
-            )
 
-            client = devops20210625Client(config)
+            client = await cls.get_client()
 
             request = devops_20210625_models.GetFileBlobsRequest(
                 organization_id=ALIYUN_ORG_ID,
@@ -404,16 +410,7 @@ class AliyunFileInfo:
             if not repository_id:
                 raise ValueError(f"未找到仓库 {repo} 对应的阿里云仓库ID")
 
-            config = open_api_models.Config(
-                access_key_id=Aliyun_AccessKey_ID,
-                access_key_secret=base64.b64decode(
-                    Aliyun_Secret_AccessKey_encrypted.encode()
-                ).decode(),
-                endpoint=ALIYUN_ENDPOINT,
-                region_id=ALIYUN_REGION,
-            )
-
-            client = devops20210625Client(config)
+            client = await cls.get_client()
 
             request = devops_20210625_models.ListRepositoryTreeRequest(
                 organization_id=ALIYUN_ORG_ID,
@@ -459,16 +456,7 @@ class AliyunFileInfo:
             if not repository_id:
                 raise ValueError(f"未找到仓库 {repo} 对应的阿里云仓库ID")
 
-            config = open_api_models.Config(
-                access_key_id=Aliyun_AccessKey_ID,
-                access_key_secret=base64.b64decode(
-                    Aliyun_Secret_AccessKey_encrypted.encode()
-                ).decode(),
-                endpoint=ALIYUN_ENDPOINT,
-                region_id=ALIYUN_REGION,
-            )
-
-            client = devops20210625Client(config)
+            client = await cls.get_client()
 
             request = devops_20210625_models.GetRepositoryCommitRequest(
                 organization_id=ALIYUN_ORG_ID,

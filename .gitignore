@@ -145,3 +145,5 @@ backup/
 .idea/
 resources/
 .vscode/launch.json
+
+./.env.dev

@@ -5,32 +5,18 @@ LLM 提供商配置管理
 """
 
 from functools import lru_cache
-import json
-import sys
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from zhenxun.configs.config import Config
-from zhenxun.configs.path_config import DATA_PATH
 from zhenxun.configs.utils import parse_as
 from zhenxun.services.log import logger
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
 from ..core import key_store
+from ..tools import tool_provider_manager
 from ..types.models import ModelDetail, ProviderConfig
-
-
-class ToolConfig(BaseModel):
-    """MCP类型工具的配置定义"""
-
-    type: str = "mcp"
-    name: str = Field(..., description="工具的唯一名称标识")
-    description: str | None = Field(None, description="工具功能的描述")
-    mcp_config: dict[str, Any] | BaseModel = Field(
-        ..., description="MCP服务器的特定配置"
-    )
-
 
 AI_CONFIG_GROUP = "AI"
 PROVIDERS_CONFIG_KEY = "PROVIDERS"
@@ -56,9 +42,6 @@ class LLMConfig(BaseModel):
     )
     providers: list[ProviderConfig] = Field(
         default_factory=list, description="配置多个 AI 服务提供商及其模型信息"
-    )
-    mcp_tools: list[ToolConfig] = Field(
-        default_factory=list, description="配置可用的外部MCP工具"
     )
 
     def get_provider_by_name(self, name: str) -> ProviderConfig | None:
@@ -218,33 +201,6 @@ def get_default_providers() -> list[dict[str, Any]]:
     ]
 
 
-def get_default_mcp_tools() -> dict[str, Any]:
-    """
-    获取默认的MCP工具配置，用于在文件不存在时创建。
-    包含了 baidu-map, Context7, 和 sequential-thinking.
-    """
-    return {
-        "mcpServers": {
-            "baidu-map": {
-                "command": "npx",
-                "args": ["-y", "@baidumap/mcp-server-baidu-map"],
-                "env": {"BAIDU_MAP_API_KEY": "<YOUR_BAIDU_MAP_API_KEY>"},
-                "description": "百度地图工具，提供地理编码、路线规划等功能。",
-            },
-            "sequential-thinking": {
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
-                "description": "顺序思维工具，用于帮助模型进行多步骤推理。",
-            },
-            "Context7": {
-                "command": "npx",
-                "args": ["-y", "@upstash/context7-mcp@latest"],
-                "description": "Upstash 提供的上下文管理和记忆工具。",
-            },
-        }
-    }
-
-
 def register_llm_configs():
     """注册 LLM 服务的配置项"""
     logger.info("注册 LLM 服务的配置项")
@@ -312,87 +268,8 @@ def register_llm_configs():
 
 @lru_cache(maxsize=1)
 def get_llm_config() -> LLMConfig:
-    """获取 LLM 配置实例，现在会从新的 JSON 文件加载 MCP 工具"""
+    """获取 LLM 配置实例，不再加载 MCP 工具配置"""
     ai_config = get_ai_config()
-
-    llm_data_path = DATA_PATH / "llm"
-    mcp_tools_path = llm_data_path / "mcp_tools.json"
-
-    mcp_tools_list = []
-    mcp_servers_dict = {}
-
-    if not mcp_tools_path.exists():
-        logger.info(f"未找到 MCP 工具配置文件，将在 '{mcp_tools_path}' 创建一个。")
-        llm_data_path.mkdir(parents=True, exist_ok=True)
-        default_mcp_config = get_default_mcp_tools()
-        try:
-            with mcp_tools_path.open("w", encoding="utf-8") as f:
-                json.dump(default_mcp_config, f, ensure_ascii=False, indent=2)
-            mcp_servers_dict = default_mcp_config.get("mcpServers", {})
-        except Exception as e:
-            logger.error(f"创建默认 MCP 配置文件失败: {e}", e=e)
-            mcp_servers_dict = {}
-    else:
-        try:
-            with mcp_tools_path.open("r", encoding="utf-8") as f:
-                mcp_data = json.load(f)
-                mcp_servers_dict = mcp_data.get("mcpServers", {})
-                if not isinstance(mcp_servers_dict, dict):
-                    logger.warning(
-                        f"'{mcp_tools_path}' 中的 'mcpServers' 键不是一个字典，"
-                        f"将使用空配置。"
-                    )
-                    mcp_servers_dict = {}
-
-        except json.JSONDecodeError as e:
-            logger.error(f"解析 MCP 配置文件 '{mcp_tools_path}' 失败: {e}", e=e)
-        except Exception as e:
-            logger.error(f"读取 MCP 配置文件时发生未知错误: {e}", e=e)
-            mcp_servers_dict = {}
-
-    if sys.platform == "win32":
-        logger.debug("检测到Windows平台，正在调整MCP工具的npx命令...")
-        for name, config in mcp_servers_dict.items():
-            if isinstance(config, dict) and config.get("command") == "npx":
-                logger.info(f"为工具 '{name}' 包装npx命令以兼容Windows。")
-                original_args = config.get("args", [])
-                config["command"] = "cmd"
-                config["args"] = ["/c", "npx", *original_args]
-
-    if mcp_servers_dict:
-        mcp_tools_list = [
-            {
-                "name": name,
-                "type": "mcp",
-                "description": config.get("description", f"MCP tool for {name}"),
-                "mcp_config": config,
-            }
-            for name, config in mcp_servers_dict.items()
-            if isinstance(config, dict)
-        ]
-
-    from ..tools.registry import tool_registry
-
-    for tool_dict in mcp_tools_list:
-        if isinstance(tool_dict, dict):
-            tool_name = tool_dict.get("name")
-            if not tool_name:
-                continue
-
-            config_model = tool_registry.get_mcp_config_model(tool_name)
-            if not config_model:
-                logger.debug(
-                    f"MCP工具 '{tool_name}' 没有注册其配置模型，"
-                    f"将跳过特定配置验证，直接使用原始配置字典。"
-                )
-                continue
-
-            mcp_config_data = tool_dict.get("mcp_config", {})
-            try:
-                parsed_mcp_config = parse_as(config_model, mcp_config_data)
-                tool_dict["mcp_config"] = parsed_mcp_config
-            except Exception as e:
-                raise ValueError(f"MCP工具 '{tool_name}' 的 `mcp_config` 配置错误: {e}")
 
     config_data = {
         "default_model_name": ai_config.get("default_model_name"),
@@ -401,7 +278,6 @@ def get_llm_config() -> LLMConfig:
         "max_retries_llm": ai_config.get("max_retries_llm", 3),
         "retry_delay_llm": ai_config.get("retry_delay_llm", 2),
         PROVIDERS_CONFIG_KEY: ai_config.get(PROVIDERS_CONFIG_KEY, []),
-        "mcp_tools": mcp_tools_list,
     }
 
     return parse_as(LLMConfig, config_data)
@@ -504,12 +380,17 @@ def set_default_model(provider_model_name: str | None) -> bool:
 async def _init_llm_config_on_startup():
     """
     在服务启动时主动调用一次 get_llm_config 和 key_store.initialize，
-    以触发必要的初始化操作。
+    并预热工具提供者管理器。
     """
     logger.info("正在初始化 LLM 配置并加载密钥状态...")
     try:
         get_llm_config()
         await key_store.initialize()
-        logger.info("LLM 配置和密钥状态初始化完成。")
+        logger.debug("LLM 配置和密钥状态初始化完成。")
+
+        logger.debug("正在预热 LLM 工具提供者管理器...")
+        await tool_provider_manager.initialize()
+        logger.debug("LLM 工具提供者管理器预热完成。")
+
     except Exception as e:
         logger.error(f"LLM 配置或密钥状态初始化时发生错误: {e}", e=e)

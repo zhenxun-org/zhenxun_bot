@@ -2,10 +2,10 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal
 
-from nonebot.compat import model_dump
 from pydantic import BaseModel, Field
 
 from zhenxun.utils.enum import BlockType, LimitWatchType, PluginLimitType, PluginType
+from zhenxun.utils.pydantic_compat import model_dump
 
 __all__ = [
     "AICallableParam",

@@ -405,7 +405,7 @@ class LLMMessage(BaseModel):
                 f"工具 '{function_name}' 的结果无法JSON序列化: {result}. 错误: {e}"
             )
             content_str = json.dumps(
-                {"error": "Tool result not JSON serializable", "details": str(e)}
+                {"error": "工具结果无法JSON序列化", "details": str(e)}
             )
 
         return cls(

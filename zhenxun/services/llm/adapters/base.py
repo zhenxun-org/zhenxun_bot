@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ..service import LLMModel
     from ..types.content import LLMMessage
     from ..types.enums import EmbeddingTaskType
-    from ..types.models import LLMTool
+    from ..types.protocols import ToolExecutable
 
 
 class RequestData(BaseModel):
@@ -103,7 +103,7 @@ class BaseAdapter(ABC):
         api_key: str,
         messages: list["LLMMessage"],
         config: "LLMGenerationConfig | None" = None,
-        tools: list["LLMTool"] | None = None,
+        tools: dict[str, "ToolExecutable"] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> RequestData:
         """准备高级请求"""
@@ -401,7 +401,6 @@ class BaseAdapter(ABC):
 class OpenAICompatAdapter(BaseAdapter):
     """
     处理所有 OpenAI 兼容 API 的通用适配器。
-    消除 OpenAIAdapter 和 ZhipuAdapter 之间的代码重复。
     """
 
     @abstractmethod
@@ -445,7 +444,7 @@ class OpenAICompatAdapter(BaseAdapter):
         api_key: str,
         messages: list["LLMMessage"],
         config: "LLMGenerationConfig | None" = None,
-        tools: list["LLMTool"] | None = None,
+        tools: dict[str, "ToolExecutable"] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> RequestData:
         """准备高级请求 - OpenAI兼容格式"""
@@ -459,21 +458,20 @@ class OpenAICompatAdapter(BaseAdapter):
         }
 
         if tools:
-            openai_tools = []
-            for tool in tools:
-                if tool.type == "function" and tool.function:
-                    openai_tools.append({"type": "function", "function": tool.function})
-                elif tool.type == "mcp" and tool.mcp_session:
-                    if callable(tool.mcp_session):
-                        raise ValueError(
-                            "适配器接收到未激活的 MCP 会话工厂。"
-                            "会话工厂应该在 LLMModel.generate_response 中被激活。"
-                        )
-                    openai_tools.append(
-                        tool.mcp_session.to_api_tool(api_type=self.api_type)
-                    )
+            import asyncio
+
+            from zhenxun.utils.pydantic_compat import model_dump
+
+            definition_tasks = [
+                executable.get_definition() for executable in tools.values()
+            ]
+            openai_tools = await asyncio.gather(*definition_tasks)
             if openai_tools:
-                body["tools"] = openai_tools
+                body["tools"] = [
+                    {"type": "function", "function": model_dump(tool)}
+                    for tool in openai_tools
+                ]
+
         if tool_choice:
             body["tool_choice"] = tool_choice
 

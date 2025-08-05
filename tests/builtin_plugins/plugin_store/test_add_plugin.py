@@ -6,23 +6,17 @@ from nonebot.adapters.onebot.v11 import Bot
 from nonebot.adapters.onebot.v11.event import GroupMessageEvent
 from nonebot.adapters.onebot.v11.message import Message
 from nonebug import App
-import pytest
 from pytest_mock import MockerFixture
-from respx import MockRouter
 
-from tests.builtin_plugins.plugin_store.utils import init_mocked_api
 from tests.config import BotId, GroupId, MessageId, UserId
 from tests.utils import _v11_group_message_event
 
+test_path = Path(__file__).parent.parent.parent
 
-@pytest.mark.parametrize("package_api", ["jsd", "gh"])
-@pytest.mark.parametrize("is_commit", [True, False])
+
 async def test_add_plugin_basic(
-    package_api: str,
-    is_commit: bool,
     app: App,
     mocker: MockerFixture,
-    mocked_api: MockRouter,
     create_bot: Callable,
     tmp_path: Path,
 ) -> None:
@@ -31,24 +25,12 @@ async def test_add_plugin_basic(
     """
     from zhenxun.builtin_plugins.plugin_store import _matcher
 
-    init_mocked_api(mocked_api=mocked_api)
     mock_base_path = mocker.patch(
         "zhenxun.builtin_plugins.plugin_store.data_source.BASE_PATH",
         new=tmp_path / "zhenxun",
     )
 
-    if package_api != "jsd":
-        mocked_api["zhenxun_bot_plugins_metadata"].respond(404)
-    if package_api != "gh":
-        mocked_api["zhenxun_bot_plugins_tree"].respond(404)
-
-    if not is_commit:
-        mocked_api["zhenxun_bot_plugins_commit"].respond(404)
-        mocked_api["zhenxun_bot_plugins_commit_proxy"].respond(404)
-        mocked_api["zhenxun_bot_plugins_index_commit"].respond(404)
-        mocked_api["zhenxun_bot_plugins_index_commit_proxy"].respond(404)
-
-    plugin_id = 1
+    plugin_id = "search_image"
 
     async with app.test_matcher(_matcher) as ctx:
         bot = create_bot(ctx)
@@ -65,7 +47,7 @@ async def test_add_plugin_basic(
         ctx.receive_event(bot=bot, event=event)
         ctx.should_call_send(
             event=event,
-            message=Message(message=f"正在添加插件 Id: {plugin_id}"),
+            message=Message(message=f"正在添加插件 Module: {plugin_id}"),
             result=None,
             bot=bot,
         )
@@ -75,25 +57,12 @@ async def test_add_plugin_basic(
             result=None,
             bot=bot,
         )
-    if is_commit:
-        assert mocked_api["search_image_plugin_file_init_commit"].called
-        assert mocked_api["basic_plugins"].called
-        assert mocked_api["extra_plugins"].called
-    else:
-        assert mocked_api["search_image_plugin_file_init"].called
-        assert mocked_api["basic_plugins_no_commit"].called
-        assert mocked_api["extra_plugins_no_commit"].called
     assert (mock_base_path / "plugins" / "search_image" / "__init__.py").is_file()
 
 
-@pytest.mark.parametrize("package_api", ["jsd", "gh"])
-@pytest.mark.parametrize("is_commit", [True, False])
 async def test_add_plugin_basic_commit_version(
-    package_api: str,
-    is_commit: bool,
     app: App,
     mocker: MockerFixture,
-    mocked_api: MockRouter,
     create_bot: Callable,
     tmp_path: Path,
 ) -> None:
@@ -102,23 +71,12 @@ async def test_add_plugin_basic_commit_version(
     """
     from zhenxun.builtin_plugins.plugin_store import _matcher
 
-    init_mocked_api(mocked_api=mocked_api)
     mock_base_path = mocker.patch(
         "zhenxun.builtin_plugins.plugin_store.data_source.BASE_PATH",
         new=tmp_path / "zhenxun",
     )
 
-    if package_api != "jsd":
-        mocked_api["zhenxun_bot_plugins_metadata_commit"].respond(404)
-    if package_api != "gh":
-        mocked_api["zhenxun_bot_plugins_tree_commit"].respond(404)
-
-    if not is_commit:
-        mocked_api["zhenxun_bot_plugins_commit"].respond(404)
-        mocked_api["zhenxun_bot_plugins_commit_proxy"].respond(404)
-        mocked_api["zhenxun_bot_plugins_index_commit"].respond(404)
-        mocked_api["zhenxun_bot_plugins_index_commit_proxy"].respond(404)
-    plugin_id = 3
+    plugin_id = "bilibili_sub"
 
     async with app.test_matcher(_matcher) as ctx:
         bot = create_bot(ctx)
@@ -135,7 +93,7 @@ async def test_add_plugin_basic_commit_version(
         ctx.receive_event(bot=bot, event=event)
         ctx.should_call_send(
             event=event,
-            message=Message(message=f"正在添加插件 Id: {plugin_id}"),
+            message=Message(message=f"正在添加插件 Module: {plugin_id}"),
             result=None,
             bot=bot,
         )
@@ -145,28 +103,12 @@ async def test_add_plugin_basic_commit_version(
             result=None,
             bot=bot,
         )
-    if package_api == "jsd":
-        assert mocked_api["zhenxun_bot_plugins_metadata_commit"].called
-    if package_api == "gh":
-        assert mocked_api["zhenxun_bot_plugins_tree_commit"].called
-    if is_commit:
-        assert mocked_api["basic_plugins"].called
-        assert mocked_api["extra_plugins"].called
-    else:
-        assert mocked_api["basic_plugins_no_commit"].called
-        assert mocked_api["extra_plugins_no_commit"].called
-    assert mocked_api["bilibili_sub_plugin_file_init"].called
     assert (mock_base_path / "plugins" / "bilibili_sub" / "__init__.py").is_file()
 
 
-@pytest.mark.parametrize("package_api", ["jsd", "gh"])
-@pytest.mark.parametrize("is_commit", [True, False])
 async def test_add_plugin_basic_is_not_dir(
-    package_api: str,
-    is_commit: bool,
     app: App,
     mocker: MockerFixture,
-    mocked_api: MockRouter,
     create_bot: Callable,
     tmp_path: Path,
 ) -> None:
@@ -175,24 +117,12 @@ async def test_add_plugin_basic_is_not_dir(
     """
     from zhenxun.builtin_plugins.plugin_store import _matcher
 
-    init_mocked_api(mocked_api=mocked_api)
     mock_base_path = mocker.patch(
         "zhenxun.builtin_plugins.plugin_store.data_source.BASE_PATH",
         new=tmp_path / "zhenxun",
     )
 
-    if package_api != "jsd":
-        mocked_api["zhenxun_bot_plugins_metadata"].respond(404)
-    if package_api != "gh":
-        mocked_api["zhenxun_bot_plugins_tree"].respond(404)
-
-    if not is_commit:
-        mocked_api["zhenxun_bot_plugins_commit"].respond(404)
-        mocked_api["zhenxun_bot_plugins_commit_proxy"].respond(404)
-        mocked_api["zhenxun_bot_plugins_index_commit"].respond(404)
-        mocked_api["zhenxun_bot_plugins_index_commit_proxy"].respond(404)
-
-    plugin_id = 0
+    plugin_id = "jitang"
 
     async with app.test_matcher(_matcher) as ctx:
         bot = create_bot(ctx)
@@ -209,7 +139,7 @@ async def test_add_plugin_basic_is_not_dir(
         ctx.receive_event(bot=bot, event=event)
         ctx.should_call_send(
             event=event,
-            message=Message(message=f"正在添加插件 Id: {plugin_id}"),
+            message=Message(message=f"正在添加插件 Module: {plugin_id}"),
             result=None,
             bot=bot,
         )
@@ -219,25 +149,12 @@ async def test_add_plugin_basic_is_not_dir(
             result=None,
             bot=bot,
         )
-    if is_commit:
-        assert mocked_api["jitang_plugin_file_commit"].called
-        assert mocked_api["basic_plugins"].called
-        assert mocked_api["extra_plugins"].called
-    else:
-        assert mocked_api["jitang_plugin_file"].called
-        assert mocked_api["basic_plugins_no_commit"].called
-        assert mocked_api["extra_plugins_no_commit"].called
-    assert (mock_base_path / "plugins" / "alapi" / "jitang.py").is_file()
+    assert (mock_base_path / "plugins" / "jitang.py").is_file()
 
 
-@pytest.mark.parametrize("package_api", ["jsd", "gh"])
-@pytest.mark.parametrize("is_commit", [True, False])
 async def test_add_plugin_extra(
-    package_api: str,
-    is_commit: bool,
     app: App,
     mocker: MockerFixture,
-    mocked_api: MockRouter,
     create_bot: Callable,
     tmp_path: Path,
 ) -> None:
@@ -246,26 +163,12 @@ async def test_add_plugin_extra(
     """
     from zhenxun.builtin_plugins.plugin_store import _matcher
 
-    init_mocked_api(mocked_api=mocked_api)
     mock_base_path = mocker.patch(
         "zhenxun.builtin_plugins.plugin_store.data_source.BASE_PATH",
         new=tmp_path / "zhenxun",
     )
 
-    if package_api != "jsd":
-        mocked_api["zhenxun_github_sub_metadata"].respond(404)
-    if package_api != "gh":
-        mocked_api["zhenxun_github_sub_tree"].respond(404)
-
-    if not is_commit:
-        mocked_api["zhenxun_github_sub_commit"].respond(404)
-        mocked_api["zhenxun_github_sub_commit_proxy"].respond(404)
-        mocked_api["zhenxun_bot_plugins_commit"].respond(404)
-        mocked_api["zhenxun_bot_plugins_commit_proxy"].respond(404)
-        mocked_api["zhenxun_bot_plugins_index_commit"].respond(404)
-        mocked_api["zhenxun_bot_plugins_index_commit_proxy"].respond(404)
-
-    plugin_id = 4
+    plugin_id = "github_sub"
 
     async with app.test_matcher(_matcher) as ctx:
         bot = create_bot(ctx)
@@ -282,7 +185,7 @@ async def test_add_plugin_extra(
         ctx.receive_event(bot=bot, event=event)
         ctx.should_call_send(
             event=event,
-            message=Message(message=f"正在添加插件 Id: {plugin_id}"),
+            message=Message(message=f"正在添加插件 Module: {plugin_id}"),
             result=None,
             bot=bot,
         )
@@ -292,30 +195,18 @@ async def test_add_plugin_extra(
             result=None,
             bot=bot,
         )
-    if is_commit:
-        assert mocked_api["github_sub_plugin_file_init_commit"].called
-        assert mocked_api["basic_plugins"].called
-        assert mocked_api["extra_plugins"].called
-    else:
-        assert mocked_api["github_sub_plugin_file_init"].called
-        assert mocked_api["basic_plugins_no_commit"].called
-        assert mocked_api["extra_plugins_no_commit"].called
     assert (mock_base_path / "plugins" / "github_sub" / "__init__.py").is_file()
 
 
 async def test_plugin_not_exist_add(
     app: App,
-    mocker: MockerFixture,
-    mocked_api: MockRouter,
     create_bot: Callable,
-    tmp_path: Path,
 ) -> None:
     """
     测试插件不存在，添加插件
     """
     from zhenxun.builtin_plugins.plugin_store import _matcher
 
-    init_mocked_api(mocked_api=mocked_api)
     plugin_id = -1
 
     async with app.test_matcher(_matcher) as ctx:
@@ -339,7 +230,7 @@ async def test_plugin_not_exist_add(
         )
         ctx.should_call_send(
             event=event,
-            message=Message(message="插件ID不存在..."),
+            message=Message(message="添加插件 Id: -1 失败 e: 插件ID不存在..."),
             result=None,
             bot=bot,
         )
@@ -348,16 +239,13 @@ async def test_plugin_not_exist_add(
 async def test_add_plugin_exist(
     app: App,
     mocker: MockerFixture,
-    mocked_api: MockRouter,
     create_bot: Callable,
-    tmp_path: Path,
 ) -> None:
     """
     测试插件已经存在，添加插件
     """
     from zhenxun.builtin_plugins.plugin_store import _matcher
 
-    init_mocked_api(mocked_api=mocked_api)
     mocker.patch(
         "zhenxun.builtin_plugins.plugin_store.data_source.StoreManager.get_loaded_plugins",
         return_value=[("search_image", "0.1")],
@@ -385,7 +273,9 @@ async def test_add_plugin_exist(
         )
         ctx.should_call_send(
             event=event,
-            message=Message(message="插件 识图 已安装，无需重复安装"),
+            message=Message(
+                message="添加插件 Id: 1 失败 e: 插件 识图 已安装，无需重复安装"
+            ),
             result=None,
             bot=bot,
         )

@@ -17,7 +17,7 @@ from zhenxun.models.user_console import UserConsole
 from zhenxun.services.log import logger
 from zhenxun.utils.decorator.shop import shop_register
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
-from zhenxun.utils.manager.resource_manager import ResourceManager
+from zhenxun.utils.manager.zhenxun_repo_manager import ZhenxunRepoManager
 from zhenxun.utils.platform import PlatformUtils
 
 driver: Driver = nonebot.get_driver()
@@ -85,7 +85,8 @@ from bag_users t1
 
 @PriorityLifecycle.on_startup(priority=5)
 async def _():
-    await ResourceManager.init_resources()
+    if not ZhenxunRepoManager.check_resources_exists():
+        await ZhenxunRepoManager.resources_update()
     """签到与用户的数据迁移"""
     if goods_list := await GoodsInfo.filter(uuid__isnull=True).all():
         for goods in goods_list:

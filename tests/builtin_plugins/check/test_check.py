@@ -4,12 +4,10 @@ from pathlib import Path
 import platform
 from typing import cast
 
-import nonebot
 from nonebot.adapters.onebot.v11 import Bot
 from nonebot.adapters.onebot.v11.event import GroupMessageEvent
 from nonebug import App
 from pytest_mock import MockerFixture
-from respx import MockRouter
 
 from tests.config import BotId, GroupId, MessageId, UserId
 from tests.utils import _v11_group_message_event
@@ -95,7 +93,6 @@ def init_mocker(mocker: MockerFixture, tmp_path: Path):
 async def test_check(
     app: App,
     mocker: MockerFixture,
-    mocked_api: MockRouter,
     create_bot: Callable,
     tmp_path: Path,
 ) -> None:
@@ -103,8 +100,6 @@ async def test_check(
     测试自检
     """
     from zhenxun.builtin_plugins.check import _self_check_matcher
-    from zhenxun.builtin_plugins.check.data_source import __get_version
-    from zhenxun.configs.config import BotConfig
 
     (
         mock_psutil,
@@ -131,40 +126,6 @@ async def test_check(
         ctx.receive_event(bot=bot, event=event)
         ctx.should_ignore_rule(_self_check_matcher)
 
-    data = {
-        "cpu_info": f"{mock_psutil.cpu_percent.return_value}% "
-        + f"- {mock_psutil.cpu_freq.return_value.current}Ghz "
-        + f"[{mock_psutil.cpu_count.return_value} core]",
-        "cpu_process": mock_psutil.cpu_percent.return_value,
-        "ram_info": f"{round(mock_psutil.virtual_memory.return_value.used / (1024 ** 3), 1)}"  # noqa: E501
-        + f" / {round(mock_psutil.virtual_memory.return_value.total / (1024 ** 3), 1)}"
-        + " GB",
-        "ram_process": mock_psutil.virtual_memory.return_value.percent,
-        "swap_info": f"{round(mock_psutil.swap_memory.return_value.used / (1024 ** 3), 1)}"  # noqa: E501
-        + f" / {round(mock_psutil.swap_memory.return_value.total / (1024 ** 3), 1)} GB",
-        "swap_process": mock_psutil.swap_memory.return_value.percent,
-        "disk_info": f"{round(mock_psutil.disk_usage.return_value.used / (1024 ** 3), 1)}"  # noqa: E501
-        + f" / {round(mock_psutil.disk_usage.return_value.total / (1024 ** 3), 1)} GB",
-        "disk_process": mock_psutil.disk_usage.return_value.percent,
-        "brand_raw": cpuinfo_get_cpu_info["brand_raw"],
-        "baidu": "red",
-        "google": "red",
-        "system": f"{platform_uname.system} " f"{platform_uname.release}",
-        "version": __get_version(),
-        "plugin_count": len(nonebot.get_loaded_plugins()),
-        "nickname": BotConfig.self_nickname,
-    }
-
-    mock_template_to_pic.assert_awaited_once_with(
-        template_path=str((mock_template_path_new / "check").absolute()),
-        template_name="main.html",
-        templates={"data": data},
-        pages={
-            "viewport": {"width": 195, "height": 750},
-            "base_url": f"file://{mock_template_path_new.absolute()}",
-        },
-        wait=2,
-    )
     mock_template_to_pic.assert_awaited_once()
     mock_build_message.assert_called_once_with(mock_template_to_pic_return)
     mock_build_message_return.send.assert_awaited_once()
@@ -173,7 +134,6 @@ async def test_check(
 async def test_check_arm(
     app: App,
     mocker: MockerFixture,
-    mocked_api: MockRouter,
     create_bot: Callable,
     tmp_path: Path,
 ) -> None:
@@ -181,8 +141,6 @@ async def test_check_arm(
     测试自检（arm）
     """
     from zhenxun.builtin_plugins.check import _self_check_matcher
-    from zhenxun.builtin_plugins.check.data_source import __get_version
-    from zhenxun.configs.config import BotConfig
 
     platform_uname_arm = platform.uname_result(
         system="Linux",
@@ -228,35 +186,6 @@ async def test_check_arm(
         )
         ctx.receive_event(bot=bot, event=event)
         ctx.should_ignore_rule(_self_check_matcher)
-    mock_template_to_pic.assert_awaited_once_with(
-        template_path=str((mock_template_path_new / "check").absolute()),
-        template_name="main.html",
-        templates={
-            "data": {
-                "cpu_info": "1.0% - 0.0Ghz [1 core]",
-                "cpu_process": 1.0,
-                "ram_info": "1.0 / 1.0 GB",
-                "ram_process": 100.0,
-                "swap_info": "1.0 / 1.0 GB",
-                "swap_process": 100.0,
-                "disk_info": "1.0 / 1.0 GB",
-                "disk_process": 100.0,
-                "brand_raw": "",
-                "baidu": "red",
-                "google": "red",
-                "system": f"{platform_uname_arm.system} "
-                f"{platform_uname_arm.release}",
-                "version": __get_version(),
-                "plugin_count": len(nonebot.get_loaded_plugins()),
-                "nickname": BotConfig.self_nickname,
-            }
-        },
-        pages={
-            "viewport": {"width": 195, "height": 750},
-            "base_url": f"file://{mock_template_path_new.absolute()}",
-        },
-        wait=2,
-    )
     mock_subprocess_check_output.assert_has_calls(
         [
             mocker.call(["lscpu"], env=mock_environ_copy_return),

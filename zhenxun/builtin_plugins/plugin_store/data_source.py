@@ -1,19 +1,19 @@
 from pathlib import Path
+import random
 import shutil
 
 from aiocache import cached
 import ujson as json
 
-from zhenxun.builtin_plugins.auto_update.config import REQ_TXT_FILE_STRING
 from zhenxun.builtin_plugins.plugin_store.models import StorePluginInfo
+from zhenxun.configs.path_config import TEMP_PATH
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.services.log import logger
 from zhenxun.services.plugin_init import PluginInitManager
-from zhenxun.utils.github_utils import GithubUtils
-from zhenxun.utils.github_utils.models import RepoAPI
-from zhenxun.utils.http_utils import AsyncHttpx
 from zhenxun.utils.image_utils import BuildImage, ImageTemplate, RowStyle
 from zhenxun.utils.manager.virtual_env_package_manager import VirtualEnvPackageManager
+from zhenxun.utils.repo_utils import RepoFileManager
+from zhenxun.utils.repo_utils.models import RepoFileInfo, RepoType
 from zhenxun.utils.utils import is_number
 
 from .config import (
@@ -22,6 +22,7 @@ from .config import (
     EXTRA_GITHUB_URL,
     LOG_COMMAND,
 )
+from .exceptions import PluginStoreException
 
 
 def row_style(column: str, text: str) -> RowStyle:
@@ -40,73 +41,25 @@ def row_style(column: str, text: str) -> RowStyle:
     return style
 
 
-def install_requirement(plugin_path: Path):
-    requirement_files = ["requirement.txt", "requirements.txt"]
-    requirement_paths = [plugin_path / file for file in requirement_files]
-
-    if existing_requirements := next(
-        (path for path in requirement_paths if path.exists()), None
-    ):
-        VirtualEnvPackageManager.install_requirement(existing_requirements)
-
-
 class StoreManager:
     @classmethod
-    async def get_github_plugins(cls) -> list[StorePluginInfo]:
-        """获取github插件列表信息
-
-        返回:
-            list[StorePluginInfo]: 插件列表数据
-        """
-        repo_info = GithubUtils.parse_github_url(DEFAULT_GITHUB_URL)
-        if await repo_info.update_repo_commit():
-            logger.info(f"获取最新提交: {repo_info.branch}", LOG_COMMAND)
-        else:
-            logger.warning(f"获取最新提交失败: {repo_info}", LOG_COMMAND)
-        default_github_url = await repo_info.get_raw_download_urls("plugins.json")
-        response = await AsyncHttpx.get(default_github_url, check_status_code=200)
-        if response.status_code == 200:
-            logger.info("获取github插件列表成功", LOG_COMMAND)
-            return [StorePluginInfo(**detail) for detail in json.loads(response.text)]
-        else:
-            logger.warning(
-                f"获取github插件列表失败: {response.status_code}", LOG_COMMAND
-            )
-        return []
-
-    @classmethod
-    async def get_extra_plugins(cls) -> list[StorePluginInfo]:
-        """获取额外插件列表信息
-
-        返回:
-            list[StorePluginInfo]: 插件列表数据
-        """
-        repo_info = GithubUtils.parse_github_url(EXTRA_GITHUB_URL)
-        if await repo_info.update_repo_commit():
-            logger.info(f"获取最新提交: {repo_info.branch}", LOG_COMMAND)
-        else:
-            logger.warning(f"获取最新提交失败: {repo_info}", LOG_COMMAND)
-        extra_github_url = await repo_info.get_raw_download_urls("plugins.json")
-        response = await AsyncHttpx.get(extra_github_url, check_status_code=200)
-        if response.status_code == 200:
-            return [StorePluginInfo(**detail) for detail in json.loads(response.text)]
-        else:
-            logger.warning(
-                f"获取github扩展插件列表失败: {response.status_code}", LOG_COMMAND
-            )
-        return []
-
-    @classmethod
     @cached(60)
-    async def get_data(cls) -> list[StorePluginInfo]:
+    async def get_data(cls) -> tuple[list[StorePluginInfo], list[StorePluginInfo]]:
         """获取插件信息数据
 
         返回:
-            list[StorePluginInfo]: 插件信息数据
+            tuple[list[StorePluginInfo], list[StorePluginInfo]]:
+                原生插件信息数据，第三方插件信息数据
         """
-        plugins = await cls.get_github_plugins()
-        extra_plugins = await cls.get_extra_plugins()
-        return [*plugins, *extra_plugins]
+        plugins = await RepoFileManager.get_file_content(
+            DEFAULT_GITHUB_URL, "plugins.json"
+        )
+        extra_plugins = await RepoFileManager.get_file_content(
+            EXTRA_GITHUB_URL, "plugins.json", "index"
+        )
+        return [StorePluginInfo(**plugin) for plugin in json.loads(plugins)], [
+            StorePluginInfo(**plugin) for plugin in json.loads(extra_plugins)
+        ]
 
     @classmethod
     def version_check(cls, plugin_info: StorePluginInfo, suc_plugin: dict[str, str]):
@@ -152,38 +105,105 @@ class StoreManager:
         return await PluginInfo.filter(load_status=True).values_list(*args)
 
     @classmethod
-    async def get_plugins_info(cls) -> BuildImage | str:
+    async def get_plugins_info(cls) -> list[BuildImage] | str:
         """插件列表
 
         返回:
             BuildImage | str: 返回消息
         """
-        plugin_list: list[StorePluginInfo] = await cls.get_data()
+        plugin_list, extra_plugin_list = await cls.get_data()
         column_name = ["-", "ID", "名称", "简介", "作者", "版本", "类型"]
         db_plugin_list = await cls.get_loaded_plugins("module", "version")
         suc_plugin = {p[0]: (p[1] or "0.1") for p in db_plugin_list}
-        data_list = [
-            [
-                "已安装" if plugin_info.module in suc_plugin else "",
-                id,
-                plugin_info.name,
-                plugin_info.description,
-                plugin_info.author,
-                cls.version_check(plugin_info, suc_plugin),
-                plugin_info.plugin_type_name,
-            ]
-            for id, plugin_info in enumerate(plugin_list)
+        index = 0
+        data_list = []
+        extra_data_list = []
+        for plugin_info in plugin_list:
+            data_list.append(
+                [
+                    "已安装" if plugin_info.module in suc_plugin else "",
+                    index,
+                    plugin_info.name,
+                    plugin_info.description,
+                    plugin_info.author,
+                    cls.version_check(plugin_info, suc_plugin),
+                    plugin_info.plugin_type_name,
+                ]
+            )
+            index += 1
+        for plugin_info in extra_plugin_list:
+            extra_data_list.append(
+                [
+                    "已安装" if plugin_info.module in suc_plugin else "",
+                    index,
+                    plugin_info.name,
+                    plugin_info.description,
+                    plugin_info.author,
+                    cls.version_check(plugin_info, suc_plugin),
+                    plugin_info.plugin_type_name,
+                ]
+            )
+            index += 1
+        return [
+            await ImageTemplate.table_page(
+                "原生插件列表",
+                "通过添加/移除插件 ID 来管理插件",
+                column_name,
+                data_list,
+                text_style=row_style,
+            ),
+            await ImageTemplate.table_page(
+                "第三方插件列表",
+                "通过添加/移除插件 ID 来管理插件",
+                column_name,
+                extra_data_list,
+                text_style=row_style,
+            ),
         ]
-        return await ImageTemplate.table_page(
-            "插件列表",
-            "通过添加/移除插件 ID 来管理插件",
-            column_name,
-            data_list,
-            text_style=row_style,
-        )
 
     @classmethod
-    async def add_plugin(cls, plugin_id: str) -> str:
+    async def get_plugin_by_value(
+        cls, index_or_module: str, is_update: bool = False
+    ) -> tuple[StorePluginInfo, bool]:
+        """获取插件信息
+
+        参数:
+            index_or_module: 插件索引或模块名
+            is_update: 是否是更新插件
+
+        异常:
+            PluginStoreException: 插件不存在
+            PluginStoreException: 插件已安装
+
+        返回:
+            StorePluginInfo: 插件信息
+            bool: 是否是外部插件
+        """
+        plugin_list, extra_plugin_list = await cls.get_data()
+        plugin_info = None
+        is_external = False
+        db_plugin_list = await cls.get_loaded_plugins("module")
+        plugin_key = await cls._resolve_plugin_key(index_or_module)
+        for p in plugin_list:
+            if p.module == plugin_key:
+                is_external = False
+                plugin_info = p
+                break
+        for p in extra_plugin_list:
+            if p.module == plugin_key:
+                is_external = True
+                plugin_info = p
+                break
+        if not plugin_info:
+            raise PluginStoreException(f"插件不存在: {plugin_key}")
+        if not is_update and plugin_info.module in [p[0] for p in db_plugin_list]:
+            raise PluginStoreException(f"插件 {plugin_info.name} 已安装，无需重复安装")
+        if plugin_info.module not in [p[0] for p in db_plugin_list] and is_update:
+            raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法更新")
+        return plugin_info, is_external
+
+    @classmethod
+    async def add_plugin(cls, index_or_module: str) -> str:
         """添加插件
 
         参数:
@@ -192,21 +212,9 @@ class StoreManager:
         返回:
             str: 返回消息
         """
-        plugin_list: list[StorePluginInfo] = await cls.get_data()
-        try:
-            plugin_key = await cls._resolve_plugin_key(plugin_id)
-        except ValueError as e:
-            return str(e)
-        db_plugin_list = await cls.get_loaded_plugins("module")
-        plugin_info = next((p for p in plugin_list if p.module == plugin_key), None)
-        if plugin_info is None:
-            return f"未找到插件 {plugin_key}"
-        if plugin_info.module in [p[0] for p in db_plugin_list]:
-            return f"插件 {plugin_info.name} 已安装，无需重复安装"
-        is_external = True
+        plugin_info, is_external = await cls.get_plugin_by_value(index_or_module)
         if plugin_info.github_url is None:
             plugin_info.github_url = DEFAULT_GITHUB_URL
-            is_external = False
         version_split = plugin_info.version.split("-")
         if len(version_split) > 1:
             github_url_split = plugin_info.github_url.split("/tree/")
@@ -228,90 +236,81 @@ class StoreManager:
         is_dir: bool,
         is_external: bool = False,
     ):
-        repo_api: RepoAPI
-        repo_info = GithubUtils.parse_github_url(github_url)
-        if await repo_info.update_repo_commit():
-            logger.info(f"获取最新提交: {repo_info.branch}", LOG_COMMAND)
-        else:
-            logger.warning(f"获取最新提交失败: {repo_info}", LOG_COMMAND)
-        logger.debug(f"成功获取仓库信息: {repo_info}", LOG_COMMAND)
-        for repo_api in GithubUtils.iter_api_strategies():
-            try:
-                await repo_api.parse_repo_info(repo_info)
-                break
-            except Exception as e:
-                logger.warning(
-                    f"获取插件文件失败 | API类型: {repo_api.strategy}",
-                    LOG_COMMAND,
-                    e=e,
-                )
-                continue
-        else:
-            raise ValueError("所有API获取插件文件失败，请检查网络连接")
-        if module_path == ".":
-            module_path = ""
+        """安装插件
+
+        参数:
+            github_url: 仓库地址
+            module_path: 模块路径
+            is_dir: 是否是文件夹
+            is_external: 是否是外部仓库
+        """
+        repo_type = RepoType.GITHUB if is_external else None
         replace_module_path = module_path.replace(".", "/")
-        files = repo_api.get_files(
-            module_path=replace_module_path + ("" if is_dir else ".py"),
-            is_dir=is_dir,
-        )
-        download_urls = [await repo_info.get_raw_download_urls(file) for file in files]
-        base_path = BASE_PATH / "plugins" if is_external else BASE_PATH
-        base_path = base_path if module_path else base_path / repo_info.repo
-        download_paths: list[Path | str] = [base_path / file for file in files]
-        logger.debug(f"插件下载路径: {download_paths}", LOG_COMMAND)
-        result = await AsyncHttpx.gather_download_file(download_urls, download_paths)
-        for _id, success in enumerate(result):
-            if not success:
-                break
+        if is_dir:
+            files = await RepoFileManager.list_directory_files(
+                github_url, replace_module_path, repo_type=repo_type
+            )
         else:
-            # 安装依赖
-            plugin_path = base_path / "/".join(module_path.split("."))
-            try:
-                req_files = repo_api.get_files(
-                    f"{replace_module_path}/{REQ_TXT_FILE_STRING}", False
+            files = [RepoFileInfo(path=f"{replace_module_path}.py", is_dir=False)]
+        local_path = BASE_PATH / "plugins" if is_external else BASE_PATH
+        files = [file for file in files if not file.is_dir]
+        download_files = [(file.path, local_path / file.path) for file in files]
+        await RepoFileManager.download_files(
+            github_url, download_files, repo_type=repo_type
+        )
+
+        requirement_paths = [
+            file
+            for file in files
+            if file.path.endswith("requirement.txt")
+            or file.path.endswith("requirements.txt")
+        ]
+
+        is_install_req = False
+        for requirement_path in requirement_paths:
+            requirement_file = local_path / requirement_path.path
+            if requirement_file.exists():
+                is_install_req = True
+                await VirtualEnvPackageManager.install_requirement(requirement_file)
+
+        if not is_install_req:
+            # 从仓库根目录查找文件
+            rand = random.randint(1, 10000)
+            requirement_path = TEMP_PATH / f"plugin_store_{rand}_req.txt"
+            requirements_path = TEMP_PATH / f"plugin_store_{rand}_reqs.txt"
+            await RepoFileManager.download_files(
+                github_url,
+                [
+                    ("requirement.txt", requirement_path),
+                    ("requirements.txt", requirements_path),
+                ],
+                repo_type=repo_type,
+                ignore_error=True,
+            )
+            if requirement_path.exists():
+                logger.info(
+                    f"开始安装插件 {module_path} 依赖文件: {requirement_path}",
+                    LOG_COMMAND,
                 )
-                req_files.extend(
-                    repo_api.get_files(f"{replace_module_path}/requirement.txt", False)
+                await VirtualEnvPackageManager.install_requirement(requirement_path)
+            if requirements_path.exists():
+                logger.info(
+                    f"开始安装插件 {module_path} 依赖文件: {requirements_path}",
+                    LOG_COMMAND,
                 )
-                logger.debug(f"获取插件依赖文件列表: {req_files}", LOG_COMMAND)
-                req_download_urls = [
-                    await repo_info.get_raw_download_urls(file) for file in req_files
-                ]
-                req_paths: list[Path | str] = [plugin_path / file for file in req_files]
-                logger.debug(f"插件依赖文件下载路径: {req_paths}", LOG_COMMAND)
-                if req_files:
-                    result = await AsyncHttpx.gather_download_file(
-                        req_download_urls, req_paths
-                    )
-                    for success in result:
-                        if not success:
-                            raise Exception("插件依赖文件下载失败")
-                    logger.debug(f"插件依赖文件列表: {req_paths}", LOG_COMMAND)
-                    install_requirement(plugin_path)
-            except ValueError as e:
-                logger.warning("未获取到依赖文件路径...", e=e)
-            return True
-        raise Exception("插件下载失败...")
+                await VirtualEnvPackageManager.install_requirement(requirements_path)
 
     @classmethod
-    async def remove_plugin(cls, plugin_id: str) -> str:
+    async def remove_plugin(cls, index_or_module: str) -> str:
         """移除插件
 
         参数:
-            plugin_id: 插件id或模块名
+            index_or_module: 插件id或模块名
 
         返回:
             str: 返回消息
         """
-        plugin_list: list[StorePluginInfo] = await cls.get_data()
-        try:
-            plugin_key = await cls._resolve_plugin_key(plugin_id)
-        except ValueError as e:
-            return str(e)
-        plugin_info = next((p for p in plugin_list if p.module == plugin_key), None)
-        if plugin_info is None:
-            return f"未找到插件 {plugin_key}"
+        plugin_info, _ = await cls.get_plugin_by_value(index_or_module)
         path = BASE_PATH
         if plugin_info.github_url:
             path = BASE_PATH / "plugins"
@@ -339,12 +338,13 @@ class StoreManager:
         返回:
             BuildImage | str: 返回消息
         """
-        plugin_list: list[StorePluginInfo] = await cls.get_data()
+        plugin_list, extra_plugin_list = await cls.get_data()
+        all_plugin_list = plugin_list + extra_plugin_list
         db_plugin_list = await cls.get_loaded_plugins("module", "version")
         suc_plugin = {p[0]: (p[1] or "Unknown") for p in db_plugin_list}
         filtered_data = [
             (id, plugin_info)
-            for id, plugin_info in enumerate(plugin_list)
+            for id, plugin_info in enumerate(all_plugin_list)
             if plugin_name_or_author.lower() in plugin_info.name.lower()
             or plugin_name_or_author.lower() in plugin_info.author.lower()
         ]
@@ -373,35 +373,24 @@ class StoreManager:
         )
 
     @classmethod
-    async def update_plugin(cls, plugin_id: str) -> str:
+    async def update_plugin(cls, index_or_module: str) -> str:
         """更新插件
 
         参数:
-            plugin_id: 插件id
+            index_or_module: 插件id
 
         返回:
             str: 返回消息
         """
-        plugin_list: list[StorePluginInfo] = await cls.get_data()
-        try:
-            plugin_key = await cls._resolve_plugin_key(plugin_id)
-        except ValueError as e:
-            return str(e)
-        plugin_info = next((p for p in plugin_list if p.module == plugin_key), None)
-        if plugin_info is None:
-            return f"未找到插件 {plugin_key}"
+        plugin_info, is_external = await cls.get_plugin_by_value(index_or_module, True)
         logger.info(f"尝试更新插件 {plugin_info.name}", LOG_COMMAND)
         db_plugin_list = await cls.get_loaded_plugins("module", "version")
         suc_plugin = {p[0]: (p[1] or "Unknown") for p in db_plugin_list}
-        if plugin_info.module not in [p[0] for p in db_plugin_list]:
-            return f"插件 {plugin_info.name} 未安装，无法更新"
         logger.debug(f"当前插件列表: {suc_plugin}", LOG_COMMAND)
         if cls.check_version_is_new(plugin_info, suc_plugin):
             return f"插件 {plugin_info.name} 已是最新版本"
-        is_external = True
         if plugin_info.github_url is None:
             plugin_info.github_url = DEFAULT_GITHUB_URL
-            is_external = False
         await cls.install_plugin_with_repo(
             plugin_info.github_url,
             plugin_info.module_path,
@@ -420,8 +409,9 @@ class StoreManager:
         返回:
             str: 返回消息
         """
-        plugin_list: list[StorePluginInfo] = await cls.get_data()
-        plugin_name_list = [p.name for p in plugin_list]
+        plugin_list, extra_plugin_list = await cls.get_data()
+        all_plugin_list = plugin_list + extra_plugin_list
+        plugin_name_list = [p.name for p in all_plugin_list]
         update_failed_list = []
         update_success_list = []
         result = "--已更新{}个插件 {}个失败 {}个成功--"
@@ -492,22 +482,25 @@ class StoreManager:
             plugin_id: module，id或插件名称
 
         异常:
-            ValueError: 插件不存在
-            ValueError: 插件不存在
+            PluginStoreException: 插件不存在
+            PluginStoreException: 插件不存在
 
         返回:
             str: 插件模块名
         """
-        plugin_list: list[StorePluginInfo] = await cls.get_data()
+        plugin_list, extra_plugin_list = await cls.get_data()
+        all_plugin_list = plugin_list + extra_plugin_list
         if is_number(plugin_id):
             idx = int(plugin_id)
-            if idx < 0 or idx >= len(plugin_list):
-                raise ValueError("插件ID不存在...")
-            return plugin_list[idx].module
+            if idx < 0 or idx >= len(all_plugin_list):
+                raise PluginStoreException("插件ID不存在...")
+            return all_plugin_list[idx].module
         elif isinstance(plugin_id, str):
             result = (
-                None if plugin_id not in [v.module for v in plugin_list] else plugin_id
-            ) or next(v for v in plugin_list if v.name == plugin_id).module
+                None
+                if plugin_id not in [v.module for v in all_plugin_list]
+                else plugin_id
+            ) or next(v for v in all_plugin_list if v.name == plugin_id).module
             if not result:
-                raise ValueError("插件 Module / 名称 不存在...")
+                raise PluginStoreException("插件 Module / 名称 不存在...")
             return result

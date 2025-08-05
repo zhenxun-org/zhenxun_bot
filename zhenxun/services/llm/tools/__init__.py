@@ -2,6 +2,12 @@
 工具模块导出
 """
 
-from .registry import tool_registry
+from .manager import tool_provider_manager
 
-__all__ = ["tool_registry"]
+function_tool = tool_provider_manager.function_tool
+
+
+__all__ = [
+    "function_tool",
+    "tool_provider_manager",
+]

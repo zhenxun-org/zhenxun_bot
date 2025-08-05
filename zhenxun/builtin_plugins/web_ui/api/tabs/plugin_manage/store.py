@@ -25,10 +25,10 @@ async def _() -> Result[dict]:
         require("plugin_store")
         from zhenxun.builtin_plugins.plugin_store import StoreManager
 
-        data = await StoreManager.get_data()
+        plugin_list, extra_plugin_list = await StoreManager.get_data()
         plugin_list = [
             {**model_dump(plugin), "name": plugin.name, "id": idx}
-            for idx, plugin in enumerate(data)
+            for idx, plugin in enumerate(plugin_list + extra_plugin_list)
         ]
         modules = await PluginInfo.filter(load_status=True).values_list(
             "module", flat=True

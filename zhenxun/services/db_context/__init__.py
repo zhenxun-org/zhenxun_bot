@@ -1,6 +1,8 @@
 import asyncio
+from pathlib import Path
 from urllib.parse import urlparse
 
+import aiofiles
 import nonebot
 from nonebot.utils import is_coroutine_callable
 from tortoise import Tortoise
@@ -86,6 +88,7 @@ def get_config() -> dict:
             **MYSQL_CONFIG,
         }
     elif parsed.scheme == "sqlite":
+        Path(parsed.path).parent.mkdir(parents=True, exist_ok=True)
         config["connections"]["default"] = {
             "engine": "tortoise.backends.sqlite",
             "credentials": {
@@ -99,6 +102,15 @@ def get_config() -> dict:
 @PriorityLifecycle.on_startup(priority=1)
 async def init():
     global MODELS, SCRIPT_METHOD
+
+    env_example_file = Path() / ".env.example"
+    env_dev_file = Path() / ".env.dev"
+    if not env_dev_file.exists():
+        async with aiofiles.open(env_example_file, encoding="utf-8") as f:
+            env_text = await f.read()
+        async with aiofiles.open(env_dev_file, "w", encoding="utf-8") as f:
+            await f.write(env_text)
+        logger.info("已生成 .env.dev 文件，请根据 .env.example 文件配置进行配置")
 
     MODELS = db_model.models
     SCRIPT_METHOD = db_model.script_method

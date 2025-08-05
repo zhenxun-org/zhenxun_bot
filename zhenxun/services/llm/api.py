@@ -1,16 +1,19 @@
 """
-LLM 服务的高级 API 接口 - 便捷函数入口
+LLM 服务的高级 API 接口 - 便捷函数入口 (无状态)
 """
 
-from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from nonebot_plugin_alconna.uniseg import UniMessage
+from pydantic import BaseModel
 
 from zhenxun.services.log import logger
 
+from .config import CommonOverrides
+from .config.generation import create_generation_config_from_kwargs
 from .manager import get_model_instance
 from .session import AI
+from .tools.manager import tool_provider_manager
 from .types import (
     EmbeddingTaskType,
     LLMContentPart,
@@ -18,37 +21,53 @@ from .types import (
     LLMException,
     LLMMessage,
     LLMResponse,
-    LLMTool,
     ModelName,
 )
-from .utils import create_multimodal_message, unimsg_to_llm_parts
+
+T = TypeVar("T", bound=BaseModel)
 
 
 async def chat(
-    message: str | LLMMessage | list[LLMContentPart],
+    message: str | UniMessage | LLMMessage | list[LLMContentPart],
     *,
     model: ModelName = None,
-    tools: list[LLMTool] | None = None,
+    instruction: str | None = None,
+    tools: list[dict[str, Any] | str] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> LLMResponse:
     """
-    聊天对话便捷函数
+    无状态的聊天对话便捷函数，通过临时的AI会话实例与LLM模型交互。
 
     参数:
-        message: 用户输入的消息。
-        model: 要使用的模型名称。
-        tools: 本次对话可用的工具列表。
-        tool_choice: 强制模型使用的工具。
-        **kwargs: 传递给模型的其他参数。
+        message: 用户输入的消息内容，支持多种格式。
+        model: 要使用的模型名称，如果为None则使用默认模型。
+        instruction: 系统指令，用于指导AI的行为和回复风格。
+        tools: 可用的工具列表，支持字典配置或字符串标识符。
+        tool_choice: 工具选择策略，控制AI如何选择和使用工具。
+        **kwargs: 额外的生成配置参数，会被转换为LLMGenerationConfig。
 
     返回:
-        LLMResponse: 模型的完整响应，可能包含文本或工具调用请求。
+        LLMResponse: 包含AI回复内容、使用信息和工具调用等的完整响应对象。
     """
-    ai = AI()
-    return await ai.chat(
-        message, model=model, tools=tools, tool_choice=tool_choice, **kwargs
-    )
+    try:
+        config = create_generation_config_from_kwargs(**kwargs) if kwargs else None
+
+        ai_session = AI()
+
+        return await ai_session.chat(
+            message,
+            model=model,
+            instruction=instruction,
+            tools=tools,
+            tool_choice=tool_choice,
+            config=config,
+        )
+    except LLMException:
+        raise
+    except Exception as e:
+        logger.error(f"执行 chat 函数失败: {e}", e=e)
+        raise LLMException(f"聊天执行失败: {e}", cause=e)
 
 
 async def code(
@@ -57,141 +76,66 @@ async def code(
     model: ModelName = None,
     timeout: int | None = None,
     **kwargs: Any,
-) -> dict[str, Any]:
+) -> LLMResponse:
     """
-    代码执行便捷函数
+    无状态的代码执行便捷函数，支持在沙箱环境中执行代码。
 
     参数:
-        prompt: 代码执行的提示词。
-        model: 要使用的模型名称。
-        timeout: 代码执行超时时间（秒）。
-        **kwargs: 传递给模型的其他参数。
+        prompt: 代码执行的提示词，描述要执行的代码任务。
+        model: 要使用的模型名称，默认使用Gemini/gemini-2.0-flash。
+        timeout: 代码执行超时时间（秒），防止长时间运行的代码阻塞。
+        **kwargs: 额外的生成配置参数。
 
     返回:
-        dict[str, Any]: 包含执行结果的字典。
+        LLMResponse: 包含代码执行结果的完整响应对象。
     """
-    ai = AI()
-    return await ai.code(prompt, model=model, timeout=timeout, **kwargs)
+    resolved_model = model or "Gemini/gemini-2.0-flash"
+
+    config = CommonOverrides.gemini_code_execution()
+    if timeout:
+        config.custom_params = config.custom_params or {}
+        config.custom_params["code_execution_timeout"] = timeout
+
+    final_config = config.to_dict()
+    final_config.update(kwargs)
+
+    return await chat(prompt, model=resolved_model, **final_config)
 
 
 async def search(
-    query: str | UniMessage,
+    query: str | UniMessage | LLMMessage | list[LLMContentPart],
     *,
     model: ModelName = None,
-    instruction: str = "",
+    instruction: str = (
+        "你是一位强大的信息检索和整合专家。请利用可用的搜索工具，"
+        "根据用户的查询找到最相关的信息，并进行总结和回答。"
+    ),
     **kwargs: Any,
-) -> dict[str, Any]:
+) -> LLMResponse:
     """
-    信息搜索便捷函数
+    无状态的信息搜索便捷函数，利用搜索工具获取实时信息。
 
     参数:
-        query: 搜索查询内容。
-        model: 要使用的模型名称。
-        instruction: 搜索指令。
-        **kwargs: 传递给模型的其他参数。
+        query: 搜索查询内容，支持多种输入格式。
+        model: 要使用的模型名称，如果为None则使用默认模型。
+        instruction: 搜索任务的系统指令，指导AI如何处理搜索结果。
+        **kwargs: 额外的生成配置参数。
 
     返回:
-        dict[str, Any]: 包含搜索结果的字典。
+        LLMResponse: 包含搜索结果和AI整合回复的完整响应对象。
     """
-    ai = AI()
-    return await ai.search(query, model=model, instruction=instruction, **kwargs)
+    logger.debug("执行无状态 'search' 任务...")
+    search_config = CommonOverrides.gemini_grounding()
 
+    final_config = search_config.to_dict()
+    final_config.update(kwargs)
 
-async def analyze(
-    message: UniMessage | None,
-    *,
-    instruction: str = "",
-    model: ModelName = None,
-    use_tools: list[str] | None = None,
-    tool_config: dict[str, Any] | None = None,
-    **kwargs: Any,
-) -> str | LLMResponse:
-    """
-    内容分析便捷函数
-
-    参数:
-        message: 要分析的消息内容。
-        instruction: 分析指令。
-        model: 要使用的模型名称。
-        use_tools: 要使用的工具名称列表。
-        tool_config: 工具配置。
-        **kwargs: 传递给模型的其他参数。
-
-    返回:
-        str | LLMResponse: 分析结果。
-    """
-    ai = AI()
-    return await ai.analyze(
-        message,
-        instruction=instruction,
+    return await chat(
+        query,
         model=model,
-        use_tools=use_tools,
-        tool_config=tool_config,
-        **kwargs,
+        instruction=instruction,
+        **final_config,
     )
-
-
-async def analyze_multimodal(
-    text: str | None = None,
-    images: list[str | Path | bytes] | str | Path | bytes | None = None,
-    videos: list[str | Path | bytes] | str | Path | bytes | None = None,
-    audios: list[str | Path | bytes] | str | Path | bytes | None = None,
-    *,
-    instruction: str = "",
-    model: ModelName = None,
-    **kwargs: Any,
-) -> str | LLMResponse:
-    """
-    多模态分析便捷函数
-
-    参数:
-        text: 文本内容。
-        images: 图片文件路径、字节数据或列表。
-        videos: 视频文件路径、字节数据或列表。
-        audios: 音频文件路径、字节数据或列表。
-        instruction: 分析指令。
-        model: 要使用的模型名称。
-        **kwargs: 传递给模型的其他参数。
-
-    返回:
-        str | LLMResponse: 分析结果。
-    """
-    message = create_multimodal_message(
-        text=text, images=images, videos=videos, audios=audios
-    )
-    return await analyze(message, instruction=instruction, model=model, **kwargs)
-
-
-async def search_multimodal(
-    text: str | None = None,
-    images: list[str | Path | bytes] | str | Path | bytes | None = None,
-    videos: list[str | Path | bytes] | str | Path | bytes | None = None,
-    audios: list[str | Path | bytes] | str | Path | bytes | None = None,
-    *,
-    instruction: str = "",
-    model: ModelName = None,
-    **kwargs: Any,
-) -> dict[str, Any]:
-    """
-    多模态搜索便捷函数
-
-    参数:
-        text: 文本内容。
-        images: 图片文件路径、字节数据或列表。
-        videos: 视频文件路径、字节数据或列表。
-        audios: 音频文件路径、字节数据或列表。
-        instruction: 搜索指令。
-        model: 要使用的模型名称。
-        **kwargs: 传递给模型的其他参数。
-
-    返回:
-        dict[str, Any]: 包含搜索结果的字典。
-    """
-    message = create_multimodal_message(
-        text=text, images=images, videos=videos, audios=audios
-    )
-    ai = AI()
-    return await ai.search(message, model=model, instruction=instruction, **kwargs)
 
 
 async def embed(
@@ -202,140 +146,104 @@ async def embed(
     **kwargs: Any,
 ) -> list[list[float]]:
     """
-    文本嵌入便捷函数
+    无状态的文本嵌入便捷函数，将文本转换为向量表示。
 
     参数:
-        texts: 要生成嵌入向量的文本或文本列表。
-        model: 要使用的嵌入模型名称。
-        task_type: 嵌入任务类型。
-        **kwargs: 传递给模型的其他参数。
+        texts: 要生成嵌入的文本内容，支持单个字符串或字符串列表。
+        model: 要使用的嵌入模型名称，如果为None则使用默认模型。
+        task_type: 嵌入任务类型，影响向量的优化方向（如检索、分类等）。
+        **kwargs: 额外的模型配置参数。
 
     返回:
-        list[list[float]]: 文本的嵌入向量列表。
+        list[list[float]]: 文本对应的嵌入向量列表，每个向量为浮点数列表。
     """
-    ai = AI()
-    return await ai.embed(texts, model=model, task_type=task_type, **kwargs)
+    if isinstance(texts, str):
+        texts = [texts]
+    if not texts:
+        return []
 
-
-async def pipeline_chat(
-    message: UniMessage | str | list[LLMContentPart],
-    model_chain: list[ModelName],
-    *,
-    initial_instruction: str = "",
-    final_instruction: str = "",
-    **kwargs: Any,
-) -> LLMResponse:
-    """
-    AI模型链式调用，前一个模型的输出作为下一个模型的输入。
-
-    参数:
-        message: 初始输入消息（支持多模态）
-        model_chain: 模型名称列表
-        initial_instruction: 第一个模型的系统指令
-        final_instruction: 最后一个模型的系统指令
-        **kwargs: 传递给模型实例的其他参数
-
-    返回:
-        LLMResponse: 最后一个模型的响应结果
-    """
-    if not model_chain:
-        raise ValueError("模型链`model_chain`不能为空。")
-
-    current_content: str | list[LLMContentPart]
-    if isinstance(message, UniMessage):
-        current_content = await unimsg_to_llm_parts(message)
-    elif isinstance(message, str):
-        current_content = message
-    elif isinstance(message, list):
-        current_content = message
-    else:
-        raise TypeError(f"不支持的消息类型: {type(message)}")
-
-    final_response: LLMResponse | None = None
-
-    for i, model_name in enumerate(model_chain):
-        if not model_name:
-            raise ValueError(f"模型链中第 {i + 1} 个模型名称为空。")
-
-        is_first_step = i == 0
-        is_last_step = i == len(model_chain) - 1
-
-        messages_for_step: list[LLMMessage] = []
-        instruction_for_step = ""
-        if is_first_step and initial_instruction:
-            instruction_for_step = initial_instruction
-        elif is_last_step and final_instruction:
-            instruction_for_step = final_instruction
-
-        if instruction_for_step:
-            messages_for_step.append(LLMMessage.system(instruction_for_step))
-
-        messages_for_step.append(LLMMessage.user(current_content))
-
-        logger.info(
-            f"Pipeline Step [{i + 1}/{len(model_chain)}]: "
-            f"使用模型 '{model_name}' 进行处理..."
-        )
-        try:
-            async with await get_model_instance(model_name, **kwargs) as model:
-                response = await model.generate_response(messages_for_step)
-            final_response = response
-            current_content = response.text.strip()
-            if not current_content and not is_last_step:
-                logger.warning(
-                    f"模型 '{model_name}' 在中间步骤返回了空内容，流水线可能无法继续。"
-                )
-                break
-
-        except Exception as e:
-            logger.error(f"在模型链的第 {i + 1} 步 ('{model_name}') 出错: {e}", e=e)
-            raise LLMException(
-                f"流水线在模型 '{model_name}' 处执行失败: {e}",
-                code=LLMErrorCode.GENERATION_FAILED,
-                cause=e,
+    try:
+        async with await get_model_instance(model) as model_instance:
+            return await model_instance.generate_embeddings(
+                texts, task_type=task_type, **kwargs
             )
-
-    if final_response is None:
+    except LLMException:
+        raise
+    except Exception as e:
+        logger.error(f"文本嵌入失败: {e}", e=e)
         raise LLMException(
-            "AI流水线未能产生任何响应。", code=LLMErrorCode.GENERATION_FAILED
+            f"文本嵌入失败: {e}", code=LLMErrorCode.EMBEDDING_FAILED, cause=e
         )
 
-    return final_response
+
+async def generate_structured(
+    message: str | LLMMessage | list[LLMContentPart],
+    response_model: type[T],
+    *,
+    model: ModelName = None,
+    instruction: str | None = None,
+    **kwargs: Any,
+) -> T:
+    """
+    无状态地生成结构化响应，并自动解析为指定的Pydantic模型。
+
+    参数:
+        message: 用户输入的消息内容，支持多种格式。
+        response_model: 用于解析和验证响应的Pydantic模型类。
+        model: 要使用的模型名称，如果为None则使用默认模型。
+        instruction: 系统指令，用于指导AI生成符合要求的结构化输出。
+        **kwargs: 额外的生成配置参数。
+
+    返回:
+        T: 解析后的Pydantic模型实例，类型为response_model指定的类型。
+    """
+    try:
+        config = create_generation_config_from_kwargs(**kwargs) if kwargs else None
+
+        ai_session = AI()
+
+        return await ai_session.generate_structured(
+            message,
+            response_model,
+            model=model,
+            instruction=instruction,
+            config=config,
+        )
+    except LLMException:
+        raise
+    except Exception as e:
+        logger.error(f"生成结构化响应失败: {e}", e=e)
+        raise LLMException(f"生成结构化响应失败: {e}", cause=e)
 
 
 async def generate(
     messages: list[LLMMessage],
     *,
     model: ModelName = None,
-    tools: list[LLMTool] | None = None,
+    tools: list[dict[str, Any] | str] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> LLMResponse:
     """
-    根据完整的消息列表（包括系统指令）生成一次性响应。
-    这是一个便捷的函数，不使用或修改任何会话历史。
+    根据完整的消息列表生成一次性响应，这是一个无状态的底层函数。
 
     参数:
-        messages: 用于生成响应的完整消息列表。
-        model: 要使用的模型名称。
-        tools: 可用的工具列表。
-        tool_choice: 工具选择策略。
-        **kwargs: 传递给模型的其他参数。
+        messages: 完整的消息历史列表，包括系统指令、用户消息和助手回复。
+        model: 要使用的模型名称，如果为None则使用默认模型。
+        tools: 可用的工具列表，支持字典配置或字符串标识符。
+        tool_choice: 工具选择策略，控制AI如何选择和使用工具。
+        **kwargs: 额外的生成配置参数，会覆盖默认配置。
 
     返回:
-        LLMResponse: 模型的完整响应对象。
+        LLMResponse: 包含AI回复内容、使用信息和工具调用等的完整响应对象。
     """
     try:
-        ai_instance = AI()
-        resolved_model_name = ai_instance._resolve_model_name(model)
-        final_config_dict = ai_instance._merge_config(kwargs)
-
         async with await get_model_instance(
-            resolved_model_name, override_config=final_config_dict
+            model, override_config=kwargs
         ) as model_instance:
             return await model_instance.generate_response(
                 messages,
-                tools=tools,
+                tools=tools,  # type: ignore
                 tool_choice=tool_choice,
             )
     except LLMException:
@@ -343,3 +251,55 @@ async def generate(
     except Exception as e:
         logger.error(f"生成响应失败: {e}", e=e)
         raise LLMException(f"生成响应失败: {e}", cause=e)
+
+
+async def run_with_tools(
+    message: str | UniMessage | LLMMessage | list[LLMContentPart],
+    *,
+    model: ModelName = None,
+    instruction: str | None = None,
+    tools: list[str],
+    max_cycles: int = 5,
+    **kwargs: Any,
+) -> LLMResponse:
+    """
+    无状态地执行一个带本地Python函数的LLM调用循环。
+
+    参数:
+        message: 用户输入。
+        model: 使用的模型。
+        instruction: 系统指令。
+        tools: 要使用的本地函数工具名称列表 (必须已通过 @function_tool 注册)。
+        max_cycles: 最大工具调用循环次数。
+        **kwargs: 额外的生成配置参数。
+
+    返回:
+        LLMResponse: 包含最终回复的响应对象。
+    """
+    from .executor import ExecutionConfig, LLMToolExecutor
+    from .utils import normalize_to_llm_messages
+
+    messages = await normalize_to_llm_messages(message, instruction)
+
+    async with await get_model_instance(
+        model, override_config=kwargs
+    ) as model_instance:
+        resolved_tools = await tool_provider_manager.get_function_tools(tools)
+        if not resolved_tools:
+            logger.warning(
+                "run_with_tools 未找到任何可用的本地函数工具，将作为普通聊天执行。"
+            )
+            return await model_instance.generate_response(messages, tools=None)
+
+        executor = LLMToolExecutor(model_instance)
+        config = ExecutionConfig(max_cycles=max_cycles)
+        final_history = await executor.run(messages, resolved_tools, config)
+
+        for msg in reversed(final_history):
+            if msg.role == "assistant":
+                text = msg.content if isinstance(msg.content, str) else str(msg.content)
+                return LLMResponse(text=text, tool_calls=msg.tool_calls)
+
+    raise LLMException(
+        "带工具的执行循环未能产生有效的助手回复。", code=LLMErrorCode.GENERATION_FAILED
+    )

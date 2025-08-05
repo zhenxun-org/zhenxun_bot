@@ -229,9 +229,9 @@ async def _(payload: InstallDependenciesPayload) -> Result:
         if not payload.dependencies:
             return Result.fail("依赖列表不能为空")
         if payload.handle_type == "install":
-            result = VirtualEnvPackageManager.install(payload.dependencies)
+            result = await VirtualEnvPackageManager.install(payload.dependencies)
         else:
-            result = VirtualEnvPackageManager.uninstall(payload.dependencies)
+            result = await VirtualEnvPackageManager.uninstall(payload.dependencies)
         return Result.ok(result)
     except Exception as e:
         logger.error(f"{router.prefix}/install_dependencies 调用错误", "WebUi", e=e)

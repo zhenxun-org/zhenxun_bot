@@ -84,7 +84,7 @@ async def _(session: EventSession):
     try:
         result = await StoreManager.get_plugins_info()
         logger.info("查看插件列表", "插件商店", session=session)
-        await MessageUtils.build_message(result).send()
+        await MessageUtils.build_message([*result]).send()
     except Exception as e:
         logger.error(f"查看插件列表失败 e: {e}", "插件商店", session=session, e=e)
         await MessageUtils.build_message("获取插件列表失败...").send()

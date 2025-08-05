@@ -5,17 +5,27 @@ LLM 服务 - 会话客户端
 """
 
 import copy
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+import json
+from typing import Any, TypeVar
+import uuid
 
+from jinja2 import Environment
+from nonebot.compat import type_validate_json
 from nonebot_plugin_alconna.uniseg import UniMessage
+from pydantic import BaseModel, ValidationError
 
 from zhenxun.services.log import logger
+from zhenxun.utils.pydantic_compat import model_copy, model_dump, model_json_schema
 
-from .config import CommonOverrides, LLMGenerationConfig
+from .config import (
+    CommonOverrides,
+    LLMGenerationConfig,
+)
 from .config.providers import get_ai_config
 from .manager import get_global_default_model_name, get_model_instance
-from .tools import tool_registry
+from .memory import BaseMemory, InMemoryMemory
+from .tools.manager import tool_provider_manager
 from .types import (
     EmbeddingTaskType,
     LLMContentPart,
@@ -23,67 +33,93 @@ from .types import (
     LLMException,
     LLMMessage,
     LLMResponse,
-    LLMTool,
     ModelName,
+    ResponseFormat,
+    ToolExecutable,
+    ToolProvider,
 )
-from .utils import unimsg_to_llm_parts
+from .utils import normalize_to_llm_messages
+
+T = TypeVar("T", bound=BaseModel)
+
+jinja_env = Environment(autoescape=False)
 
 
 @dataclass
 class AIConfig:
-    """AI配置类 - 简化版本"""
+    """AI配置类 - [重构后] 简化版本"""
 
     model: ModelName = None
     default_embedding_model: ModelName = None
-    temperature: float | None = None
-    max_tokens: int | None = None
-    enable_cache: bool = False
-    enable_code: bool = False
-    enable_search: bool = False
-    timeout: int | None = None
-
-    enable_gemini_json_mode: bool = False
-    enable_gemini_thinking: bool = False
-    enable_gemini_safe_mode: bool = False
-    enable_gemini_multimodal: bool = False
-    enable_gemini_grounding: bool = False
     default_preserve_media_in_history: bool = False
+    tool_providers: list[ToolProvider] = field(default_factory=list)
 
     def __post_init__(self):
         """初始化后从配置中读取默认值"""
         ai_config = get_ai_config()
         if self.model is None:
             self.model = ai_config.get("default_model_name")
-        if self.timeout is None:
-            self.timeout = ai_config.get("timeout", 180)
 
 
 class AI:
-    """统一的AI服务类 - 平衡设计版本
-
-    提供三层API：
-    1. 简单方法：ai.chat(), ai.code(), ai.search()
-    2. 标准方法：ai.analyze() 支持复杂参数
-    3. 高级方法：通过get_model_instance()直接访问
+    """
+    统一的AI服务类 - 提供了带记忆的会话接口。
+    不再执行自主工具循环，当LLM返回工具调用时，会直接将请求返回给调用者。
     """
 
     def __init__(
-        self, config: AIConfig | None = None, history: list[LLMMessage] | None = None
+        self,
+        session_id: str | None = None,
+        config: AIConfig | None = None,
+        memory: BaseMemory | None = None,
+        default_generation_config: LLMGenerationConfig | None = None,
     ):
         """
         初始化AI服务
 
         参数:
+            session_id: 唯一的会话ID，用于隔离记忆。
             config: AI 配置.
-            history: 可选的初始对话历史.
+            memory: 可选的自定义记忆后端。如果为None，则使用默认的InMemoryMemory。
+            default_generation_config: (新增) 此AI实例的默认生成配置。
         """
+        self.session_id = session_id or str(uuid.uuid4())
         self.config = config or AIConfig()
-        self.history = history or []
+        self.memory = memory or InMemoryMemory()
+        self.default_generation_config = (
+            default_generation_config or LLMGenerationConfig()
+        )
 
-    def clear_history(self):
-        """清空当前会话的历史记录"""
-        self.history = []
-        logger.info("AI session history cleared.")
+        global_providers = tool_provider_manager._providers
+        config_providers = self.config.tool_providers
+        self._tool_providers = list(dict.fromkeys(global_providers + config_providers))
+
+    async def clear_history(self):
+        """清空当前会话的历史记录。"""
+        await self.memory.clear_history(self.session_id)
+        logger.info(f"AI会话历史记录已清空 (session_id: {self.session_id})")
+
+    async def add_user_message_to_history(
+        self, message: str | LLMMessage | list[LLMContentPart]
+    ):
+        """
+        将一条用户消息标准化并添加到会话历史中。
+
+        参数:
+            message: 用户消息内容。
+        """
+        user_message = await self._normalize_input_to_message(message)
+        await self.memory.add_message(self.session_id, user_message)
+
+    async def add_assistant_response_to_history(self, response_text: str):
+        """
+        将助手的文本回复添加到会话历史中。
+
+        参数:
+            response_text: 助手的回复文本。
+        """
+        assistant_message = LLMMessage.assistant_text_response(response_text)
+        await self.memory.add_message(self.session_id, assistant_message)
 
     def _sanitize_message_for_history(self, message: LLMMessage) -> LLMMessage:
         """
@@ -121,83 +157,122 @@ class AI:
         sanitized_message.content = new_content_parts
         return sanitized_message
 
+    async def _normalize_input_to_message(
+        self, message: str | UniMessage | LLMMessage | list[LLMContentPart]
+    ) -> LLMMessage:
+        """
+        [重构后] 内部辅助方法，将各种输入类型统一转换为单个 LLMMessage 对象。
+        它调用共享的工具函数并提取最后一条消息（通常是用户输入）。
+        """
+        messages = await normalize_to_llm_messages(message)
+
+        if not messages:
+            raise LLMException(
+                "无法将输入标准化为有效的消息。", code=LLMErrorCode.CONFIGURATION_ERROR
+            )
+        return messages[-1]
+
     async def chat(
         self,
-        message: str | LLMMessage | list[LLMContentPart],
+        message: str | UniMessage | LLMMessage | list[LLMContentPart],
         *,
         model: ModelName = None,
+        instruction: str | None = None,
+        template_vars: dict[str, Any] | None = None,
         preserve_media_in_history: bool | None = None,
-        tools: list[LLMTool] | None = None,
+        tools: list[dict[str, Any] | str] | dict[str, ToolExecutable] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
-        **kwargs: Any,
+        config: LLMGenerationConfig | None = None,
     ) -> LLMResponse:
         """
-        进行一次聊天对话，支持工具调用。
-        此方法会自动使用和更新会话内的历史记录。
+        核心交互方法，管理会话历史并执行单次LLM调用。
 
         参数:
-            message: 用户输入的消息。
-            model: 本次对话要使用的模型。
-            preserve_media_in_history: 是否在历史记录中保留原始多模态信息。
-                - True: 保留，用于深度多轮媒体分析。
-                - False: 不保留，替换为占位符，提高效率。
-                - None (默认): 使用AI实例配置的默认值。
-            tools: 本次对话可用的工具列表。
-            tool_choice: 强制模型使用的工具。
-            **kwargs: 传递给模型的其他生成参数。
+            message: 用户输入的消息内容，支持文本、UniMessage、LLMMessage或
+                    内容部分列表。
+            model: 要使用的模型名称，如果为None则使用配置中的默认模型。
+            instruction: 本次调用的特定系统指令，会与全局指令合并。
+            template_vars: 模板变量字典，用于在指令中进行变量替换。
+            preserve_media_in_history: 是否在历史记录中保留媒体内容，
+                                     None时使用默认配置。
+            tools: 可用的工具列表或工具字典，支持临时工具和预配置工具。
+            tool_choice: 工具选择策略，控制AI如何选择和使用工具。
+            config: 生成配置对象，用于覆盖默认的生成参数。
 
         返回:
-            LLMResponse: 模型的完整响应，可能包含文本或工具调用请求。
+            LLMResponse: 包含AI回复、工具调用请求、使用信息等的完整响应对象。
         """
-        current_message: LLMMessage
-        if isinstance(message, str):
-            current_message = LLMMessage.user(message)
-        elif isinstance(message, list) and all(
-            isinstance(part, LLMContentPart) for part in message
-        ):
-            current_message = LLMMessage.user(message)
-        elif isinstance(message, LLMMessage):
-            current_message = message
-        else:
-            raise LLMException(
-                f"AI.chat 不支持的消息类型: {type(message)}. "
-                "请使用 str, LLMMessage, 或 list[LLMContentPart]. "
-                "对于更复杂的多模态输入或文件路径，请使用 AI.analyze().",
-                code=LLMErrorCode.API_REQUEST_FAILED,
+        current_message = await self._normalize_input_to_message(message)
+
+        messages_for_run = []
+        final_instruction = instruction
+
+        if final_instruction and template_vars:
+            try:
+                template = jinja_env.from_string(final_instruction)
+                final_instruction = template.render(**template_vars)
+                logger.debug(f"渲染后的系统指令: {final_instruction}")
+            except Exception as e:
+                logger.error(f"渲染系统指令模板失败: {e}", e=e)
+
+        if final_instruction:
+            messages_for_run.append(LLMMessage.system(final_instruction))
+
+        current_history = await self.memory.get_history(self.session_id)
+        messages_for_run.extend(current_history)
+        messages_for_run.append(current_message)
+
+        try:
+            resolved_model_name = self._resolve_model_name(model or self.config.model)
+
+            final_config = model_copy(self.default_generation_config, deep=True)
+            if config:
+                update_dict = model_dump(config, exclude_unset=True)
+                final_config = model_copy(final_config, update=update_dict)
+
+            ad_hoc_tools = None
+            if tools:
+                if isinstance(tools, dict):
+                    ad_hoc_tools = tools
+                else:
+                    ad_hoc_tools = await self._resolve_tools(tools)
+
+            async with await get_model_instance(
+                resolved_model_name,
+                override_config=final_config.to_dict(),
+            ) as model_instance:
+                response = await model_instance.generate_response(
+                    messages_for_run, tools=ad_hoc_tools, tool_choice=tool_choice
+                )
+
+            should_preserve = (
+                preserve_media_in_history
+                if preserve_media_in_history is not None
+                else self.config.default_preserve_media_in_history
+            )
+            user_msg_to_store = (
+                current_message
+                if should_preserve
+                else self._sanitize_message_for_history(current_message)
+            )
+            assistant_response_msg = LLMMessage.assistant_text_response(response.text)
+            if response.tool_calls:
+                assistant_response_msg = LLMMessage.assistant_tool_calls(
+                    response.tool_calls, response.text
+                )
+
+            await self.memory.add_messages(
+                self.session_id, [user_msg_to_store, assistant_response_msg]
             )
 
-        final_messages = [*self.history, current_message]
+            return response
 
-        response = await self._execute_generation(
-            messages=final_messages,
-            model_name=model,
-            error_message="聊天失败",
-            config_overrides=kwargs,
-            llm_tools=tools,
-            tool_choice=tool_choice,
-        )
-
-        should_preserve = (
-            preserve_media_in_history
-            if preserve_media_in_history is not None
-            else self.config.default_preserve_media_in_history
-        )
-
-        if should_preserve:
-            logger.debug("深度分析模式：在历史记录中保留原始多模态消息。")
-            self.history.append(current_message)
-        else:
-            logger.debug("高效模式：净化历史记录中的多模态消息。")
-            sanitized_user_message = self._sanitize_message_for_history(current_message)
-            self.history.append(sanitized_user_message)
-
-        self.history.append(
-            LLMMessage(
-                role="assistant", content=response.text, tool_calls=response.tool_calls
+        except Exception as e:
+            raise (
+                e
+                if isinstance(e, LLMException)
+                else LLMException(f"聊天执行失败: {e}", cause=e)
             )
-        )
-
-        return response
 
     async def code(
         self,
@@ -205,8 +280,8 @@ class AI:
         *,
         model: ModelName = None,
         timeout: int | None = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
+        config: LLMGenerationConfig | None = None,
+    ) -> LLMResponse:
         """
         代码执行
 
@@ -214,217 +289,120 @@ class AI:
             prompt: 代码执行的提示词。
             model: 要使用的模型名称。
             timeout: 代码执行超时时间（秒）。
-            **kwargs: 传递给模型的其他参数。
+            config: (可选) 覆盖默认的生成配置。
 
         返回:
-            dict[str, Any]: 包含执行结果的字典，包含text、code_executions和success字段。
+            LLMResponse: 包含执行结果的完整响应对象。
         """
         resolved_model = model or self.config.model or "Gemini/gemini-2.0-flash"
 
-        config = CommonOverrides.gemini_code_execution()
+        code_config = CommonOverrides.gemini_code_execution()
         if timeout:
-            config.custom_params = config.custom_params or {}
-            config.custom_params["code_execution_timeout"] = timeout
+            code_config.custom_params = code_config.custom_params or {}
+            code_config.custom_params["code_execution_timeout"] = timeout
 
-        messages = [LLMMessage.user(prompt)]
+        if config:
+            update_dict = model_dump(config, exclude_unset=True)
+            code_config = model_copy(code_config, update=update_dict)
 
-        response = await self._execute_generation(
-            messages=messages,
-            model_name=resolved_model,
-            error_message="代码执行失败",
-            config_overrides=kwargs,
-            base_config=config,
-        )
-
-        return {
-            "text": response.text,
-            "code_executions": response.code_executions or [],
-            "success": True,
-        }
+        return await self.chat(prompt, model=resolved_model, config=code_config)
 
     async def search(
         self,
-        query: str | UniMessage,
+        query: UniMessage,
         *,
         model: ModelName = None,
-        instruction: str = "",
-        **kwargs: Any,
-    ) -> dict[str, Any]:
+        instruction: str = (
+            "你是一位强大的信息检索和整合专家。请利用可用的搜索工具，"
+            "根据用户的查询找到最相关的信息，并进行总结和回答。"
+        ),
+        template_vars: dict[str, Any] | None = None,
+        config: LLMGenerationConfig | None = None,
+    ) -> LLMResponse:
         """
-        信息搜索 - 支持多模态输入
-
-        参数:
-            query: 搜索查询内容，支持文本或多模态消息。
-            model: 要使用的模型名称。
-            instruction: 搜索指令。
-            **kwargs: 传递给模型的其他参数。
-
-        返回:
-            dict[str, Any]: 包含搜索结果的字典，包含text、sources、queries和success字段
+        信息搜索的便捷入口，原生支持多模态查询。
         """
-        from nonebot_plugin_alconna.uniseg import UniMessage
+        logger.info("执行 'search' 任务...")
+        search_config = CommonOverrides.gemini_grounding()
 
-        resolved_model = model or self.config.model or "Gemini/gemini-2.0-flash"
-        config = CommonOverrides.gemini_grounding()
+        if config:
+            update_dict = model_dump(config, exclude_unset=True)
+            search_config = model_copy(search_config, update=update_dict)
 
-        if isinstance(query, str):
-            messages = [LLMMessage.user(query)]
-        elif isinstance(query, UniMessage):
-            content_parts = await unimsg_to_llm_parts(query)
-
-            final_messages: list[LLMMessage] = []
-            if instruction:
-                final_messages.append(LLMMessage.system(instruction))
-
-            if not content_parts:
-                if instruction:
-                    final_messages.append(LLMMessage.user(instruction))
-                else:
-                    raise LLMException(
-                        "搜索内容为空或无法处理。", code=LLMErrorCode.API_REQUEST_FAILED
-                    )
-            else:
-                final_messages.append(LLMMessage.user(content_parts))
-
-            messages = final_messages
-        else:
-            raise LLMException(
-                f"不支持的搜索输入类型: {type(query)}. 请使用 str 或 UniMessage.",
-                code=LLMErrorCode.API_REQUEST_FAILED,
-            )
-
-        response = await self._execute_generation(
-            messages=messages,
-            model_name=resolved_model,
-            error_message="信息搜索失败",
-            config_overrides=kwargs,
-            base_config=config,
+        return await self.chat(
+            query,
+            model=model,
+            instruction=instruction,
+            template_vars=template_vars,
+            config=search_config,
         )
 
-        result = {
-            "text": response.text,
-            "sources": [],
-            "queries": [],
-            "success": True,
-        }
-
-        if response.grounding_metadata:
-            result["sources"] = response.grounding_metadata.grounding_attributions or []
-            result["queries"] = response.grounding_metadata.web_search_queries or []
-
-        return result
-
-    async def analyze(
+    async def generate_structured(
         self,
-        message: UniMessage | None,
+        message: str | LLMMessage | list[LLMContentPart],
+        response_model: type[T],
         *,
-        instruction: str = "",
         model: ModelName = None,
-        use_tools: list[str] | None = None,
-        tool_config: dict[str, Any] | None = None,
-        activated_tools: list[LLMTool] | None = None,
-        history: list[LLMMessage] | None = None,
-        **kwargs: Any,
-    ) -> LLMResponse:
+        instruction: str | None = None,
+        config: LLMGenerationConfig | None = None,
+    ) -> T:
         """
-        内容分析 - 接收 UniMessage 物件进行多模态分析和工具呼叫。
+        生成结构化响应，并自动解析为指定的Pydantic模型。
 
         参数:
-            message: 要分析的消息内容（支持多模态）。
-            instruction: 分析指令。
-            model: 要使用的模型名称。
-            use_tools: 要使用的工具名称列表。
-            tool_config: 工具配置。
-            activated_tools: 已激活的工具列表。
-            history: 对话历史记录。
-            **kwargs: 传递给模型的其他参数。
+            message: 用户输入的消息内容，支持多种格式。
+            response_model: 用于解析和验证响应的Pydantic模型类。
+            model: 要使用的模型名称，如果为None则使用配置中的默认模型。
+            instruction: 本次调用的特定系统指令，会与JSON Schema指令合并。
+            config: 生成配置对象，用于覆盖默认的生成参数。
 
         返回:
-            LLMResponse: 模型的完整响应结果。
+            T: 解析后的Pydantic模型实例，类型为response_model指定的类型。
+
+        异常:
+            LLMException: 如果模型返回的不是有效的JSON或验证失败。
         """
-        from nonebot_plugin_alconna.uniseg import UniMessage
-
-        content_parts = await unimsg_to_llm_parts(message or UniMessage())
-
-        final_messages: list[LLMMessage] = []
-        if history:
-            final_messages.extend(history)
-
-        if instruction:
-            if not any(msg.role == "system" for msg in final_messages):
-                final_messages.insert(0, LLMMessage.system(instruction))
-
-        if not content_parts:
-            if instruction and not history:
-                final_messages.append(LLMMessage.user(instruction))
-            elif not history:
-                raise LLMException(
-                    "分析内容为空或无法处理。", code=LLMErrorCode.API_REQUEST_FAILED
-                )
-        else:
-            final_messages.append(LLMMessage.user(content_parts))
-
-        llm_tools: list[LLMTool] | None = activated_tools
-        if not llm_tools and use_tools:
-            try:
-                llm_tools = tool_registry.get_tools(use_tools)
-                logger.debug(f"已从注册表加载工具定义: {use_tools}")
-            except ValueError as e:
-                raise LLMException(
-                    f"加载工具定义失败: {e}",
-                    code=LLMErrorCode.CONFIGURATION_ERROR,
-                    cause=e,
-                )
-
-        tool_choice = None
-        if tool_config:
-            mode = tool_config.get("mode", "auto")
-            if mode in ["auto", "any", "none"]:
-                tool_choice = mode
-
-        response = await self._execute_generation(
-            messages=final_messages,
-            model_name=model,
-            error_message="内容分析失败",
-            config_overrides=kwargs,
-            llm_tools=llm_tools,
-            tool_choice=tool_choice,
-        )
-
-        return response
-
-    async def _execute_generation(
-        self,
-        messages: list[LLMMessage],
-        model_name: ModelName,
-        error_message: str,
-        config_overrides: dict[str, Any],
-        llm_tools: list[LLMTool] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        base_config: LLMGenerationConfig | None = None,
-    ) -> LLMResponse:
-        """通用的生成执行方法，封装模型获取和单次API调用"""
         try:
-            resolved_model_name = self._resolve_model_name(
-                model_name or self.config.model
-            )
-            final_config_dict = self._merge_config(
-                config_overrides, base_config=base_config
-            )
+            json_schema = model_json_schema(response_model)
+        except AttributeError:
+            json_schema = response_model.schema()
 
-            async with await get_model_instance(
-                resolved_model_name, override_config=final_config_dict
-            ) as model_instance:
-                return await model_instance.generate_response(
-                    messages,
-                    tools=llm_tools,
-                    tool_choice=tool_choice,
-                )
-        except LLMException:
-            raise
+        schema_str = json.dumps(json_schema, ensure_ascii=False, indent=2)
+
+        system_prompt = (
+            (f"{instruction}\n\n" if instruction else "")
+            + "你必须严格按照以下 JSON Schema 格式进行响应。"
+            + "不要包含任何额外的解释、注释或代码块标记，只返回纯粹的 JSON 对象。\n\n"
+        )
+        system_prompt += f"JSON Schema:\n```json\n{schema_str}\n```"
+
+        final_config = model_copy(config) if config else LLMGenerationConfig()
+
+        final_config.response_format = ResponseFormat.JSON
+        final_config.response_schema = json_schema
+
+        response = await self.chat(
+            message, model=model, instruction=system_prompt, config=final_config
+        )
+
+        try:
+            return type_validate_json(response_model, response.text)
+        except ValidationError as e:
+            logger.error(f"LLM结构化输出验证失败: {e}", e=e)
+            raise LLMException(
+                "LLM返回的JSON未能通过结构验证。",
+                code=LLMErrorCode.RESPONSE_PARSE_ERROR,
+                details={"raw_response": response.text, "validation_error": str(e)},
+                cause=e,
+            )
         except Exception as e:
-            logger.error(f"{error_message}: {e}", e=e)
-            raise LLMException(f"{error_message}: {e}", cause=e)
+            logger.error(f"解析LLM结构化输出时发生未知错误: {e}", e=e)
+            raise LLMException(
+                "解析LLM的JSON输出时失败。",
+                code=LLMErrorCode.RESPONSE_PARSE_ERROR,
+                details={"raw_response": response.text},
+                cause=e,
+            )
 
     def _resolve_model_name(self, model_name: ModelName) -> str:
         """解析模型名称"""
@@ -440,45 +418,6 @@ class AI:
             code=LLMErrorCode.MODEL_NOT_FOUND,
         )
 
-    def _merge_config(
-        self,
-        user_config: dict[str, Any],
-        base_config: LLMGenerationConfig | None = None,
-    ) -> dict[str, Any]:
-        """合并配置"""
-        final_config = {}
-        if base_config:
-            final_config.update(base_config.to_dict())
-
-        if self.config.temperature is not None:
-            final_config["temperature"] = self.config.temperature
-        if self.config.max_tokens is not None:
-            final_config["max_tokens"] = self.config.max_tokens
-
-        if self.config.enable_cache:
-            final_config["enable_caching"] = True
-        if self.config.enable_code:
-            final_config["enable_code_execution"] = True
-        if self.config.enable_search:
-            final_config["enable_grounding"] = True
-
-        if self.config.enable_gemini_json_mode:
-            final_config["response_mime_type"] = "application/json"
-        if self.config.enable_gemini_thinking:
-            final_config["thinking_budget"] = 0.8
-        if self.config.enable_gemini_safe_mode:
-            final_config["safety_settings"] = (
-                CommonOverrides.gemini_safe().safety_settings
-            )
-        if self.config.enable_gemini_multimodal:
-            final_config.update(CommonOverrides.gemini_multimodal().to_dict())
-        if self.config.enable_gemini_grounding:
-            final_config["enable_grounding"] = True
-
-        final_config.update(user_config)
-
-        return final_config
-
     async def embed(
         self,
         texts: list[str] | str,
@@ -488,16 +427,19 @@ class AI:
         **kwargs: Any,
     ) -> list[list[float]]:
         """
-        生成文本嵌入向量
+        生成文本嵌入向量，将文本转换为数值向量表示。
 
         参数:
-            texts: 要生成嵌入向量的文本或文本列表。
-            model: 要使用的嵌入模型名称。
-            task_type: 嵌入任务类型。
-            **kwargs: 传递给模型的其他参数。
+            texts: 要生成嵌入的文本内容，支持单个字符串或字符串列表。
+            model: 嵌入模型名称，如果为None则使用配置中的默认嵌入模型。
+            task_type: 嵌入任务类型，影响向量的优化方向（如检索、分类等）。
+            **kwargs: 传递给嵌入模型的额外参数。
 
         返回:
-            list[list[float]]: 文本的嵌入向量列表。
+            list[list[float]]: 文本对应的嵌入向量列表，每个向量为浮点数列表。
+
+        异常:
+            LLMException: 如果嵌入生成失败或模型配置错误。
         """
         if isinstance(texts, str):
             texts = [texts]
@@ -530,3 +472,44 @@ class AI:
             raise LLMException(
                 f"文本嵌入失败: {e}", code=LLMErrorCode.EMBEDDING_FAILED, cause=e
             )
+
+    async def _resolve_tools(
+        self,
+        tool_configs: list[Any],
+    ) -> dict[str, ToolExecutable]:
+        """
+        使用注入的 ToolProvider 异步解析 ad-hoc（临时）工具配置。
+        返回一个从工具名称到可执行对象的字典。
+        """
+        resolved: dict[str, ToolExecutable] = {}
+
+        for config in tool_configs:
+            name = config if isinstance(config, str) else config.get("name")
+            if not name:
+                raise LLMException(
+                    "工具配置字典必须包含 'name' 字段。",
+                    code=LLMErrorCode.CONFIGURATION_ERROR,
+                )
+
+            if isinstance(config, str):
+                config_dict = {"name": name, "type": "function"}
+            elif isinstance(config, dict):
+                config_dict = config
+            else:
+                raise TypeError(f"不支持的工具配置类型: {type(config)}")
+
+            executable = None
+            for provider in self._tool_providers:
+                executable = await provider.get_tool_executable(name, config_dict)
+                if executable:
+                    break
+
+            if not executable:
+                raise LLMException(
+                    f"没有为 ad-hoc 工具 '{name}' 找到合适的提供者。",
+                    code=LLMErrorCode.CONFIGURATION_ERROR,
+                )
+
+            resolved[name] = executable
+
+        return resolved

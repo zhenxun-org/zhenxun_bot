@@ -148,6 +148,11 @@ async def get_plugin_and_user(
         user = await with_timeout(
             user_dao.safe_get_or_none(user_id=user_id), name="get_user"
         )
+    except IntegrityError:
+        await asyncio.sleep(0.5)
+        plugin, user = await with_timeout(
+            asyncio.gather(plugin_task, user_task), name="get_plugin_and_user"
+        )
 
     if not plugin:
         raise PermissionExemption(f"插件:{module} 数据不存在，已跳过权限检查...")

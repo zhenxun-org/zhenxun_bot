@@ -104,25 +104,16 @@ class MemberUpdateManage:
                 exist_member_list.append(member.id)
             if data_list[0]:
                 try:
-                    await GroupInfoUser.bulk_create(data_list[0], 30)
+                    await GroupInfoUser.bulk_create(
+                        data_list[0], 30, ignore_conflicts=True
+                    )
                     logger.debug(
                         f"创建用户数据 {len(data_list[0])} 条",
                         "更新群组成员信息",
                         target=group_id,
                     )
                 except Exception as e:
-                    logger.error(
-                        f"批量创建用户数据失败: {e}，开始进行逐个存储",
-                        "更新群组成员信息",
-                    )
-                    for u in data_list[0]:
-                        try:
-                            await u.save()
-                        except Exception as e:
-                            logger.error(
-                                f"创建用户 {u.user_name}({u.user_id}) 数据失败: {e}",
-                                "更新群组成员信息",
-                            )
+                    logger.error("批量创建用户数据失败", "更新群组成员信息", e=e)
             if data_list[1]:
                 await GroupInfoUser.bulk_update(data_list[1], ["user_name"], 30)
                 logger.debug(

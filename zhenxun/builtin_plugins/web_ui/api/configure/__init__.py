@@ -38,10 +38,11 @@ async def _(setting: Setting) -> Result:
     password = Config.get_config("web-ui", "password")
     if password or BotConfig.db_url:
         return Result.fail("配置已存在，请先删除DB_URL内容和前端密码再进行设置。")
-    env_file = Path() / ".env.dev"
+    env_file = Path() / ".env.example"
     if not env_file.exists():
-        return Result.fail("配置文件.env.dev不存在。")
+        return Result.fail("基础配置文件.env.example不存在。")
     env_text = env_file.read_text(encoding="utf-8")
+    to_env_file = Path() / ".env.dev"
     if setting.db_url:
         if setting.db_url.startswith("sqlite"):
             base_dir = Path().resolve()
@@ -78,7 +79,7 @@ async def _(setting: Setting) -> Result:
     if setting.username:
         Config.set_config("web-ui", "username", setting.username)
     Config.set_config("web-ui", "password", setting.password, True)
-    env_file.write_text(env_text, encoding="utf-8")
+    to_env_file.write_text(env_text, encoding="utf-8")
     if BAT_FILE.exists():
         for file in os.listdir(Path()):
             if file.startswith(FILE_NAME):
