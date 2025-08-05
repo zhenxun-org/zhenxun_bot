@@ -65,7 +65,7 @@ class ZhenxunRepoConfig:
 
     # WEB UI 相关配置
     WEBUI_GIT = "https://github.com/HibiKier/zhenxun_bot_webui.git"
-    WEBUI_DIST_GITHUB_URL = "https://github.com/HibiKier/zhenxun_bot_webui/tree/test"
+    WEBUI_DIST_GITHUB_URL = "https://github.com/HibiKier/zhenxun_bot_webui/tree/dist"
     WEBUI_DOWNLOAD_FILE_STRING = "webui_assets.zip"
     WEBUI_DOWNLOAD_FILE = TEMP_PATH / WEBUI_DOWNLOAD_FILE_STRING
     WEBUI_UNZIP_PATH = TEMP_PATH / "web_ui"
@@ -268,8 +268,6 @@ class ZhenxunRepoManagerClass:
                     self.config.ZHENXUN_BOT_CODE_PATH / folder,
                 )
             logger.debug("移动真寻更新文件完成!", LOG_COMMAND)
-            if self.config.ZHENXUN_BOT_DOWNLOAD_FILE.exists():
-                self.config.ZHENXUN_BOT_DOWNLOAD_FILE.unlink()
             if self.config.ZHENXUN_BOT_UNZIP_PATH.exists():
                 shutil.rmtree(self.config.ZHENXUN_BOT_UNZIP_PATH)
         except Exception as e:
