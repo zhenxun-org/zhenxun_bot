@@ -46,6 +46,8 @@ driver = nonebot.get_driver()
 
 def get_config() -> dict:
     """获取数据库配置"""
+    if not BotConfig.db_url:
+        raise DbUrlIsNode("数据库Url连接字符串为空，请检查配置文件（.env.dev）")
     parsed = urlparse(BotConfig.db_url)
 
     # 基础配置
@@ -92,7 +94,7 @@ def get_config() -> dict:
         config["connections"]["default"] = {
             "engine": "tortoise.backends.sqlite",
             "credentials": {
-                "file_path": parsed.path or ":memory:",
+                "file_path": parsed.path,
             },
             **SQLITE_CONFIG,
         }

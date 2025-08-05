@@ -113,6 +113,11 @@ async def _(
 ):
     _is_superuser = is_superuser.result if is_superuser.available else False
 
+    if _is_superuser and session.user.id not in bot.config.superusers:
+        await MessageUtils.build_message("权限不足，无法查看超级用户帮助").finish(
+            reply_to=True
+        )
+
     if name.available:
         traditional_help_result = await get_plugin_help(
             session.user.id, name.result, _is_superuser

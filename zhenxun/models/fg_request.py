@@ -128,12 +128,14 @@ class FgRequest(Model):
                 await bot.set_friend_add_request(
                     flag=req.flag, approve=handle_type == RequestHandleType.APPROVE
                 )
-                if BotProfileManager.is_auto_send_profile():
-                    file_path = await BotProfileManager.build_bot_profile_image(
+                if (
+                    handle_type == RequestHandleType.APPROVE
+                    and BotProfileManager.is_auto_send_profile()
+                ):
+                    if file_path := await BotProfileManager.build_bot_profile_image(
                         bot.self_id
-                    )
-                    if file_path:
-                        await asyncio.sleep(2)
+                    ):
+                        await asyncio.sleep(1)
                         await PlatformUtils.send_message(
                             bot,
                             req.user_id,

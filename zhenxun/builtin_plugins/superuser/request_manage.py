@@ -17,7 +17,7 @@ from nonebot_plugin_alconna import (
     store_true,
 )
 from nonebot_plugin_alconna.uniseg.tools import reply_fetch
-from nonebot_plugin_session import EventSession
+from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun.configs.config import BotConfig
 from zhenxun.configs.path_config import IMAGE_PATH
@@ -33,12 +33,14 @@ from zhenxun.utils.utils import get_user_avatar
 usage = """
 查看请求
 清空请求
-请求处理 -fa [id] / 同意好友请求 [id]      # 同意好友请求
-请求处理 -fr [id] / 拒绝好友请求 [id]      # 拒绝好友请求
-请求处理 -fi [id] / 忽略好友请求 [id]      # 忽略好友请求
-请求处理 -ga [id] / 同意群组请求 [id]      # 同意群聊请求
-请求处理 -gr [id] / 拒绝群组请求 [id]      # 拒绝群聊请求
-请求处理 -gi [id] / 忽略群组请求 [id]      # 忽略群聊请求
+同意请求 [id]
+拒绝请求 [id]
+忽略请求 [id]
+
+特别的，在引用消息时，可以不指定id
+/引用消息 同意请求
+/引用消息 拒绝请求
+/引用消息 忽略请求
 """.strip()
 
 
@@ -57,11 +59,11 @@ __plugin_meta__ = PluginMetadata(
 _req_matcher = on_alconna(
     Alconna(
         "请求处理",
-        Args["handle", ["-fa", "-fr", "-fi", "-ga", "-gr", "-gi"]]["id?", int],
+        Args["handle", ["a", "r", "i"]]["id?", int],
         meta=CommandMeta(
-            description="好友/群组请求处理",
+            description="请求处理",
             usage=usage,
-            example="同意好友请求 20",
+            example="同意请求 20",
             compact=True,
         ),
     ),
@@ -108,12 +110,9 @@ _clear_matcher = on_alconna(
 )
 
 reg_arg_list = [
-    (r"同意好友请求\s*(?P<id>\d*)", ["-fa", "{id}"]),
-    (r"拒绝好友请求\s*(?P<id>\d*)", ["-fr", "{id}"]),
-    (r"忽略好友请求\s*(?P<id>\d*)", ["-fi", "{id}"]),
-    (r"同意群组请求\s*(?P<id>\d*)", ["-ga", "{id}"]),
-    (r"拒绝群组请求\s*(?P<id>\d*)", ["-gr", "{id}"]),
-    (r"忽略群组请求\s*(?P<id>\d*)", ["-gi", "{id}"]),
+    (r"同意请求\s*(?P<id>\d*)", ["a", "{id}"]),
+    (r"拒绝请求\s*(?P<id>\d*)", ["r", "{id}"]),
+    (r"忽略请求\s*(?P<id>\d*)", ["i", "{id}"]),
 ]
 
 for r in reg_arg_list:
@@ -129,7 +128,7 @@ for r in reg_arg_list:
 async def _(
     bot: Bot,
     event: Event,
-    session: EventSession,
+    session: Uninfo,
     handle: str,
     id: Match[int],
     arparma: Arparma,
@@ -153,7 +152,7 @@ async def _(
             ).finish(reply_to=True)
         handle_id = db_data.id
     req = None
-    handle_type = type_dict[handle[-1]]
+    handle_type = type_dict[handle]
     try:
         if handle_type == RequestHandleType.APPROVE:
             req = await FgRequest.approve(bot, handle_id)
@@ -187,7 +186,7 @@ async def _(
 
 @_read_matcher.handle()
 async def _(
-    session: EventSession,
+    session: Uninfo,
     arparma: Arparma,
     is_friend: Query[bool] = AlconnaQuery("friend.value", False),
     is_group: Query[bool] = AlconnaQuery("group.value", False),
@@ -283,7 +282,7 @@ async def _(
 
 @_clear_matcher.handle()
 async def _(
-    session: EventSession,
+    session: Uninfo,
     arparma: Arparma,
     is_friend: Query[bool] = AlconnaQuery("friend.value", False),
     is_group: Query[bool] = AlconnaQuery("group.value", False),
