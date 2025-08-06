@@ -54,6 +54,27 @@ message = message_list[0]
 # 保存缓存数据（可选）
 await message_list.save()
 ```
+
+4. 使用CacheManager的类型化缓存方法
+```python
+from zhenxun.services.cache import CacheRoot
+
+# 获取字符串类型的缓存字典（向后兼容）
+str_cache = CacheRoot.cache_dict("string_cache")
+
+# 获取类型化的缓存字典（推荐）
+int_cache = CacheRoot.cache_dict_typed("int_cache", value_type=int)
+user_cache = CacheRoot.cache_dict_typed("user_cache", value_type=User)
+
+# 获取类型化的缓存列表
+message_list = CacheRoot.cache_list_typed("messages", value_type=str)
+user_list = CacheRoot.cache_list_typed("users", value_type=User)
+
+# 使用类型化的缓存
+int_cache["count"] = 42  # 类型安全
+user_cache["user1"] = User(name="Alice")  # 类型安全
+message_list.append("Hello")  # 类型安全
+```
 """
 
 import asyncio
@@ -94,6 +115,7 @@ __all__ = [
 ]
 
 T = TypeVar("T")
+U = TypeVar("U")
 
 
 class Config(BaseModel):
@@ -294,16 +316,36 @@ class CacheManager:
         self.__class__._enabled = False
         logger.info("缓存功能已禁用", LOG_COMMAND)
 
-    def cache_dict(self, cache_type: str, expire: int = 0) -> CacheDict:
-        """获取缓存字典"""
+    def cache_dict(
+        self, cache_type: str, expire: int = 0, value_type: type[U] = str
+    ) -> CacheDict[U]:
+        """获取缓存字典
+        参数:
+            cache_type: 缓存类型
+            expire: 过期时间（秒）
+            value_type: 值类型
+
+        返回:
+            CacheDict: 缓存字典
+        """
         if cache_type not in self._dict_caches:
-            self._dict_caches[cache_type] = CacheDict(cache_type, expire)
+            self._dict_caches[cache_type] = CacheDict[value_type](cache_type, expire)
         return self._dict_caches[cache_type]
 
-    def cache_list(self, cache_type: str, expire: int = 0) -> CacheList:
-        """获取缓存列表"""
+    def cache_list(
+        self, cache_type: str, expire: int = 0, value_type: type[U] = str
+    ) -> CacheList[U]:
+        """获取缓存列表
+        参数:
+            cache_type: 缓存类型
+            expire: 过期时间（秒）
+            value_type: 值类型
+
+        返回:
+            CacheList: 缓存列表
+        """
         if cache_type not in self._list_caches:
-            self._list_caches[cache_type] = CacheList(cache_type, expire)
+            self._list_caches[cache_type] = CacheList[value_type](cache_type, expire)
         return self._list_caches[cache_type]
 
     def listener(self, cache_type: str):

@@ -150,6 +150,10 @@ async def get_plugin_and_user(
         )
     except IntegrityError:
         await asyncio.sleep(0.5)
+        plugin_task = plugin_dao.safe_get_or_none(module=module)
+        user_task = user_dao.get_by_func_or_none(
+            UserConsole.get_user, False, user_id=user_id
+        )
         plugin, user = await with_timeout(
             asyncio.gather(plugin_task, user_task), name="get_plugin_and_user"
         )

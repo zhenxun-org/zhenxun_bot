@@ -13,7 +13,7 @@ class BotSetting(BaseModel):
     """回复时NICKNAME"""
     system_proxy: str | None = None
     """系统代理"""
-    db_url: str = "sqlite:data/zhenxun.db"
+    db_url: str = ""
     """数据库链接, 默认值为sqlite:data/zhenxun.db"""
     platform_superusers: dict[str, list[str]] = Field(default_factory=dict)
     """平台超级用户"""

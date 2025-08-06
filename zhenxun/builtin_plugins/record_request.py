@@ -21,6 +21,7 @@ from zhenxun.models.event_log import EventLog
 from zhenxun.models.fg_request import FgRequest
 from zhenxun.models.friend_user import FriendUser
 from zhenxun.models.group_console import GroupConsole
+from zhenxun.services.cache import CacheRoot
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import EventLogType, PluginType, RequestHandleType, RequestType
 from zhenxun.utils.platform import PlatformUtils
@@ -52,6 +53,14 @@ __plugin_meta__ = PluginMetadata(
                 type=bool,
                 default_value=False,
             ),
+            RegisterConfig(
+                module="invite_manager",
+                key="TIP_MESSAGE_LIMIT",
+                value=360,
+                help="重复申请与退群提醒过滤时间（分钟）",
+                type=int,
+                default_value=360,
+            ),
         ],
     ).to_dict(),
 )
@@ -75,6 +84,11 @@ class Timer:
 friend_req = on_request(priority=5, block=True)
 group_req = on_request(priority=5, block=True)
 _t = on_message(priority=999, block=False, rule=lambda: False)
+
+
+cache = CacheRoot.cache_dict(
+    "REQUEST_CACHE", (base_config.get("TIP_MESSAGE_LIMIT") or 360) * 60, str
+)
 
 
 @friend_req.handle()
@@ -113,22 +127,25 @@ async def _(bot: v12Bot | v11Bot, event: FriendRequestEvent, session: EventSessi
                 nickname=nickname,
                 comment=comment,
             )
-            results = await PlatformUtils.send_superuser(
-                bot,
-                f"*****一份好友申请*****\n"
-                f"ID: {f.id}\n"
-                f"昵称：{nickname}({event.user_id})\n"
-                f"自动同意：{'√' if base_config.get('AUTO_ADD_FRIEND') else '×'}\n"
-                f"日期：{datetime.now().replace(microsecond=0)}\n"
-                f"备注：{event.comment}",
-            )
-            if message_ids := [
-                str(r[1].msg_ids[0]["message_id"])
-                for r in results
-                if r[1] and r[1].msg_ids
-            ]:
-                f.message_ids = ",".join(message_ids)
-                await f.save(update_fields=["message_ids"])
+            cache_key = str(event.user_id)
+            if not cache.get(cache_key):
+                cache.set(cache_key, "1")
+                results = await PlatformUtils.send_superuser(
+                    bot,
+                    f"*****一份好友申请*****\n"
+                    f"ID: {f.id}\n"
+                    f"昵称：{nickname}({event.user_id})\n"
+                    f"自动同意：{'√' if base_config.get('AUTO_ADD_FRIEND') else '×'}\n"
+                    f"日期：{datetime.now().replace(microsecond=0)}\n"
+                    f"备注：{event.comment}",
+                )
+                if message_ids := [
+                    str(r[1].msg_ids[0]["message_id"])
+                    for r in results
+                    if r[1] and r[1].msg_ids
+                ]:
+                    f.message_ids = ",".join(message_ids)
+                    await f.save(update_fields=["message_ids"])
     else:
         logger.debug("好友请求五分钟内重复, 已忽略", "好友请求", target=event.user_id)
 
@@ -210,7 +227,8 @@ async def _(bot: v12Bot | v11Bot, event: GroupRequestEvent, session: EventSessio
                 "\n在群组中 群组管理员与群主 允许使用管理员帮助"
                 "（包括ban与功能开关等）\n请在群组中发送 '管理员帮助'",
             )
-    elif Timer.check(f"{event.user_id}:{event.group_id}"):
+    elif cache.get(f"{event.group_id}"):
+        cache.set(f"{event.group_id}", "1")
         logger.debug(
             f"收录 用户[{event.user_id}] 群聊[{event.group_id}] 群聊请求",
             "群聊请求",
