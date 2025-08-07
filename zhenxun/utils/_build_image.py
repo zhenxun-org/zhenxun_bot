@@ -222,7 +222,7 @@ class BuildImage:
         text: str,
         font: str | FreeTypeFont | None = "HYWenHei-85W.ttf",
         font_size: int = 10,
-    ) -> tuple[int, int]:  # sourcery skip: remove-unnecessary-cast
+    ) -> tuple[float, float]:
         """获取该字体下文本需要的长宽
 
         参数:
@@ -231,7 +231,7 @@ class BuildImage:
             font_size: 字体大小
 
         返回:
-            tuple[int, int]: 长宽
+            tuple[float, float]: 长宽
         """
         _font = font
         if font and type(font) is str:
@@ -244,7 +244,7 @@ class BuildImage:
         return text_width, text_height + 10
         # return _font.getsize(str(text))  # type: ignore
 
-    def getsize(self, msg: str) -> tuple[int, int]:
+    def getsize(self, msg: str) -> tuple[float, float]:
         # sourcery skip: remove-unnecessary-cast
         """
         获取文字在该图片 font_size 下所需要的空间
@@ -253,7 +253,7 @@ class BuildImage:
             msg: 文本
 
         返回:
-            tuple[int, int]: 长宽
+            tuple[float, float]: 长宽
         """
         temp_image = Image.new("RGB", (1, 1), (255, 255, 255))
         draw = ImageDraw.Draw(temp_image)
@@ -265,9 +265,9 @@ class BuildImage:
 
     def __center_xy(
         self,
-        pos: tuple[int, int],
-        width: int,
-        height: int,
+        pos: tuple[float, float],
+        width: float,
+        height: float,
         center_type: CenterType | None,
     ) -> tuple[int, int]:
         """
@@ -284,21 +284,21 @@ class BuildImage:
         # _width, _height = pos
         if self.width and self.height:
             if center_type == "center":
-                width = int((self.width - width) / 2)
-                height = int((self.height - height) / 2)
+                width = (self.width - width) / 2
+                height = (self.height - height) / 2
             elif center_type == "width":
-                width = int((self.width - width) / 2)
+                width = (self.width - width) / 2
                 height = pos[1]
             elif center_type == "height":
                 width = pos[0]
-                height = int((self.height - height) / 2)
-        return width, height
+                height = (self.height - height) / 2
+        return int(width), int(height)
 
     @run_sync
     def paste(
         self,
         image: Self | tImage,
-        pos: tuple[int, int] = (0, 0),
+        pos: tuple[float, float] = (0, 0),
         center_type: CenterType | None = None,
     ) -> Self:
         """贴图
@@ -370,7 +370,7 @@ class BuildImage:
     @run_sync
     def text(
         self,
-        pos: tuple[int, int],
+        pos: tuple[float, float],
         text: str,
         fill: str | tuple[int, int, int] = (0, 0, 0),
         center_type: CenterType | None = None,
@@ -457,7 +457,7 @@ class BuildImage:
         return self
 
     @run_sync
-    def crop(self, box: tuple[int, int, int, int]) -> Self:
+    def crop(self, box: tuple[float, float, float, float]) -> Self:
         """
         裁剪图片
 
@@ -488,7 +488,7 @@ class BuildImage:
         x, y = self.markImg.size
         for i, k in itertools.product(range(n, x - n), range(n, y - n)):
             color = self.markImg.getpixel((i, k))
-            color = color[:-1] + (int(100 * alpha_ratio),)  # type: ignore
+            color = color[:-1] + (int(100 * alpha_ratio),)  # type: ignore  # noqa: RUF005
             self.markImg.putpixel((i, k), color)
         self.draw = ImageDraw.Draw(self.markImg)
         return self
