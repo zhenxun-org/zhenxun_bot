@@ -240,7 +240,7 @@ class BuildImage:
             _font = cls.load_font(font, font_size)
         temp_image = Image.new("RGB", (1, 1), (255, 255, 255))
         draw = ImageDraw.Draw(temp_image)
-        text_box = draw.textbbox((0, 0), text, font=_font) # pyright: ignore[reportArgumentType]
+        text_box = draw.textbbox((0, 0), text, font=_font)  # pyright: ignore[reportArgumentType]
         text_width = text_box[2] - text_box[0]
         text_height = text_box[3] - text_box[1]
         return text_width, text_height + 10
@@ -490,7 +490,7 @@ class BuildImage:
         x, y = self.markImg.size
         for i, k in itertools.product(range(n, x - n), range(n, y - n)):
             color = self.markImg.getpixel((i, k))
-            color = color[:-1] + (int(100 * alpha_ratio),)  # type: ignore  # noqa: RUF005
+            color = color[:-1] + (int(100 * alpha_ratio),)  # type: ignore
             self.markImg.putpixel((i, k), color)
         self.draw = ImageDraw.Draw(self.markImg)
         return self
