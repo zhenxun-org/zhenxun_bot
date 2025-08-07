@@ -232,8 +232,8 @@ class ImageTemplate:
     async def __build_text_image(
         cls,
         text: str,
-        width: int,
-        height: int,
+        width: float,
+        height: float,
         font: FreeTypeFont,
         font_color: str | tuple[int, int, int] = (0, 0, 0),
         color: str | tuple[int, int, int] = (255, 255, 255),

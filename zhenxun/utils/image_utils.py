@@ -65,13 +65,13 @@ async def text2image(
             top_padding = padding[0]
             left_padding = padding[1]
     _font = BuildImage.load_font(font, font_size)
+    image_list = []
     if auto_parse and re.search(r"<f(.*)>(.*)</f>", text):
         _data = []
         new_text = ""
         placeholder_index = 0
         for s in text.split("</f>"):
-            r = re.search(r"<f(.*)>(.*)", s)
-            if r:
+            if r := re.search(r"<f(.*)>(.*)", s):
                 start, end = r.span()
                 if start != 0 and (t := s[:start]):
                     new_text += t
@@ -79,14 +79,13 @@ async def text2image(
                     [
                         (start, end),
                         f"[placeholder_{placeholder_index}]",
-                        r.group(1).strip(),
-                        r.group(2),
+                        r[1].strip(),
+                        r[2],
                     ]
                 )
                 new_text += f"[placeholder_{placeholder_index}]"
                 placeholder_index += 1
         new_text += text.split("</f>")[-1]
-        image_list = []
         current_placeholder_index = 0
         # 切分换行，每行为单张图片
         for s in new_text.split("\n"):
@@ -97,12 +96,9 @@ async def text2image(
             for _ in range(s.count("[placeholder_")):
                 placeholder = _data[_tmp_index]
                 if "font_size" in placeholder[2]:
-                    r = re.search(r"font_size=['\"]?(\d+)", placeholder[2])
-                    if r:
-                        w, h = BuildImage.get_text_size(
-                            placeholder[3], font, int(r.group(1))
-                        )
-                        img_height = img_height if img_height > h else h
+                    if r := re.search(r"font_size=['\"]?(\d+)", placeholder[2]):
+                        w, h = BuildImage.get_text_size(placeholder[3], font, int(r[1]))
+                        img_height = max(img_height, h)
                         img_width += w
                 else:
                     img_width += BuildImage.get_text_size(placeholder[3], _font)[0]
@@ -135,10 +131,8 @@ async def text2image(
                         _font = e.split("=")[-1]
                     if e.startswith("font_size=") or e.startswith("fs="):
                         _font_size = int(e.split("=")[-1])
-                        if _font_size > 1000:
-                            _font_size = 1000
-                        if _font_size < 1:
-                            _font_size = 1
+                        _font_size = min(_font_size, 1000)
+                        _font_size = max(_font_size, 1)
                     if e.startswith("font_color") or e.startswith("fc="):
                         _font_color = e.split("=")[-1]
                 text_img = await BuildImage.build_text_image(
@@ -167,7 +161,7 @@ async def text2image(
         width = 0
         for img in image_list:
             height += img.h
-            width = width if width > img.w else img.w
+            width = max(width, img.w)
         width += pw
         height += ph
         A = BuildImage(width + left_padding, height + top_padding, color=color)
@@ -179,12 +173,11 @@ async def text2image(
         width = 0
         height = 0
         _, h = BuildImage.get_text_size("正", _font)
-        line_height = int(font_size / 3)
-        image_list = []
+        line_height = font_size // 3
         for s in text.split("\n"):
             w, _ = BuildImage.get_text_size(s.strip() or "正", _font)
             height += h + line_height
-            width = width if width > w else w
+            width = max(width, w)
             image_list.append(
                 await BuildImage.build_text_image(
                     s.strip(), font, font_size, font_color
@@ -205,7 +198,7 @@ async def text2image(
     return A
 
 
-def group_image(image_list: list[BuildImage]) -> tuple[list[list[BuildImage]], int]:
+def group_image(image_list: list[BuildImage]) -> tuple[list[list[BuildImage]], float]:
     """
     说明:
         根据图片大小进行分组
@@ -240,7 +233,7 @@ def group_image(image_list: list[BuildImage]) -> tuple[list[list[BuildImage]], i
                         break
                 else:
                     break
-            total_w += max([x.width for x in group]) + 15
+            total_w += max(x.width for x in group) + 15
             image_group.append(group)
     while surplus_list:
         surplus_list = [x for x in surplus_list if x.uid not in is_use]
@@ -252,7 +245,7 @@ def group_image(image_list: list[BuildImage]) -> tuple[list[list[BuildImage]], i
                 _w = 0
                 index = -1
                 for i, ig in enumerate(image_group):
-                    if s := sum([x.height for x in ig]) > _w:
+                    if s := sum(x.height for x in ig) > _w:
                         _w = s
                         index = i
                 if index != -1:
@@ -262,29 +255,29 @@ def group_image(image_list: list[BuildImage]) -> tuple[list[list[BuildImage]], i
     max_h = 0
     max_w = 0
     for ig in image_group:
-        if (_h := sum([x.height + 15 for x in ig])) > max_h:
+        if (_h := sum(x.height + 15 for x in ig)) > max_h:
             max_h = _h
-        max_w += max([x.width for x in ig]) + 30
+        max_w += max(x.width for x in ig) + 30
     is_use.clear()
     while abs(max_h - max_w) > 200 and len(image_group) - 1 >= len(image_group[-1]):
         for img in image_group[-1]:
             _min_h = 999999
             _min_index = -1
             for i, ig in enumerate(image_group):
-                if (_h := sum([x.height for x in ig]) + img.height) < _min_h:
+                if (_h := sum(x.height for x in ig) + img.height) < _min_h:
                     _min_h = _h
                     _min_index = i
             is_use.append(_min_index)
             image_group[_min_index].append(img)
-        max_w -= max([x.width for x in image_group[-1]]) - 30
+        max_w -= max(x.width for x in image_group[-1]) - 30
         image_group.pop(-1)
-        max_h = max([sum([x.height + 15 for x in ig]) for ig in image_group])
+        max_h = max(sum(x.height + 15 for x in ig) for ig in image_group)
     return image_group, max(max_h + 250, max_w + 70)
 
 
 async def build_sort_image(
     image_group: list[list[BuildImage]],
-    h: int | None = None,
+    h: float | None = None,
     padding_top: int = 200,
     color: ColorAlias = (
         255,
@@ -307,16 +300,15 @@ async def build_sort_image(
     """
     bk_file = None
     if background_path:
-        random_bk = os.listdir(background_path)
-        if random_bk:
+        if random_bk := os.listdir(background_path):
             bk_file = random.choice(random_bk)
     image_w = 0
     image_h = 0
     if not h:
         for ig in image_group:
-            _w = max([x.width + 30 for x in ig])
+            _w = max(x.width + 30 for x in ig)
             image_w += _w + 30
-            _h = sum([x.height + 10 for x in ig])
+            _h = sum(x.height + 10 for x in ig)
             if _h > image_h:
                 image_h = _h
         image_h += padding_top
@@ -342,7 +334,7 @@ async def build_sort_image(
         for img in ig:
             await A.paste(img, (curr_w, curr_h))
             curr_h += img.height + 10
-        curr_w += max([x.width for x in ig]) + 30
+        curr_w += max(x.width for x in ig) + 30
     return A
 
 

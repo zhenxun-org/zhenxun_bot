@@ -321,8 +321,7 @@ class BuildMat:
         if not self.build_data.y_index:
             """没有指定y_index时，使用data自动生成"""
             max_num = max(self.build_data.data)
-            if max_num < 5:
-                max_num = 5
+            max_num = max(max_num, 5)
             s = int(max_num / 5)
             _y_index = [max_num]
             for _n in range(4):
@@ -334,23 +333,20 @@ class BuildMat:
             #         _tmp = ["_" for _ in range(len(_y_index) - 1)]
             #         _tmp.append(str(_y_index[0]))
             #         _y_index = _tmp
-            self.build_data.y_index = _y_index  # type: ignore
+            self.build_data.y_index = _y_index
         for item in self.build_data.y_index:
             text_size = BuildImage.get_text_size(str(item), font)
             if text_size[0] > padding_width:
                 padding_width = text_size[0]
             y_height_list.append(text_size)
         if self.build_data.mat_type == MatType.BARH:
-            _tmp = x_width_list
-            x_width_list = y_height_list
-            y_height_list = _tmp
+            x_width_list, y_height_list = y_height_list, x_width_list
         old_space = self.build_data.space
         width = padding_width * 2 + self.build_data.space[0] * 2 + 20
         height = (
-            sum([h[1] + self.build_data.space[1] for h in y_height_list])
+            sum(h[1] + self.build_data.space[1] for h in y_height_list)
             + self.build_data.space[1] * 2
-            + 30
-        )
+        ) + 30
         _x_index = self.build_data.x_index
         _y_index = self.build_data.y_index
         _barh_max_text_width = 0
@@ -376,7 +372,7 @@ class BuildMat:
             width += self.build_data.space[0] * (len(_x_index) - 1)
         else:
             """非横向柱状图时加字体宽度"""
-            width += sum([w[0] + self.build_data.space[0] for w in x_width_list])
+            width += sum(w[0] + self.build_data.space[0] for w in x_width_list)
 
         A = BuildImage(
             width + 5,

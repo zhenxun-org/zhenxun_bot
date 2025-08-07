@@ -42,8 +42,8 @@ class BuildImage:
 
     def __init__(
         self,
-        width: int = 0,
-        height: int = 0,
+        width: float = 0,
+        height: float = 0,
         color: ColorAlias = (255, 255, 255),
         mode: ModeType = "RGBA",
         font: str | Path | FreeTypeFont = "HYWenHei-85W.ttf",
@@ -63,12 +63,14 @@ class BuildImage:
             else:
                 self.markImg = Image.open(background)
             if width and height:
-                self.markImg = self.markImg.resize((width, height), Resampling.LANCZOS)
+                self.markImg = self.markImg.resize(
+                    (int(width), int(height)), Resampling.LANCZOS
+                )
             else:
                 self.width = self.markImg.width
                 self.height = self.markImg.height
         elif width and height:
-            self.markImg = Image.new(mode, (width, height), color)  # type: ignore
+            self.markImg = Image.new(mode, (int(width), int(height)), color)
         else:
             raise ValueError("长度和宽度不能为空...")
         self.draw = ImageDraw.Draw(self.markImg)
@@ -238,7 +240,7 @@ class BuildImage:
             _font = cls.load_font(font, font_size)
         temp_image = Image.new("RGB", (1, 1), (255, 255, 255))
         draw = ImageDraw.Draw(temp_image)
-        text_box = draw.textbbox((0, 0), str(text), font=_font)  # type: ignore
+        text_box = draw.textbbox((0, 0), text, font=_font) # pyright: ignore[reportArgumentType]
         text_width = text_box[2] - text_box[0]
         text_height = text_box[3] - text_box[1]
         return text_width, text_height + 10
@@ -430,7 +432,7 @@ class BuildImage:
         self.markImg.show()
 
     @run_sync
-    def resize(self, ratio: float = 0, width: int = 0, height: int = 0) -> Self:
+    def resize(self, ratio: float = 0, width: float = 0, height: float = 0) -> Self:
         """
         压缩图片
 
@@ -451,7 +453,7 @@ class BuildImage:
             if not width and not height:
                 width = int(self.width * ratio)
                 height = int(self.height * ratio)
-            self.markImg = self.markImg.resize((width, height), Image.LANCZOS)  # type: ignore
+            self.markImg = self.markImg.resize((int(width), int(height)), Image.LANCZOS)  # type: ignore
             self.width, self.height = self.markImg.size
             self.draw = ImageDraw.Draw(self.markImg)
         return self
@@ -580,7 +582,7 @@ class BuildImage:
     @run_sync
     def line(
         self,
-        xy: tuple[int, int, int, int],
+        xy: tuple[float, float, float, float],
         fill: tuple[int, int, int] | str = "#D8DEE4",
         width: int = 1,
     ) -> Self:
