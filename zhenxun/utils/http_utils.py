@@ -61,7 +61,7 @@ async def _():
                 "将默认使用新版 'proxy' 参数语法。"
             )
 
-    _client = httpx.AsyncClient(
+    _client = get_async_client(
         headers=get_user_agent(),
         follow_redirects=True,
         **client_kwargs,
@@ -90,7 +90,7 @@ def get_client() -> AsyncClient:
             raise RuntimeError("全局 httpx.AsyncClient 未初始化，请检查启动流程。")
         # 在测试环境中创建临时客户端
         logger.warning("在测试环境中创建临时HTTP客户端", "HTTPClient")
-        _client = httpx.AsyncClient(
+        _client = get_async_client(
             headers=get_user_agent(),
             follow_redirects=True,
         )
