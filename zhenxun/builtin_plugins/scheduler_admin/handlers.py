@@ -78,7 +78,7 @@ async def handle_view(
     img = await presenters.format_schedule_list_as_image(
         schedules=schedules,
         title=title,
-        current_page=page.result if page.available else 1
+        current_page=page.result if page.available else 1,
     )
     await MessageUtils.build_message(img).send(reply_to=True)
 
