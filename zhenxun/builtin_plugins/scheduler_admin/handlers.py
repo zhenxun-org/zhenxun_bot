@@ -76,7 +76,9 @@ async def handle_view(
         await schedule_cmd.finish("没有找到任何相关的定时任务。")
 
     img = await presenters.format_schedule_list_as_image(
-        schedules=schedules, title=title, current_page=page.result
+        schedules=schedules,
+        title=title,
+        current_page=page.result if page.available else 1
     )
     await MessageUtils.build_message(img).send(reply_to=True)
 
