@@ -416,7 +416,7 @@ class StoreManager:
         update_success_list = []
         result = "--已更新{}个插件 {}个失败 {}个成功--"
         logger.info(f"尝试更新全部插件 {plugin_name_list}", LOG_COMMAND)
-        for plugin_info in plugin_list:
+        for plugin_info in all_plugin_list:
             try:
                 db_plugin_list = await cls.get_loaded_plugins("module", "version")
                 suc_plugin = {p[0]: (p[1] or "Unknown") for p in db_plugin_list}
