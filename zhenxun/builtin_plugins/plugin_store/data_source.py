@@ -163,13 +163,17 @@ class StoreManager:
 
     @classmethod
     async def get_plugin_by_value(
-        cls, index_or_module: str, is_update: bool = False
+        cls,
+        index_or_module: str,
+        is_update: bool = False,
+        is_remove: bool = False,
     ) -> tuple[StorePluginInfo, bool]:
         """获取插件信息
 
         参数:
             index_or_module: 插件索引或模块名
             is_update: 是否是更新插件
+            is_remove: 是否是移除插件
 
         异常:
             PluginStoreException: 插件不存在
@@ -196,10 +200,22 @@ class StoreManager:
                 break
         if not plugin_info:
             raise PluginStoreException(f"插件不存在: {plugin_key}")
-        if not is_update and plugin_info.module in [p[0] for p in db_plugin_list]:
+
+        modules = [p[0] for p in db_plugin_list]
+
+        if is_remove:
+            if plugin_info.module not in modules:
+                raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法移除")
+            return plugin_info, is_external
+
+        if is_update:
+            if plugin_info.module not in modules:
+                raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法更新")
+            return plugin_info, is_external
+
+        if plugin_info.module in modules:
             raise PluginStoreException(f"插件 {plugin_info.name} 已安装，无需重复安装")
-        if plugin_info.module not in [p[0] for p in db_plugin_list] and is_update:
-            raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法更新")
+
         return plugin_info, is_external
 
     @classmethod
@@ -310,7 +326,7 @@ class StoreManager:
         返回:
             str: 返回消息
         """
-        plugin_info, _ = await cls.get_plugin_by_value(index_or_module)
+        plugin_info, _ = await cls.get_plugin_by_value(index_or_module, is_remove=True)
         path = BASE_PATH
         if plugin_info.github_url:
             path = BASE_PATH / "plugins"

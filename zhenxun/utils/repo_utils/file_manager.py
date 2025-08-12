@@ -154,7 +154,10 @@ class RepoFileManager:
                 )
                 results.append((f, content))
             except Exception as e:
-                logger.warning(f"获取阿里云文件内容失败: {file_path}", LOG_COMMAND, e=e)
+                if "code: 404" not in str(e):
+                    logger.warning(
+                        f"获取阿里云文件内容失败: {file_path}", LOG_COMMAND, e=e
+                    )
                 if not ignore_error:
                     raise
         logger.debug(f"获取阿里云文件内容: {[r[0] for r in results]}", LOG_COMMAND)
@@ -526,7 +529,7 @@ class RepoFileManager:
                     content_bytes = content.encode("utf-8")
                 else:
                     content_bytes = content
-                logger.warning(f"写入文件: {local_path}")
+                logger.debug(f"写入文件: {local_path}")
                 async with aiofiles.open(local_path, "wb") as f:
                     await f.write(content_bytes)
             result.success = True
@@ -535,6 +538,7 @@ class RepoFileManager:
                 len(content.encode("utf-8") if isinstance(content, str) else content)
                 for _, content in file_contents
             )
+            logger.info(f"下载文件成功: {[f[0] for f in file_contents]}")
             return result
         except Exception as e:
             logger.error(f"下载文件失败: {e}")
