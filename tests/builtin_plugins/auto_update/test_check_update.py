@@ -225,7 +225,7 @@ def init_mocker_path(mocker: MockerFixture, tmp_path: Path):
     )
 
 
-@pytest.mark.skip("不会修")
+@pytest.mark.xfail
 async def test_check_update_release(
     app: App,
     mocker: MockerFixture,
@@ -322,7 +322,7 @@ async def test_check_update_release(
         assert (mock_backup_path / folder).exists()
 
 
-@pytest.mark.skip("不会修")
+@pytest.mark.xfail
 async def test_check_update_main(
     app: App,
     mocker: MockerFixture,

@@ -15,7 +15,7 @@ from tests.utils import _v11_group_message_event
 test_path = Path(__file__).parent.parent.parent
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_add_plugin_basic(
     app: App,
     mocker: MockerFixture,
@@ -62,7 +62,7 @@ async def test_add_plugin_basic(
     assert (mock_base_path / "plugins" / "search_image" / "__init__.py").is_file()
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_add_plugin_basic_commit_version(
     app: App,
     mocker: MockerFixture,
@@ -109,7 +109,7 @@ async def test_add_plugin_basic_commit_version(
     assert (mock_base_path / "plugins" / "bilibili_sub" / "__init__.py").is_file()
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_add_plugin_basic_is_not_dir(
     app: App,
     mocker: MockerFixture,
@@ -156,7 +156,7 @@ async def test_add_plugin_basic_is_not_dir(
     assert (mock_base_path / "plugins" / "jitang.py").is_file()
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_add_plugin_extra(
     app: App,
     mocker: MockerFixture,
@@ -203,7 +203,7 @@ async def test_add_plugin_extra(
     assert (mock_base_path / "plugins" / "github_sub" / "__init__.py").is_file()
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_plugin_not_exist_add(
     app: App,
     create_bot: Callable,
@@ -242,7 +242,7 @@ async def test_plugin_not_exist_add(
         )
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_add_plugin_exist(
     app: App,
     mocker: MockerFixture,

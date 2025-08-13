@@ -13,7 +13,7 @@ from tests.config import BotId, GroupId, MessageId, UserId
 from tests.utils import _v11_group_message_event
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_update_plugin_basic_need_update(
     app: App,
     mocker: MockerFixture,
@@ -64,7 +64,7 @@ async def test_update_plugin_basic_need_update(
     assert (mock_base_path / "plugins" / "search_image" / "__init__.py").is_file()
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_update_plugin_basic_is_new(
     app: App,
     mocker: MockerFixture,
@@ -114,7 +114,7 @@ async def test_update_plugin_basic_is_new(
         )
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_plugin_not_exist_update(
     app: App,
     create_bot: Callable,
@@ -153,7 +153,7 @@ async def test_plugin_not_exist_update(
         )
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_update_plugin_not_install(
     app: App,
     create_bot: Callable,

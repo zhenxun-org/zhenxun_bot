@@ -15,7 +15,7 @@ from tests.config import BotId, GroupId, MessageId, UserId
 from tests.utils import _v11_group_message_event
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_remove_plugin(
     app: App,
     mocker: MockerFixture,
@@ -62,7 +62,7 @@ async def test_remove_plugin(
     assert not (mock_base_path / "plugins" / "search_image" / "__init__.py").is_file()
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_plugin_not_exist_remove(
     app: App,
     create_bot: Callable,
@@ -95,7 +95,7 @@ async def test_plugin_not_exist_remove(
         )
 
 
-@pytest.mark.skip("修不好")
+@pytest.mark.xfail
 async def test_remove_plugin_not_install(
     app: App,
     mocker: MockerFixture,
