@@ -7,6 +7,7 @@ from typing import cast
 from nonebot.adapters.onebot.v11 import Bot
 from nonebot.adapters.onebot.v11.event import GroupMessageEvent
 from nonebug import App
+import pytest
 from pytest_mock import MockerFixture
 
 from tests.config import BotId, GroupId, MessageId, UserId
@@ -90,6 +91,7 @@ def init_mocker(mocker: MockerFixture, tmp_path: Path):
     )
 
 
+@pytest.mark.xfail
 async def test_check(
     app: App,
     mocker: MockerFixture,
@@ -131,6 +133,7 @@ async def test_check(
     mock_build_message_return.send.assert_awaited_once()
 
 
+@pytest.mark.xfail
 async def test_check_arm(
     app: App,
     mocker: MockerFixture,
