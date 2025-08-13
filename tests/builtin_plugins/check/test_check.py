@@ -90,6 +90,7 @@ def init_mocker(mocker: MockerFixture, tmp_path: Path):
         mock_template_path_new,
     )
 
+
 @pytest.mark.xfail
 async def test_check(
     app: App,
@@ -130,6 +131,7 @@ async def test_check(
     mock_template_to_pic.assert_awaited_once()
     mock_build_message.assert_called_once_with(mock_template_to_pic_return)
     mock_build_message_return.send.assert_awaited_once()
+
 
 @pytest.mark.xfail
 async def test_check_arm(
