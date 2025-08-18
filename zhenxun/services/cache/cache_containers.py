@@ -82,12 +82,7 @@ class CacheDict(Generic[T]):
             return False
 
         # 检查是否过期
-        data = self._data[key]
-        if data.expire_time > 0 and data.expire_time < time.time():
-            del self._data[key]
-            return False
-
-        return True
+        return bool(self.expire_time(key))
 
     def get(self, key: str, default: Any = None) -> T | None:
         """获取字典项，如果不存在返回默认值

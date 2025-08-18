@@ -64,6 +64,25 @@ class ResourceDirManager:
             cls.__tree_append(path, deep)
 
 
+def is_binary_file(file_path: str) -> bool:
+    """判断是否为二进制文件"""
+    binary_extensions = {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".ico",
+        ".pdf",
+        ".zip",
+        ".rar",
+        ".7z",
+        ".exe",
+        ".dll",
+    }
+    return any(file_path.lower().endswith(ext) for ext in binary_extensions)
+
+
 def cn2py(word: str) -> str:
     """将字符串转化为拼音
 
