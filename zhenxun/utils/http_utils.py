@@ -98,7 +98,7 @@ def get_client() -> AsyncClient:
 
 
 def get_async_client(
-    proxies: dict[str, str] | None = None,
+    proxies: dict[str, str] | str | None = None,
     proxy: str | None = None,
     verify: bool = False,
     **kwargs,
@@ -109,6 +109,8 @@ def get_async_client(
     """
     transport = kwargs.pop("transport", None) or AsyncHTTPTransport(verify=verify)
     if proxies:
+        if isinstance(proxies, str):
+            proxies = {"http://": proxies, "https://": proxies}
         http_proxy = proxies.get("http://")
         https_proxy = proxies.get("https://")
         return httpx.AsyncClient(
