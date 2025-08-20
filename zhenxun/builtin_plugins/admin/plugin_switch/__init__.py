@@ -9,7 +9,7 @@ from zhenxun.services.log import logger
 from zhenxun.utils.enum import BlockType, PluginType
 from zhenxun.utils.message import MessageUtils
 
-from ._data_source import PluginManager, build_plugin, build_task, delete_help_image
+from ._data_source import PluginManager, build_plugin, build_task
 from .command import _group_status_matcher, _status_matcher
 
 base_config = Config.get("plugin_switch")
@@ -154,7 +154,6 @@ async def _(
         else:
             result = await PluginManager.unblock_group_plugin(name, group_id)
             logger.info(f"开启功能 {name}", arparma.header_result, session=session)
-        delete_help_image(group_id)
         await MessageUtils.build_message(result).finish(reply_to=True)
     elif session.user.id in bot.config.superusers:
         """私聊"""
@@ -218,7 +217,6 @@ async def _(
                 session=session,
                 target=group_id,
             )
-        delete_help_image()
         await MessageUtils.build_message(result).finish(reply_to=True)
 
 
@@ -266,7 +264,6 @@ async def _(
         else:
             result = await PluginManager.block_group_plugin(name, group_id)
             logger.info(f"关闭功能 {name}", arparma.header_result, session=session)
-        delete_help_image(group_id)
         await MessageUtils.build_message(result).finish(reply_to=True)
     elif session.user.id in bot.config.superusers:
         group_id = group.result if group.available else None
@@ -338,7 +335,6 @@ async def _(
                 session=session,
                 target=group_id,
             )
-        delete_help_image()
         await MessageUtils.build_message(result).finish(reply_to=True)
 
 
