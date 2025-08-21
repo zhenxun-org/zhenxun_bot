@@ -4,6 +4,7 @@ from typing_extensions import Self
 
 from tortoise import fields
 
+from zhenxun.services.data_access import DataAccess
 from zhenxun.services.db_context import Model
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import CacheType, DbLockType
@@ -57,14 +58,15 @@ class BanConsole(Model):
         """
         if not user_id and not group_id:
             raise UserAndGroupIsNone()
+        dao = DataAccess(cls)
         if user_id:
             return (
-                await cls.safe_get_or_none(user_id=user_id, group_id=group_id)
+                await dao.safe_get_or_none(user_id=user_id, group_id=group_id)
                 if group_id
-                else await cls.safe_get_or_none(user_id=user_id, group_id__isnull=True)
+                else await dao.safe_get_or_none(user_id=user_id, group_id__isnull=True)
             )
         else:
-            return await cls.safe_get_or_none(user_id="", group_id=group_id)
+            return await dao.safe_get_or_none(user_id="", group_id=group_id)
 
     @classmethod
     async def check_ban_level(

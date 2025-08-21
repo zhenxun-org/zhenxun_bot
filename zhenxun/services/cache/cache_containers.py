@@ -37,7 +37,7 @@ class CacheDict(Generic[T]):
             return 0
         return data.expire_time
 
-    def __getitem__(self, key: str) -> T | None:
+    def __getitem__(self, key: str) -> T:
         """获取字典项
 
         参数:
@@ -47,8 +47,10 @@ class CacheDict(Generic[T]):
             T: 字典值
         """
         if value := self._data.get(key):
-            return value.value if self.expire_time(key) else None
-        return None
+            if self.expire_time(key):
+                raise KeyError(f"键 {key} 已过期")
+            return value.value
+        raise KeyError(f"键 {key} 不存在")
 
     def __setitem__(self, key: str, value: T) -> None:
         """设置字典项

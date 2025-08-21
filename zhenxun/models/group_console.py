@@ -7,6 +7,7 @@ from tortoise.backends.base.client import BaseDBAsyncClient
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.task_info import TaskInfo
 from zhenxun.services.cache import CacheRoot
+from zhenxun.services.data_access import DataAccess
 from zhenxun.services.db_context import Model
 from zhenxun.utils.enum import CacheType, DbLockType, PluginType
 
@@ -254,13 +255,14 @@ class GroupConsole(Model):
         返回:
             Self: GroupConsole
         """
+        dao = DataAccess(cls)
         if channel_id:
-            return await cls.safe_get_or_none(
+            return await dao.safe_get_or_none(
                 group_id=group_id,
                 channel_id=channel_id,
                 clean_duplicates=clean_duplicates,
             )
-        return await cls.safe_get_or_none(
+        return await dao.safe_get_or_none(
             group_id=group_id,
             channel_id__isnull=True,
             clean_duplicates=clean_duplicates,

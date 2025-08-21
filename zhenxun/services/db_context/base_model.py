@@ -16,6 +16,9 @@ from zhenxun.utils.enum import DbLockType
 from .config import LOG_COMMAND, db_model
 from .utils import with_db_timeout
 
+total = {}
+index = 0
+
 
 class Model(TortoiseModel):
     """
@@ -221,12 +224,25 @@ class Model(TortoiseModel):
         返回:
             Self | None: 查询结果，如果不存在返回None
         """
+        global index, total
         try:
+            if cls.__name__ == "BanConsole":
+                uid = kwargs.get("user_id")
+                if uid:
+                    if uid not in total:
+                        total[uid] = CacheRoot.cache_dict(f"DB_TEST_UID_{uid}", 10, int)
+                    total[uid][str(index)] = "1"
+                    index += 1
+                    logger.info(
+                        f"BanConsole 10秒内查询次数 uid: {uid}"
+                        f" 查询次数: {len(total[uid])}"
+                    )
             # 先尝试使用 get_or_none 获取单个记录
             try:
                 return await with_db_timeout(
                     cls.get_or_none(*args, using_db=using_db, **kwargs),
                     operation=f"{cls.__name__}.get_or_none",
+                    source="DataBaseModel",
                 )
             except MultipleObjectsReturned:
                 # 如果出现多个记录的情况，进行特殊处理
@@ -239,6 +255,7 @@ class Model(TortoiseModel):
                 records = await with_db_timeout(
                     cls.filter(*args, **kwargs).all(),
                     operation=f"{cls.__name__}.filter.all",
+                    source="DataBaseModel",
                 )
 
                 if not records:
@@ -255,6 +272,7 @@ class Model(TortoiseModel):
                             await with_db_timeout(
                                 record.delete(),
                                 operation=f"{cls.__name__}.delete_duplicate",
+                                source="DataBaseModel",
                             )
                             logger.info(
                                 f"{cls.__name__} 删除重复记录:"
@@ -269,11 +287,13 @@ class Model(TortoiseModel):
                     return await with_db_timeout(
                         cls.filter(*args, **kwargs).order_by("-id").first(),
                         operation=f"{cls.__name__}.filter.order_by.first",
+                        source="DataBaseModel",
                     )
                 # 如果没有 id 字段，则返回第一个记录
                 return await with_db_timeout(
                     cls.filter(*args, **kwargs).first(),
                     operation=f"{cls.__name__}.filter.first",
+                    source="DataBaseModel",
                 )
         except asyncio.TimeoutError:
             logger.error(
