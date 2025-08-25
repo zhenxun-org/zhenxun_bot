@@ -12,7 +12,7 @@ import psutil
 import ujson as json
 
 from zhenxun.configs.config import Config
-from zhenxun.configs.path_config import DATA_PATH, IMAGE_PATH
+from zhenxun.configs.path_config import DATA_PATH
 
 from .base_model import SystemFolderSize, SystemStatus, User
 
@@ -66,22 +66,6 @@ def validate_path(path_str: str | None) -> tuple[Path | None, str | None]:
         return (None, "路径长度超出限制") if len(str(path)) > 4096 else (path, None)
     except Exception as e:
         return None, f"路径验证失败: {e!s}"
-
-
-GROUP_HELP_PATH = DATA_PATH / "group_help"
-SIMPLE_HELP_IMAGE = IMAGE_PATH / "SIMPLE_HELP.png"
-SIMPLE_DETAIL_HELP_IMAGE = IMAGE_PATH / "SIMPLE_DETAIL_HELP.png"
-
-
-def clear_help_image():
-    """清理帮助图片"""
-    if SIMPLE_HELP_IMAGE.exists():
-        SIMPLE_HELP_IMAGE.unlink()
-    if SIMPLE_DETAIL_HELP_IMAGE.exists():
-        SIMPLE_DETAIL_HELP_IMAGE.unlink()
-    for file in GROUP_HELP_PATH.iterdir():
-        if file.is_file():
-            file.unlink()
 
 
 def get_user(uname: str) -> User | None:
