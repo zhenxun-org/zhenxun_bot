@@ -7,7 +7,7 @@ ENV POETRY_HOME="/opt/poetry" PATH="${PATH}:/opt/poetry/bin"
 RUN curl -sSL https://install.python-poetry.org | python - -y && \
   poetry self add poetry-plugin-export
 
-COPY ./pyproject.toml ./poetry.lock* /tmp/
+COPY ./pyproject.toml /tmp/
 
 RUN poetry export \
       -f requirements.txt \
