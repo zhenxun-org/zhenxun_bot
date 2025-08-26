@@ -268,6 +268,7 @@ class StoreManager:
         elif source == "git":
             repo_type = RepoType.GITHUB
         replace_module_path = module_path.replace(".", "/")
+        plugin_name = module_path.split(".")[-1]
         if is_dir:
             files = await RepoFileManager.list_directory_files(
                 github_url, replace_module_path, repo_type=repo_type
@@ -278,7 +279,11 @@ class StoreManager:
         files = [file for file in files if not file.is_dir]
         download_files = [(file.path, local_path / file.path) for file in files]
         await RepoFileManager.download_files(
-            github_url, download_files, repo_type=repo_type
+            github_url,
+            download_files,
+            repo_type=repo_type,
+            sparse_path=replace_module_path,
+            target_dir=local_path / plugin_name,
         )
 
         requirement_paths = [

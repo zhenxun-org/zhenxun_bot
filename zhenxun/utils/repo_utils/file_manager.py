@@ -12,10 +12,12 @@ from zhenxun.services.log import logger
 from zhenxun.utils.github_utils import GithubUtils
 from zhenxun.utils.github_utils.models import AliyunTreeType, GitHubStrategy, TreeType
 from zhenxun.utils.http_utils import AsyncHttpx
+from zhenxun.utils.utils import is_binary_file
 
 from .config import LOG_COMMAND, RepoConfig
 from .exceptions import FileNotFoundError, NetworkError, RepoManagerError
 from .models import FileDownloadResult, RepoFileInfo, RepoType
+from .utils import sparse_checkout_clone
 
 
 class RepoFileManager:
@@ -466,6 +468,8 @@ class RepoFileManager:
         branch: str = "main",
         repo_type: RepoType | None = None,
         ignore_error: bool = False,
+        sparse_path: str | None = None,
+        target_dir: Path | None = None,
     ) -> FileDownloadResult:
         """
         下载单个文件
@@ -476,10 +480,19 @@ class RepoFileManager:
             branch: 分支名称
             repo_type: 仓库类型，如果为None则自动判断
             ignore_error: 是否忽略错误
+            sparse_path: 稀疏检出路径
+            target_dir: 稀疏目标目录
 
         返回:
             FileDownloadResult: 下载结果
         """
+
+        # 参数一致性校验：sparse_path 与 target_dir 必须同时有值或同时为 None
+        if (sparse_path is None) ^ (target_dir is None):
+            raise RepoManagerError(
+                "参数错误: sparse_path 与 target_dir 必须同时提供或同时为 None"
+            )
+
         # 确定仓库类型和所有者
         repo_name = (
             repo_url.split("/tree/")[0].split("/")[-1].replace(".git", "").strip()
@@ -497,12 +510,43 @@ class RepoFileManager:
             file_path=file_path,
             version=branch,
         )
+        if (
+            any(is_binary_file(file_name) for file_name in file_path_mapping)
+            and repo_type == RepoType.ALIYUN
+            and sparse_path
+            and target_dir
+        ):
+            return await self._handle_binary_with_sparse_checkout(
+                repo_url=repo_url,
+                branch=branch,
+                sparse_path=sparse_path,
+                target_dir=target_dir,
+                result=result,
+            )
+        else:
+            # 不包含二进制时
+            return await self._download_and_write_files(
+                repo_url=repo_url,
+                file_paths=[f[0] for f in file_path],
+                file_path_mapping=file_path_mapping,
+                branch=branch,
+                repo_type=repo_type,
+                ignore_error=ignore_error,
+                result=result,
+            )
 
+    async def _download_and_write_files(
+        self,
+        repo_url: str,
+        file_paths: list[str],
+        file_path_mapping: dict[str, Path],
+        branch: str,
+        repo_type: RepoType | None,
+        ignore_error: bool,
+        result: FileDownloadResult,
+    ) -> FileDownloadResult:
         try:
-            # 由于我们传入的是列表，所以这里一定返回列表
-            file_paths = [f[0] for f in file_path]
             if len(file_paths) == 1:
-                # 如果只有一个文件，可能返回单个元组
                 file_contents_result = await self.get_file_content(
                     repo_url, file_paths[0], branch, repo_type, ignore_error
                 )
@@ -513,7 +557,6 @@ class RepoFileManager:
                 else:
                     file_contents = cast(list[tuple[str, str]], file_contents_result)
             else:
-                # 多个文件一定返回列表
                 file_contents = cast(
                     list[tuple[str, str]],
                     await self.get_file_content(
@@ -524,7 +567,6 @@ class RepoFileManager:
             for repo_file_path, content in file_contents:
                 local_path = file_path_mapping[repo_file_path]
                 local_path.parent.mkdir(parents=True, exist_ok=True)
-                # 使用二进制模式写入文件，避免编码问题
                 if isinstance(content, str):
                     content_bytes = content.encode("utf-8")
                 else:
@@ -533,7 +575,6 @@ class RepoFileManager:
                 async with aiofiles.open(local_path, "wb") as f:
                     await f.write(content_bytes)
             result.success = True
-            # 计算文件大小
             result.file_size = sum(
                 len(content.encode("utf-8") if isinstance(content, str) else content)
                 for _, content in file_contents
@@ -542,6 +583,39 @@ class RepoFileManager:
             return result
         except Exception as e:
             logger.error(f"下载文件失败: {e}")
+            result.success = False
+            result.error_message = str(e)
+            return result
+
+    async def _handle_binary_with_sparse_checkout(
+        self,
+        repo_url: str,
+        branch: str,
+        sparse_path: str,
+        target_dir: Path,
+        result: FileDownloadResult,
+    ) -> FileDownloadResult:
+        try:
+            await sparse_checkout_clone(
+                repo_url=repo_url,
+                branch=branch,
+                sparse_path=sparse_path,
+                target_dir=target_dir,
+            )
+            total_size = 0
+            if target_dir.exists():
+                for f in target_dir.rglob("*"):
+                    if f.is_file():
+                        try:
+                            total_size += f.stat().st_size
+                        except Exception:
+                            pass
+            result.success = True
+            result.file_size = total_size
+            logger.info(f"sparse-checkout 克隆成功: {target_dir}")
+            return result
+        except Exception as e:
+            logger.error(f"sparse-checkout 克隆失败: {e}")
             result.success = False
             result.error_message = str(e)
             return result

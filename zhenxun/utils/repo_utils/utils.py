@@ -133,3 +133,75 @@ def filter_files(
             result = [file for file in result if not re.match(regex_pattern, file)]
 
     return result
+
+
+async def sparse_checkout_clone(
+    repo_url: str,
+    branch: str,
+    sparse_path: str,
+    target_dir: Path,
+) -> None:
+    """
+    使用 git 稀疏检出克隆指定路径到目标目录（完全独立于主项目 git）。
+
+    关键保障:
+    - 在 target_dir 下检测/初始化 .git，所有 git 操作均以 cwd=target_dir 执行
+    - 强制拉取与工作区覆盖: fetch --force、checkout -B、reset --hard、clean -xdf
+    - 反复设置 sparse-checkout 路径，确保路径更新生效
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    if not await check_git():
+        raise RuntimeError("未检测到可用的 git 命令")
+
+    git_dir = target_dir / ".git"
+    if not git_dir.exists():
+        success, out, err = await run_git_command("init", target_dir)
+        if not success:
+            raise RuntimeError(f"git init 失败: {err or out}")
+        success, out, err = await run_git_command(
+            f"remote add origin {repo_url}", target_dir
+        )
+        if not success:
+            raise RuntimeError(f"添加远程失败: {err or out}")
+    else:
+        success, out, err = await run_git_command(
+            f"remote set-url origin {repo_url}", target_dir
+        )
+        if not success:
+            # 兜底尝试添加
+            await run_git_command(f"remote add origin {repo_url}", target_dir)
+
+    # 启用稀疏检出（重复设置以确保幂等）
+    await run_git_command("config core.sparseCheckout true", target_dir)
+    await run_git_command("sparse-checkout init --cone", target_dir)
+
+    # 设置需要检出的路径（每次都覆盖配置）
+    if not sparse_path:
+        raise RuntimeError("sparse-checkout 路径不能为空")
+    success, out, err = await run_git_command(
+        f"sparse-checkout set {sparse_path}", target_dir
+    )
+    if not success:
+        raise RuntimeError(f"配置稀疏路径失败: {err or out}")
+
+    # 强制拉取并同步到远端
+    success, out, err = await run_git_command(
+        f"fetch --force --depth 1 origin {branch}", target_dir
+    )
+    if not success:
+        raise RuntimeError(f"fetch 失败: {err or out}")
+
+    # 使用远端强制更新本地分支并覆盖工作区
+    success, out, err = await run_git_command(
+        f"checkout -B {branch} origin/{branch}", target_dir
+    )
+    if not success:
+        # 回退方案
+        success2, out2, err2 = await run_git_command(f"checkout {branch}", target_dir)
+        if not success2:
+            raise RuntimeError(f"checkout 失败: {(err or out) or (err2 or out2)}")
+
+    # 强制对齐工作区
+    await run_git_command(f"reset --hard origin/{branch}", target_dir)
+    await run_git_command("clean -xdf", target_dir)

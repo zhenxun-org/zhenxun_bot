@@ -65,22 +65,39 @@ class ResourceDirManager:
 
 
 def is_binary_file(file_path: str) -> bool:
-    """判断是否为二进制文件"""
-    binary_extensions = {
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".gif",
-        ".bmp",
-        ".ico",
-        ".pdf",
-        ".zip",
-        ".rar",
-        ".7z",
-        ".exe",
-        ".dll",
-    }
-    return any(file_path.lower().endswith(ext) for ext in binary_extensions)
+    """判断是否为二进制文件
+
+    参数:
+        file_path: 文件路径
+
+    返回:
+        bool: 是否为二进制文件
+    """
+    # fmt: off
+    # 精简但包含图片和字体的二进制文件扩展名集合
+    BINARY_EXTENSIONS = frozenset({
+        # 图片文件
+        "jpg", "jpeg", "png", "gif", "bmp", "ico", "webp", "tiff", "tif", "svg",
+        # 字体文件
+        "ttf", "otf", "woff", "woff2", "eot",
+        # 压缩文件
+        "zip", "rar", "7z", "tar", "gz", "bz2", "xz",
+        # 可执行文件和库
+        "exe", "dll", "so", "dylib",
+        # 文档文件
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        # 多媒体文件
+        "mp3", "mp4", "avi", "mov", "wmv", "flv",
+        # 其他常见二进制文件
+        "bin", "dat", "db", "class", "pyc"
+    })
+
+    # 使用os.path.splitext高效提取扩展名
+    _, ext = os.path.splitext(file_path)
+    # 去除点号并转换为小写
+    ext_clean = ext.lstrip(".").lower()
+
+    return ext_clean in BINARY_EXTENSIONS
 
 
 def cn2py(word: str) -> str:
