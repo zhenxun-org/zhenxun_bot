@@ -14,21 +14,21 @@ priority = "primary"
 [tool.poetry.dependencies]
 python = "^3.10"
 playwright = "^1.41.1"
-nonebot-adapter-onebot = "^2.3.1"
+nonebot-adapter-onebot = ">=2.3.1"
 nonebot-plugin-apscheduler = "^0.5"
-tortoise-orm = { extras = ["asyncpg"], version = "^0.20.0" }
+tortoise-orm = "^0.20.0"
 cattrs = "^23.2.3"
 ruamel-yaml = "^0.18.5"
 strenum = "^0.4.15"
-nonebot-plugin-session = "^0.2.3"
-ujson = "^5.9.0"
-nb-cli = "^1.3.0"
-nonebot2 = { extras = ["fastapi"], version = "^2.3.3" }
+nonebot-plugin-session = "^0.3.2"
+ujson = ">=5.9.0"
+nb-cli = ">=1.3.0"
+nonebot2 = { extras = ["fastapi"], version = ">=2.3.3" }
 pillow = "^10.0.0"
 retrying = "^1.3.4"
 aiofiles = "^23.2.1"
 nonebot-plugin-htmlrender = ">=0.6.0,<1.0.0"
-pypinyin = "^0.51.0"
+pypinyin = ">=0.51.0"
 beautifulsoup4 = "^4.12.3"
 lxml = "^5.1.0"
 psutil = "^5.9.8"
@@ -36,15 +36,20 @@ feedparser = "^6.0.11"
 imagehash = "^4.3.1"
 cn2an = "^0.5.22"
 dateparser = "^1.2.0"
-bilireq = "0.2.3post0"
+bilireq = ">=0.2.10"
 python-jose = { extras = ["cryptography"], version = "^3.3.0" }
 python-multipart = "^0.0.9"
-aiocache = "^0.12.2"
+aiocache = {extras = ["redis"], version = "^0.12.3"}
 py-cpuinfo = "^9.0.0"
-nonebot-plugin-alconna = "^0.54.0"
+nonebot-plugin-alconna = ">=0.56.0"
 tenacity = "^9.0.0"
-nonebot-plugin-uninfo = ">0.4.1"
-pydantic = "1.10.18"
+nonebot-plugin-uninfo = ">=0.7.3"
+nonebot-plugin-waiter = "^0.8.1"
+multidict = ">=6.0.0,!=6.3.2"
+pydantic = ">=1.0.0, <2.0.0"
+
+redis = { version = ">=5", optional = true }
+asyncpg = { version = ">=0.20.0", optional = true }
 alibabacloud-devops20210625 = "^5.0.2"
 
 [tool.poetry.group.dev.dependencies]
@@ -56,7 +61,6 @@ pytest-xdist = "^3.3.1"
 respx = "^0.21.1"
 ruff = "^0.8.0"
 pre-commit = "^4.0.0"
-
 
 [tool.nonebot]
 plugins = [
