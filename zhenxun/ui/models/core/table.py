@@ -2,11 +2,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ...models.components.progress_bar import ProgressBar
 from .base import RenderableComponent
 
 __all__ = [
     "BaseCell",
     "ImageCell",
+    "ProgressBarCell",
     "StatusBadgeCell",
     "TableCell",
     "TableData",
@@ -48,7 +50,15 @@ class StatusBadgeCell(BaseCell):
     status_type: Literal["ok", "error", "warning", "info"] = "info"
 
 
-TableCell = TextCell | ImageCell | StatusBadgeCell | str | int | float | None
+class ProgressBarCell(BaseCell, ProgressBar):
+    """进度条单元格，继承ProgressBar模型以复用其字段"""
+
+    type: Literal["progress_bar"] = "progress_bar"  # type: ignore
+
+
+TableCell = (
+    TextCell | ImageCell | StatusBadgeCell | ProgressBarCell | str | int | float | None
+)
 
 
 class TableData(RenderableComponent):
@@ -59,6 +69,12 @@ class TableData(RenderableComponent):
     tip: str | None = Field(None, description="表格下方的提示信息")
     headers: list[str] = Field(default_factory=list, description="表头列表")
     rows: list[list[TableCell]] = Field(default_factory=list, description="数据行列表")
+    column_alignments: list[Literal["left", "center", "right"]] | None = Field(
+        default=None, description="每列的对齐方式"
+    )
+    column_widths: list[str | int] | None = Field(
+        default=None, description="每列的宽度 (e.g., ['50px', 'auto', 100])"
+    )
 
     @property
     def template_name(self) -> str:

@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from typing import Literal
 
 from pydantic import BaseModel
@@ -29,7 +30,6 @@ class NotebookElement(BaseModel):
     data: list[str] | None = None
     ordered: bool | None = None
     component: RenderableComponent | None = None
-    html_content: str | None = None
 
 
 class NotebookData(ContainerComponent):
@@ -42,7 +42,7 @@ class NotebookData(ContainerComponent):
     def template_name(self) -> str:
         return "components/core/notebook"
 
-    def _get_renderable_child_items(self):
+    def get_children(self) -> Iterable[RenderableComponent]:
         for element in self.elements:
             if element.type == "component" and element.component:
-                yield element
+                yield element.component

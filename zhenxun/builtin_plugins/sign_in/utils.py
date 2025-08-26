@@ -7,11 +7,9 @@ import aiofiles
 import nonebot
 from nonebot.drivers import Driver
 from nonebot_plugin_uninfo import Uninfo
-import pytz
 
 from zhenxun import ui
 from zhenxun.configs.config import BotConfig, Config
-from zhenxun.models.sign_log import SignLog
 from zhenxun.models.sign_user import SignUser
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.platform import PlatformUtils
@@ -176,18 +174,17 @@ async def _generate_html_card(
 
     impression = float(user.impression)
     user_console = await user.user_console
-    uid_str = (
-        f"{user_console.uid:08}"
-        if user_console and user_console.uid is not None
-        else "XXXXXXXX"
-    )
-    uid_formatted = f"{uid_str[:4]} {uid_str[4:]}"
+    if user_console and user_console.uid is not None:
+        uid = f"{user_console.uid}".rjust(12, "0")
+        uid_formatted = f"{uid[:4]} {uid[4:8]} {uid[8:]}"
+    else:
+        uid_formatted = "XXXX XXXX XXXX"
 
     level, next_impression, previous_impression = get_level_and_next_impression(
         impression
     )
 
-    attitude = level2attitude.get(str(level), "未知")
+    attitude = f"对你的态度: {level2attitude.get(str(level), '未知')}"
     interpolation_val = max(0, next_impression - impression)
     interpolation = f"{interpolation_val:.2f}"
 
@@ -200,15 +197,20 @@ async def _generate_html_card(
 
     hour = now.hour
     if 6 < hour < 10:
-        bot_message = random.choice(MORNING_MESSAGE)
+        message = random.choice(MORNING_MESSAGE)
     elif 0 <= hour < 6:
-        bot_message = random.choice(LG_MESSAGE)
+        message = random.choice(LG_MESSAGE)
     else:
-        bot_message = f"{BotConfig.self_nickname}希望你开心！"
+        message = f"{BotConfig.self_nickname}希望你开心！"
+    bot_message = f"{BotConfig.self_nickname}说: {message}"
 
     temperature = random.randint(1, 40)
     weather_icon_name = f"{random.randint(0, 11)}.png"
     tag_icon_name = f"{random.randint(0, 5)}.png"
+
+    font_size = 45
+    if len(nickname) > 6:
+        font_size = 27
 
     user_info = {
         "nickname": nickname,
@@ -218,11 +220,17 @@ async def _generate_html_card(
         )
         or "",
         "sign_count": user.sign_count,
+        "font_size": font_size,
     }
 
     favorability_info = {
         "current": impression,
         "level": level,
+        "level_text": f"{level} [{lik2relation.get(str(level), '未知')}]",
+        "attitude": f"对你的态度: {level2attitude.get(str(level), '未知')}",
+        "relation": lik2relation.get(str(level), "未知"),
+        "heart2": [1 for _ in range(level)],
+        "heart1": [1 for _ in range(len(lik2level) - level - 1)],
         "next_level_at": next_impression,
         "previous_level_at": previous_impression,
     }
@@ -241,15 +249,14 @@ async def _generate_html_card(
         rank = value_list.index(user.user_id) + 1 if user.user_id in value_list else 0
         total_gold = user_console.gold if user_console else 0
 
-        last_log = (
-            await SignLog.filter(user_id=user.user_id).order_by("-create_time").first()
-        )
-        last_date = "从未"
-        if last_log:
-            last_date = str(
-                last_log.create_time.astimezone(pytz.timezone("Asia/Shanghai")).date()
-            )
-        last_sign_date_str = f"上次签到：{last_date}"
+        last_sign_date_str = ""
+
+        reward_info = {
+            "impression": f"好感度排名第 {rank} 位",
+            "gold": f"总金币：{total_gold}",
+            "gift": "",
+            "is_double": False,
+        }
 
     else:
         reward_info = {

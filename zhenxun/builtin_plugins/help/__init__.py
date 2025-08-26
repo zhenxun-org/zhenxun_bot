@@ -109,8 +109,11 @@ async def _(
         )
 
     if name.available:
+        help_style = Config.get_config("help", "HELP_STYLE")
+        variant = help_style if help_style != "default" else None
+
         traditional_help_result = await get_plugin_help(
-            session.user.id, name.result, _is_superuser
+            session.user.id, name.result, _is_superuser, variant=variant
         )
 
         is_plugin_found = not (

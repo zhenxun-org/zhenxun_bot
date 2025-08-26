@@ -19,16 +19,32 @@ class LayoutBuilder(BaseBuilder[LayoutData]):
         self._options: dict[str, Any] = {}
 
     @classmethod
-    def column(cls, **options: Any) -> Self:
+    def column(
+        cls, *, gap: str = "20px", align_items: str = "stretch", **options: Any
+    ) -> Self:
         builder = cls()
-        builder._template_name = "layouts/column"
+        builder._template_name = "components/core/layouts/column"
+        builder._options["gap"] = gap
+        builder._options["align_items"] = align_items
         builder._options.update(options)
         return builder
 
     @classmethod
-    def row(cls, **options: Any) -> Self:
+    def row(
+        cls, *, gap: str = "10px", align_items: str = "center", **options: Any
+    ) -> Self:
         builder = cls()
-        builder._template_name = "layouts/row"
+        builder._template_name = "components/core/layouts/row"
+        builder._options["gap"] = gap
+        builder._options["align_items"] = align_items
+        builder._options.update(options)
+        return builder
+
+    @classmethod
+    def grid(cls, columns: int = 2, **options: Any) -> Self:
+        builder = cls()
+        builder._template_name = "components/core/layouts/grid"
+        builder._options["columns"] = columns
         builder._options.update(options)
         return builder
 
@@ -56,15 +72,15 @@ class LayoutBuilder(BaseBuilder[LayoutData]):
         metadata: dict[str, Any] | None = None,
     ) -> Self:
         """
-        向布局中添加一个组件，支持多种组件类型的添加。
+        向布局中添加一个组件项。
 
         参数:
-            component: 一个 Builder 实例 (如 TableBuilder) 或一个 RenderableComponent
-                      数据模型。
-            metadata: (可选) 与此项目关联的元数据，可用于模板。
+            component: 一个 `BaseBuilder` 实例 (如 `TableBuilder()`) 或一个已构建的
+                       `RenderableComponent` 数据模型。
+            metadata: (可选) 与此项目关联的元数据，可在布局模板中访问。
 
         返回:
-            Self: 返回当前布局构建器实例，支持链式调用。
+            Self: 当前构建器实例，以支持链式调用。
         """
         component_data = (
             component.data if isinstance(component, BaseBuilder) else component
@@ -76,28 +92,24 @@ class LayoutBuilder(BaseBuilder[LayoutData]):
 
     def add_option(self, key: str, value: Any) -> Self:
         """
-        为布局添加一个自定义选项，该选项会传递给模板。
+        为布局模板添加一个自定义选项。
+
+        例如，`add_option("padding", "30px")` 会在模板的 `data.options`
+        字典中添加 `{"padding": "30px"}`。
 
         参数:
-            key: 选项的键名，用于在模板中引用。
-            value: 选项的值，可以是任意类型的数据。
+            key: 选项的键名。
+            value: 选项的值。
 
         返回:
-            Self: 返回当前布局构建器实例，支持链式调用。
+            Self: 当前构建器实例，以支持链式调用。
         """
         self._options[key] = value
         return self
 
     def build(self) -> LayoutData:
         """
-        [修改] 构建并返回 LayoutData 模型实例。
-        此方法现在是同步的，并且不执行渲染。
-
-        参数:
-            无
-
-        返回:
-            LayoutData: 配置好的布局数据模型。
+        构建并返回 LayoutData 模型实例。
         """
         if not self._template_name:
             raise ValueError(
@@ -106,4 +118,4 @@ class LayoutBuilder(BaseBuilder[LayoutData]):
 
         self._data.options = self._options
         self._data.layout_type = self._template_name.split("/")[-1]
-        return self._data
+        return super().build()

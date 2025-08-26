@@ -4,6 +4,7 @@ from typing import Any
 
 from ...models.core.markdown import (
     CodeElement,
+    ComponentElement,
     HeadingElement,
     ImageElement,
     ListElement,
@@ -12,6 +13,7 @@ from ...models.core.markdown import (
     MarkdownElement,
     QuoteElement,
     RawHtmlElement,
+    RenderableComponent,
     TableElement,
     TextElement,
 )
@@ -24,7 +26,7 @@ class MarkdownBuilder(BaseBuilder[MarkdownData]):
     """链式构建Markdown图片的辅助类，支持上下文管理和组合。"""
 
     def __init__(self):
-        data_model = MarkdownData(markdown="", width=800, css_path=None)
+        data_model = MarkdownData(elements=[], width=800, css_path=None)
         super().__init__(data_model, template_name="components/core/markdown")
         self._parts: list[MarkdownElement] = []
         self._width: int = 800
@@ -76,6 +78,16 @@ class MarkdownBuilder(BaseBuilder[MarkdownData]):
         self._append_element(
             TableElement(headers=headers, rows=rows, alignments=alignments)
         )
+        return self
+
+    def add_component(
+        self, component: "BaseBuilder | RenderableComponent"
+    ) -> "MarkdownBuilder":
+        """添加一个UI组件（如图表、卡片等）。"""
+        component_data = (
+            component.build() if isinstance(component, BaseBuilder) else component
+        )
+        self._append_element(ComponentElement(component=component_data))
         return self
 
     def add_builder(self, builder: "MarkdownBuilder") -> "MarkdownBuilder":
@@ -144,8 +156,7 @@ class MarkdownBuilder(BaseBuilder[MarkdownData]):
         """
         构建并返回 MarkdownData 模型实例。
         """
-        final_markdown = "\n\n".join(part.to_markdown() for part in self._parts).strip()
-        self._data.markdown = final_markdown
+        self._data.elements = self._parts
         self._data.width = self._width
         self._data.css_path = self._css_path
         return super().build()

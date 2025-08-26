@@ -4,7 +4,10 @@
 """
 
 from .base import RenderableComponent
+from .card import CardData
+from .details import DetailsData, DetailsItem
 from .layout import LayoutData, LayoutItem
+from .list import ListData, ListItem
 from .markdown import (
     CodeElement,
     HeadingElement,
@@ -21,16 +24,22 @@ from .markdown import (
 from .notebook import NotebookData, NotebookElement
 from .table import BaseCell, ImageCell, StatusBadgeCell, TableCell, TableData, TextCell
 from .template import TemplateComponent
+from .text import TextData, TextSpan
 
 __all__ = [
     "BaseCell",
+    "CardData",
     "CodeElement",
+    "DetailsData",
+    "DetailsItem",
     "HeadingElement",
     "ImageCell",
     "ImageElement",
     "LayoutData",
     "LayoutItem",
+    "ListData",
     "ListElement",
+    "ListItem",
     "ListItemElement",
     "MarkdownData",
     "MarkdownElement",
@@ -45,5 +54,7 @@ __all__ = [
     "TableElement",
     "TemplateComponent",
     "TextCell",
+    "TextData",
     "TextElement",
+    "TextSpan",
 ]

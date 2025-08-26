@@ -1,16 +1,18 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import aiofiles
 from pydantic import BaseModel, Field
 
 from zhenxun.services.log import logger
 
-from .base import RenderableComponent
+from .base import ContainerComponent, RenderableComponent
 
 __all__ = [
     "CodeElement",
+    "ComponentElement",
     "HeadingElement",
     "ImageElement",
     "ListElement",
@@ -32,6 +34,7 @@ class MarkdownElement(BaseModel, ABC):
 
 
 class TextElement(MarkdownElement):
+    type: Literal["text"] = "text"
     text: str
 
     def to_markdown(self) -> str:
@@ -39,6 +42,7 @@ class TextElement(MarkdownElement):
 
 
 class HeadingElement(MarkdownElement):
+    type: Literal["heading"] = "heading"
     text: str
     level: int = Field(..., ge=1, le=6)
 
@@ -47,6 +51,7 @@ class HeadingElement(MarkdownElement):
 
 
 class ImageElement(MarkdownElement):
+    type: Literal["image"] = "image"
     src: str
     alt: str = "image"
 
@@ -55,6 +60,7 @@ class ImageElement(MarkdownElement):
 
 
 class CodeElement(MarkdownElement):
+    type: Literal["code"] = "code"
     code: str
     language: str = ""
 
@@ -63,6 +69,7 @@ class CodeElement(MarkdownElement):
 
 
 class RawHtmlElement(MarkdownElement):
+    type: Literal["raw_html"] = "raw_html"
     html: str
 
     def to_markdown(self) -> str:
@@ -70,6 +77,7 @@ class RawHtmlElement(MarkdownElement):
 
 
 class TableElement(MarkdownElement):
+    type: Literal["table"] = "table"
     headers: list[str]
     rows: list[list[str]]
     alignments: list[Literal["left", "center", "right"]] | None = None
@@ -98,6 +106,8 @@ class ContainerElement(MarkdownElement):
 
 
 class QuoteElement(ContainerElement):
+    type: Literal["quote"] = "quote"
+
     def to_markdown(self) -> str:
         inner_md = "\n".join(part.to_markdown() for part in self.content)
         return "\n".join([f"> {line}" for line in inner_md.split("\n")])
@@ -109,6 +119,7 @@ class ListItemElement(ContainerElement):
 
 
 class ListElement(ContainerElement):
+    type: Literal["list"] = "list"
     ordered: bool = False
 
     def to_markdown(self) -> str:
@@ -121,11 +132,21 @@ class ListElement(ContainerElement):
         return "\n".join(lines)
 
 
-class MarkdownData(RenderableComponent):
+class ComponentElement(MarkdownElement):
+    """一个特殊的元素，用于在Markdown流中持有另一个可渲染组件。"""
+
+    type: Literal["component"] = "component"
+    component: RenderableComponent
+
+    def to_markdown(self) -> str:
+        return ""
+
+
+class MarkdownData(ContainerComponent):
     """Markdown转图片的数据模型"""
 
     style_name: str | None = None
-    markdown: str
+    elements: list[MarkdownElement] = Field(default_factory=list)
     width: int = 800
     css_path: str | None = None
 
@@ -133,7 +154,23 @@ class MarkdownData(RenderableComponent):
     def template_name(self) -> str:
         return "components/core/markdown"
 
-    async def get_extra_css(self, theme_manager) -> str:
+    def get_children(self) -> Iterable[RenderableComponent]:
+        """让CSS/JS依赖收集器能够递归地找到所有嵌入的组件。"""
+
+        def find_components_recursive(
+            elements: list[MarkdownElement],
+        ) -> Iterable[RenderableComponent]:
+            for element in elements:
+                if isinstance(element, ComponentElement):
+                    yield element.component
+                    if hasattr(element.component, "get_children"):
+                        yield from element.component.get_children()
+                elif isinstance(element, ContainerElement):
+                    yield from find_components_recursive(element.content)
+
+        yield from find_components_recursive(self.elements)
+
+    async def get_extra_css(self, context: Any) -> str:
         if self.css_path:
             css_file = Path(self.css_path)
             if css_file.is_file():
@@ -142,14 +179,12 @@ class MarkdownData(RenderableComponent):
             else:
                 logger.warning(f"Markdown自定义CSS文件不存在: {self.css_path}")
         else:
-            style_name = self.style_name or "github-light"
-            css_path = (
-                theme_manager.current_theme.default_assets_dir
-                / "css"
-                / "markdown"
-                / f"{style_name}.css"
+            style_name = self.style_name or "light"
+            # 使用上下文对象来解析路径
+            css_path = await context.theme_manager.resolve_markdown_style_path(
+                style_name, context
             )
-            if css_path.exists():
+            if css_path and css_path.exists():
                 async with aiofiles.open(css_path, encoding="utf-8") as f:
                     return await f.read()
         return ""

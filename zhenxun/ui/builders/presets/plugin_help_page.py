@@ -1,4 +1,4 @@
-from ...models.presets.help_page import (
+from ...models.presets.plugin_help_page import (
     HelpCategory,
     PluginHelpPageData,
 )
@@ -13,7 +13,7 @@ class PluginHelpPageBuilder(BaseBuilder[PluginHelpPageData]):
             bot_nickname=bot_nickname, page_title=page_title, categories=[]
         )
 
-        super().__init__(self._data, template_name="pages/core/help_page")
+        super().__init__(self._data, template_name="pages/core/plugin_help_page")
 
     def add_category(self, category: HelpCategory) -> "PluginHelpPageBuilder":
         """添加一个帮助分类"""

@@ -23,3 +23,12 @@ class TemplateComponent(RenderableComponent):
     def get_render_data(self) -> dict[str, Any]:
         """返回传递给模板的数据"""
         return self.data
+
+    def __getattr__(self, name: str) -> Any:
+        """允许直接访问 `data` 字典中的属性。"""
+        try:
+            return self.data[name]
+        except KeyError:
+            raise AttributeError(
+                f"'{type(self).__name__}' 对象没有属性 '{name}'"
+            ) from None

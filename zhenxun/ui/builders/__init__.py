@@ -1,19 +1,49 @@
-from . import widgets
-from .core.layout import LayoutBuilder
-from .core.markdown import MarkdownBuilder
-from .core.notebook import NotebookBuilder
-from .core.table import TableBuilder
-from .presets.help_page import PluginHelpPageBuilder
-from .presets.info_card import InfoCardBuilder
-from .presets.plugin_menu import PluginMenuBuilder
+from .charts import EChartsBuilder
+from .components import (
+    AlertBuilder,
+    AvatarBuilder,
+    AvatarGroupBuilder,
+    BadgeBuilder,
+    DividerBuilder,
+    KpiCardBuilder,
+    ProgressBarBuilder,
+    TimelineBuilder,
+    UserInfoBlockBuilder,
+)
+from .core import (
+    CardBuilder,
+    DetailsBuilder,
+    LayoutBuilder,
+    ListBuilder,
+    MarkdownBuilder,
+    NotebookBuilder,
+    TableBuilder,
+    TextBuilder,
+)
+from .presets import (
+    PluginHelpPageBuilder,
+    PluginMenuBuilder,
+)
 
 __all__ = [
-    "InfoCardBuilder",
+    "AlertBuilder",
+    "AvatarBuilder",
+    "AvatarGroupBuilder",
+    "BadgeBuilder",
+    "CardBuilder",
+    "DetailsBuilder",
+    "DividerBuilder",
+    "EChartsBuilder",
+    "KpiCardBuilder",
     "LayoutBuilder",
+    "ListBuilder",
     "MarkdownBuilder",
     "NotebookBuilder",
     "PluginHelpPageBuilder",
     "PluginMenuBuilder",
+    "ProgressBarBuilder",
     "TableBuilder",
-    "widgets",
+    "TextBuilder",
+    "TimelineBuilder",
+    "UserInfoBlockBuilder",
 ]

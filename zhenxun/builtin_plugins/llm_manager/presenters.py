@@ -4,7 +4,7 @@ from zhenxun.services import renderer_service
 from zhenxun.services.llm.core import KeyStatus
 from zhenxun.services.llm.types import ModelModality
 from zhenxun.ui.builders import MarkdownBuilder, TableBuilder
-from zhenxun.ui.models.core.table import StatusBadgeCell, TextCell
+from zhenxun.ui.models import StatusBadgeCell, TextCell
 
 
 def _format_seconds(seconds: int) -> str:
@@ -39,20 +39,19 @@ class Presenters:
             return await renderer_service.render(builder.build())
 
         column_name = ["提供商", "模型名称", "API类型", "状态"]
-        data_list = []
+        rows_data = []
         for model in models:
             is_available = model.get("is_available", True)
-            status_cell = StatusBadgeCell(
-                text="可用" if is_available else "不可用",
-                status_type="ok" if is_available else "error",
-            )
             embed_tag = " (Embed)" if model.get("is_embedding_model", False) else ""
-            data_list.append(
+            rows_data.append(
                 [
                     TextCell(content=model.get("provider_name", "N/A")),
                     TextCell(content=f"{model.get('model_name', 'N/A')}{embed_tag}"),
                     TextCell(content=model.get("api_type", "N/A")),
-                    status_cell,
+                    StatusBadgeCell(
+                        text="可用" if is_available else "不可用",
+                        status_type="ok" if is_available else "error",
+                    ),
                 ]
             )
 
@@ -60,7 +59,8 @@ class Presenters:
             title=title, tip="使用 `llm info <Provider/ModelName>` 查看详情"
         )
         builder.set_headers(column_name)
-        builder.add_rows(data_list)
+        builder.set_column_alignments(["left", "left", "left", "center"])
+        builder.add_rows(rows_data)
         return await renderer_service.render(builder.build(), use_cache=True)
 
     @staticmethod

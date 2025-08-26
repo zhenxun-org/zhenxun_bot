@@ -3,12 +3,12 @@ from pathlib import Path
 import random
 
 from zhenxun import ui
-from zhenxun.ui.models import BarChartData
+from zhenxun.ui.builders import charts as chart_builders
 
 from .models import Barh
 
 BACKGROUND_PATH = (
-    Path() / "resources" / "themes" / "default" / "assets" / "bar_chart" / "background"
+    Path() / "resources" / "themes" / "default" / "assets" / "ui" / "background"
 )
 
 
@@ -21,12 +21,11 @@ class ChartUtils:
             if BACKGROUND_PATH.exists()
             else None
         )
-        chart_component = BarChartData(
-            title=data.title,
-            category_data=data.category_data,
-            data=data.data,
-            background_image=background_image_name,
-            direction="horizontal",
+        items = list(zip(data.category_data, data.data))
+        builder = chart_builders.bar_chart(
+            title=data.title, items=items, direction="horizontal"
         )
+        if background_image_name:
+            builder.set_background_image(background_image_name)
 
-        return await ui.render(chart_component)
+        return await ui.render(builder.build())

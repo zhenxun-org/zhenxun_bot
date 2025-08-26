@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -12,7 +13,6 @@ class LayoutItem(BaseModel):
 
     component: RenderableComponent = Field(..., description="要渲染的组件的数据模型")
     metadata: dict[str, Any] | None = Field(None, description="传递给模板的额外元数据")
-    html_content: str | None = None
 
 
 class LayoutData(ContainerComponent):
@@ -27,23 +27,26 @@ class LayoutData(ContainerComponent):
         default_factory=dict, description="传递给模板的选项"
     )
 
-    def get_required_scripts(self) -> list[str]:
-        """[新增] 聚合所有子组件的脚本依赖。"""
-        scripts = set()
-        for item in self.children:
-            scripts.update(item.component.get_required_scripts())
-        return list(scripts)
-
-    def get_required_styles(self) -> list[str]:
-        """[新增] 聚合所有子组件的样式依赖。"""
-        styles = set()
-        for item in self.children:
-            styles.update(item.component.get_required_styles())
-        return list(styles)
-
     @property
     def template_name(self) -> str:
-        return f"layouts/{self.layout_type}"
+        return f"components/core/layouts/{self.layout_type}"
 
-    def _get_renderable_child_items(self):
-        yield from self.children
+    def get_extra_css(self, context: Any) -> str:
+        """聚合所有子组件的 extra_css。"""
+        all_css = []
+        if self.component_css:
+            all_css.append(self.component_css)
+
+        for item in self.children:
+            if (
+                item.component
+                and hasattr(item.component, "component_css")
+                and item.component.component_css
+            ):
+                all_css.append(item.component.component_css)
+
+        return "\n".join(all_css)
+
+    def get_children(self) -> Iterable[RenderableComponent]:
+        for item in self.children:
+            yield item.component

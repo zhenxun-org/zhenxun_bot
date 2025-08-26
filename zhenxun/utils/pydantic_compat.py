@@ -18,6 +18,7 @@ __all__ = [
     "PYDANTIC_V2",
     "_dump_pydantic_obj",
     "_is_pydantic_type",
+    "compat_computed_field",
     "model_copy",
     "model_dump",
     "model_json_schema",
@@ -36,6 +37,12 @@ def model_copy(
     else:
         update_dict = update or {}
         return model.copy(update=update_dict, deep=deep)
+
+
+if PYDANTIC_V2:
+    from pydantic import computed_field as compat_computed_field
+else:
+    compat_computed_field = property
 
 
 def model_json_schema(model_class: type[BaseModel], **kwargs: Any) -> dict[str, Any]:

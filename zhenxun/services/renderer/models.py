@@ -33,6 +33,10 @@ class TemplateManifest(BaseModel):
     entrypoint: str = Field(
         ..., description="模板的入口文件 (例如 'template.html' 或 'renderer.py')"
     )
+    styles: list[str] | str | None = Field(
+        None,
+        description="此组件依赖的CSS文件路径列表(相对于此manifest文件所在的组件根目录)",
+    )
     render_options: dict[str, Any] = Field(
         default_factory=dict, description="传递给渲染引擎的额外选项 (如viewport)"
     )

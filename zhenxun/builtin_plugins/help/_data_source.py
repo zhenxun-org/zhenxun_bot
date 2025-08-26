@@ -17,7 +17,6 @@ from zhenxun.services import (
 )
 from zhenxun.services.log import logger
 from zhenxun.ui.builders import (
-    InfoCardBuilder,
     NotebookBuilder,
     PluginMenuBuilder,
 )
@@ -25,7 +24,6 @@ from zhenxun.ui.models import PluginMenuCategory
 from zhenxun.utils.common_utils import format_usage_for_markdown
 from zhenxun.utils.enum import BlockType, PluginType
 from zhenxun.utils.platform import PlatformUtils
-from zhenxun.utils.pydantic_compat import model_dump
 
 from ._utils import classify_plugin
 
@@ -164,13 +162,16 @@ def split_text(text: str):
     return [s.replace(" ", "&nbsp;") for s in split_text]
 
 
-async def get_plugin_help(user_id: str, name: str, is_superuser: bool) -> str | bytes:
+async def get_plugin_help(
+    user_id: str, name: str, is_superuser: bool, variant: str | None = None
+) -> str | bytes:
     """获取功能的帮助信息
 
     参数:
         user_id: 用户id
         name: 插件名称或id
         is_superuser: 是否为超级用户
+        variant: 使用的皮肤/变体名称
     """
     type_list = await get_user_allow_help(user_id)
     if name.isdigit():
@@ -192,29 +193,32 @@ async def get_plugin_help(user_id: str, name: str, is_superuser: bool) -> str | 
                     return "该功能没有超级用户帮助信息"
                 usage = extra_data.superuser_help
 
-            builder = InfoCardBuilder(title=_plugin.metadata.name)
-
-            builder.add_metadata_items(
-                [
-                    ("作者", extra_data.author or "未知"),
-                    ("版本", extra_data.version or "未知"),
-                    ("调用次数", call_count),
-                ]
-            )
+            metadata_items = [
+                {"label": "作者", "value": extra_data.author or "未知"},
+                {"label": "版本", "value": extra_data.version or "未知"},
+                {"label": "调用次数", "value": call_count},
+            ]
 
             processed_description = format_usage_for_markdown(
                 _plugin.metadata.description.strip()
             )
             processed_usage = format_usage_for_markdown(usage.strip())
 
-            builder.add_section("简介", [processed_description])
-            builder.add_section("使用方法", [processed_usage])
+            sections = [
+                {"title": "简介", "content": [processed_description]},
+                {"title": "使用方法", "content": [processed_usage]},
+            ]
 
-            style_name = Config.get_config("help", "HELP_STYLE", "default")
-            render_dict = model_dump(builder._data)
-            render_dict["style_name"] = style_name
+            page_data = {
+                "title": _plugin.metadata.name,
+                "metadata": metadata_items,
+                "sections": sections,
+            }
 
-            return await ui.render_template("pages/builtin/help", data=render_dict)
+            component = ui.template("pages/builtin/help", data=page_data)
+            if variant:
+                component.variant = variant
+            return await ui.render(component, use_cache=True, device_scale_factor=2)
         return "糟糕! 该功能没有帮助喔..."
     return "没有查找到这个功能噢..."
 
