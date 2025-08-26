@@ -50,6 +50,7 @@ class ZhenxunRepoConfig:
         "zhenxun/utils",
         "zhenxun/models",
         "zhenxun/configs",
+        "zhenxun/ui",
     ]
     ZHENXUN_BOT_VERSION_FILE_STRING = "__version__"
     ZHENXUN_BOT_VERSION_FILE = Path() / ZHENXUN_BOT_VERSION_FILE_STRING

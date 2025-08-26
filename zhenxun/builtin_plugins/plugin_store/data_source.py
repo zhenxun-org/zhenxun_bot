@@ -219,7 +219,7 @@ class StoreManager:
         return plugin_info, is_external
 
     @classmethod
-    async def add_plugin(cls, index_or_module: str, source: str | None) -> str:
+    async def add_plugin(cls, index_or_module: str, source: str | None = None) -> str:
         """添加插件
 
         参数:
@@ -518,11 +518,11 @@ class StoreManager:
                 raise PluginStoreException("插件ID不存在...")
             return all_plugin_list[idx].module
         elif isinstance(plugin_id, str):
-            result = (
-                None
-                if plugin_id not in [v.module for v in all_plugin_list]
-                else plugin_id
-            ) or next(v for v in all_plugin_list if v.name == plugin_id).module
-            if not result:
-                raise PluginStoreException("插件 Module / 名称 不存在...")
-            return result
+            if plugin_id in [v.module for v in all_plugin_list]:
+                return plugin_id
+
+            for plugin_info in all_plugin_list:
+                if plugin_info.name.lower() == plugin_id.lower():
+                    return plugin_info.module
+
+            raise PluginStoreException("插件 Module / 名称 不存在...")
