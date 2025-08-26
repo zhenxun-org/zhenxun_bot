@@ -56,7 +56,6 @@ jobs:
       - name: Install dependencies
         if: steps.cache-poetry.outputs.cache-hit != 'true'
         run: |
-          rm -rf poetry.lock
           poetry source remove aliyun
           poetry install --no-root
 

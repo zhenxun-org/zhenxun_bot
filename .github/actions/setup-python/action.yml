@@ -26,9 +26,6 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
         cache: "poetry"
-        cache-dependency-path: |
-          ./poetry.lock
-          ${{ inputs.env-dir }}/poetry.lock
 
     - run: |
         cd ${{ inputs.env-dir }}
