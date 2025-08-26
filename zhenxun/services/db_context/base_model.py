@@ -16,9 +16,6 @@ from zhenxun.utils.enum import DbLockType
 from .config import LOG_COMMAND, db_model
 from .utils import with_db_timeout
 
-total = {}
-index = 0
-
 
 class Model(TortoiseModel):
     """
@@ -224,19 +221,7 @@ class Model(TortoiseModel):
         返回:
             Self | None: 查询结果，如果不存在返回None
         """
-        global index, total
         try:
-            if cls.__name__ == "BanConsole":
-                uid = kwargs.get("user_id")
-                if uid:
-                    if uid not in total:
-                        total[uid] = CacheRoot.cache_dict(f"DB_TEST_UID_{uid}", 10, int)
-                    total[uid][str(index)] = "1"
-                    index += 1
-                    logger.info(
-                        f"BanConsole 10秒内查询次数 uid: {uid}"
-                        f" 查询次数: {len(total[uid])}"
-                    )
             # 先尝试使用 get_or_none 获取单个记录
             try:
                 return await with_db_timeout(

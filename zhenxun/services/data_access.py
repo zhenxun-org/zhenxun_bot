@@ -181,7 +181,7 @@ class DataAccess(Generic[T]):
             # 如果成功构建缓存键，尝试从缓存获取
             if cache_key is not None:
                 data = await self.cache.get(cache_key)
-                logger.info(
+                logger.debug(
                     f"{self.model_cls.__name__}  key: {cache_key}"
                     f" 从缓存获取到的数据 {type(data)}: {data}"
                 )
@@ -197,13 +197,6 @@ class DataAccess(Generic[T]):
                             f"{self.model_cls.__name__} 从缓存获取"
                             f"到空结果: {cache_key}, 允许数据不存在，返回None"
                         )
-                        if self.model_cls.__name__ == "BanConsole":
-                            uid = kwargs.get("user_id")
-                            if uid:
-                                logger.info(
-                                    f"查询ban: {cache_key}:{uid}数据不存在返回NULL结果",
-                                    "DB_TEST__BAN",
-                                )
                         return None
                 elif data:
                     # 缓存命中
