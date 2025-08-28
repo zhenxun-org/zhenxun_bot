@@ -72,4 +72,4 @@ class GitUnavailableError(RepoManagerError):
     """Git不可用异常"""
 
     def __init__(self, message: str = "Git命令不可用"):
-        super().__init__(f"Git不可用: {message}")
+        super().__init__(message)

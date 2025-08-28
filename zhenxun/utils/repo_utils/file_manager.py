@@ -621,7 +621,10 @@ class RepoFileManager:
         except GitUnavailableError as e:
             logger.error(f"Git不可用: {e}")
             result.success = False
-            result.error_message = "Git不可用，请尝试添加参数 -s git"
+            result.error_message = (
+                "当前插件包含二进制文件，因ali限制需要使用git，"
+                "当前Git不可用，请尝试添加参数 -s git 或 安装 git"
+            )
             return result
         except Exception as e:
             logger.error(f"sparse-checkout 克隆失败: {e}")

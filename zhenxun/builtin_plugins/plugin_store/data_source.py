@@ -279,13 +279,15 @@ class StoreManager:
         target_dir = BASE_PATH / "plugins" / plugin_name
         files = [file for file in files if not file.is_dir]
         download_files = [(file.path, local_path / file.path) for file in files]
-        await RepoFileManager.download_files(
+        result = await RepoFileManager.download_files(
             github_url,
             download_files,
             repo_type=repo_type,
             sparse_path=replace_module_path,
             target_dir=target_dir,
         )
+        if not result.success:
+            raise PluginStoreException(result.error_message)
 
         requirement_paths = [
             file
