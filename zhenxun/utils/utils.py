@@ -1,9 +1,12 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 import os
 from pathlib import Path
+import stat
 import time
-from typing import ClassVar
+from types import TracebackType
+from typing import Any, ClassVar
 
 import httpx
 from nonebot_plugin_uninfo import Uninfo
@@ -241,3 +244,24 @@ def is_number(text: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def win_on_rm_error(
+    func: Callable[[str], Any],
+    path: str,
+    _exc_info: tuple[type[BaseException], BaseException, TracebackType],
+) -> None:
+    """Windows下删除只读文件/目录时的回调。
+
+    去除只读属性后重试删除，避免 WinError 5。
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except Exception:
+        # 即使去除权限失败也继续尝试
+        pass
+    try:
+        func(path)
+    except Exception:
+        # 仍失败则记录调试日志并忽略，交由上层继续处理
+        logger.debug(f"删除失败重试仍失败: {path}")

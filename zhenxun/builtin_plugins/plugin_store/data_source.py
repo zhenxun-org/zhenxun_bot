@@ -14,7 +14,7 @@ from zhenxun.utils.image_utils import BuildImage, ImageTemplate, RowStyle
 from zhenxun.utils.manager.virtual_env_package_manager import VirtualEnvPackageManager
 from zhenxun.utils.repo_utils import RepoFileManager
 from zhenxun.utils.repo_utils.models import RepoFileInfo, RepoType
-from zhenxun.utils.utils import is_number
+from zhenxun.utils.utils import is_number, win_on_rm_error
 
 from .config import (
     BASE_PATH,
@@ -352,7 +352,8 @@ class StoreManager:
             return f"插件 {plugin_info.name} 不存在..."
         logger.debug(f"尝试移除插件 {plugin_info.name} 文件: {path}", LOG_COMMAND)
         if plugin_info.is_dir:
-            shutil.rmtree(path)
+            # 处理 Windows 下 .git 等目录内只读文件导致的 WinError 5
+            shutil.rmtree(path, onerror=win_on_rm_error)
         else:
             path.unlink()
         await PluginInitManager.remove(f"zhenxun.{plugin_info.module_path}")

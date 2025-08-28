@@ -104,7 +104,9 @@ async def _(session: EventSession, plugin_id: str, source: Match[str]):
     if is_number(plugin_id):
         await MessageUtils.build_message(f"正在添加插件 Id: {plugin_id}").send()
     else:
-        await MessageUtils.build_message(f"正在添加插件 Module: {plugin_id}").send()
+        await MessageUtils.build_message(
+            f"正在添加插件 Module/名称: {plugin_id}"
+        ).send()
     source_str = source.result if source.available else None
     if source_str and source_str not in ["ali", "git"]:
         await MessageUtils.build_message(
