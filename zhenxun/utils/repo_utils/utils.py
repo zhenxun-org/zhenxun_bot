@@ -3,12 +3,15 @@
 """
 
 import asyncio
+import base64
 from pathlib import Path
 import re
+import shutil
 
 from zhenxun.services.log import logger
 
-from .config import LOG_COMMAND
+from .config import LOG_COMMAND, RepoConfig
+from .exceptions import GitUnavailableError
 
 
 async def check_git() -> bool:
@@ -152,7 +155,7 @@ async def sparse_checkout_clone(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     if not await check_git():
-        raise RuntimeError("未检测到可用的 git 命令")
+        raise GitUnavailableError()
 
     git_dir = target_dir / ".git"
     if not git_dir.exists():
@@ -172,15 +175,18 @@ async def sparse_checkout_clone(
             # 兜底尝试添加
             await run_git_command(f"remote add origin {repo_url}", target_dir)
 
-    # 启用稀疏检出（重复设置以确保幂等）
+    # 启用稀疏检出（使用 --no-cone 模式以获得更精确的控制）
     await run_git_command("config core.sparseCheckout true", target_dir)
-    await run_git_command("sparse-checkout init --cone", target_dir)
+    await run_git_command("sparse-checkout init --no-cone", target_dir)
 
     # 设置需要检出的路径（每次都覆盖配置）
     if not sparse_path:
         raise RuntimeError("sparse-checkout 路径不能为空")
+
+    # 使用 --no-cone 模式，直接指定要检出的具体路径
+    # 例如：sparse_path="plugins/mahiro" -> 只检出 plugins/mahiro/ 下的内容
     success, out, err = await run_git_command(
-        f"sparse-checkout set {sparse_path}", target_dir
+        f"sparse-checkout set {sparse_path}/", target_dir
     )
     if not success:
         raise RuntimeError(f"配置稀疏路径失败: {err or out}")
@@ -205,3 +211,44 @@ async def sparse_checkout_clone(
     # 强制对齐工作区
     await run_git_command(f"reset --hard origin/{branch}", target_dir)
     await run_git_command("clean -xdf", target_dir)
+
+    dir_path = target_dir / Path(sparse_path)
+    for f in dir_path.iterdir():
+        shutil.move(f, target_dir / f.name)
+    dir_name = sparse_path.split("/")[0]
+    rm_path = target_dir / dir_name
+    if rm_path.exists():
+        shutil.rmtree(rm_path)
+
+
+def prepare_aliyun_url(repo_url: str) -> str:
+    """解析阿里云CodeUp的仓库URL
+
+    参数:
+        repo_url: 仓库URL
+
+    返回:
+        str: 解析后的仓库URL
+    """
+    config = RepoConfig.get_instance()
+
+    repo_name = repo_url.split("/tree/")[0].split("/")[-1].replace(".git", "")
+    # 构建仓库URL
+    # 阿里云CodeUp的仓库URL格式通常为：
+    # https://codeup.aliyun.com/{organization_id}/{organization_name}/{repo_name}.git
+    url = f"https://codeup.aliyun.com/{config.aliyun_codeup.organization_id}/{config.aliyun_codeup.organization_name}/{repo_name}.git"
+
+    # 添加访问令牌 - 使用base64解码后的令牌
+    if config.aliyun_codeup.rdc_access_token_encrypted:
+        try:
+            # 解码RDC访问令牌
+            token = base64.b64decode(
+                config.aliyun_codeup.rdc_access_token_encrypted.encode()
+            ).decode()
+            # 阿里云CodeUp使用oauth2:token的格式进行身份验证
+            url = url.replace("https://", f"https://oauth2:{token}@")
+            logger.debug(f"使用RDC令牌构建阿里云URL: {url.split('@')[0]}@***")
+        except Exception as e:
+            logger.error(f"解码RDC令牌失败: {e}")
+
+    return url

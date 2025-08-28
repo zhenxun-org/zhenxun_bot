@@ -276,6 +276,7 @@ class StoreManager:
         else:
             files = [RepoFileInfo(path=f"{replace_module_path}.py", is_dir=False)]
         local_path = BASE_PATH / "plugins" if is_external else BASE_PATH
+        target_dir = BASE_PATH / "plugins" / plugin_name
         files = [file for file in files if not file.is_dir]
         download_files = [(file.path, local_path / file.path) for file in files]
         await RepoFileManager.download_files(
@@ -283,7 +284,7 @@ class StoreManager:
             download_files,
             repo_type=repo_type,
             sparse_path=replace_module_path,
-            target_dir=local_path / plugin_name,
+            target_dir=target_dir,
         )
 
         requirement_paths = [

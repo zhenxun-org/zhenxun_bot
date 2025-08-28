@@ -11,6 +11,7 @@ from aiocache import cached
 
 from zhenxun.services.log import logger
 from zhenxun.utils.github_utils.models import AliyunFileInfo
+from zhenxun.utils.repo_utils.utils import prepare_aliyun_url
 
 from .base_manager import BaseRepoManager
 from .config import LOG_COMMAND, RepoConfig
@@ -445,32 +446,6 @@ class AliyunCodeupManager(BaseRepoManager):
         返回:
             RepoUpdateResult: 更新结果
         """
-
-        # 定义预处理函数，构建阿里云CodeUp的URL
-        def prepare_aliyun_url(repo_url: str) -> str:
-            import base64
-
-            repo_name = repo_url.split("/tree/")[0].split("/")[-1].replace(".git", "")
-            # 构建仓库URL
-            # 阿里云CodeUp的仓库URL格式通常为：
-            # https://codeup.aliyun.com/{organization_id}/{organization_name}/{repo_name}.git
-            url = f"https://codeup.aliyun.com/{self.config.aliyun_codeup.organization_id}/{self.config.aliyun_codeup.organization_name}/{repo_name}.git"
-
-            # 添加访问令牌 - 使用base64解码后的令牌
-            if self.config.aliyun_codeup.rdc_access_token_encrypted:
-                try:
-                    # 解码RDC访问令牌
-                    token = base64.b64decode(
-                        self.config.aliyun_codeup.rdc_access_token_encrypted.encode()
-                    ).decode()
-                    # 阿里云CodeUp使用oauth2:token的格式进行身份验证
-                    url = url.replace("https://", f"https://oauth2:{token}@")
-                    logger.debug(f"使用RDC令牌构建阿里云URL: {url.split('@')[0]}@***")
-                except Exception as e:
-                    logger.error(f"解码RDC令牌失败: {e}")
-
-            return url
-
         # 调用基类的update_via_git方法
         return await super().update_via_git(
             repo_url=repo_url,

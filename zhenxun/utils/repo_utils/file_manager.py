@@ -2,6 +2,7 @@
 仓库文件管理器，用于从GitHub和阿里云CodeUp获取指定文件内容
 """
 
+import contextlib
 from pathlib import Path
 from typing import cast, overload
 
@@ -15,9 +16,14 @@ from zhenxun.utils.http_utils import AsyncHttpx
 from zhenxun.utils.utils import is_binary_file
 
 from .config import LOG_COMMAND, RepoConfig
-from .exceptions import FileNotFoundError, NetworkError, RepoManagerError
+from .exceptions import (
+    FileNotFoundError,
+    GitUnavailableError,
+    NetworkError,
+    RepoManagerError,
+)
 from .models import FileDownloadResult, RepoFileInfo, RepoType
-from .utils import sparse_checkout_clone
+from .utils import prepare_aliyun_url, sparse_checkout_clone
 
 
 class RepoFileManager:
@@ -264,15 +270,15 @@ class RepoFileManager:
             if repo_type is None:
                 # 尝试GitHub，失败则尝试阿里云
                 try:
-                    return await self._list_github_directory_files(
-                        repo_url, directory_path, branch, recursive
+                    return await self._list_aliyun_directory_files(
+                        repo_name, directory_path, branch, recursive
                     )
                 except Exception as e:
                     logger.warning(
-                        "获取GitHub目录文件失败，尝试阿里云", LOG_COMMAND, e=e
+                        "获取阿里云目录文件失败，尝试GitHub", LOG_COMMAND, e=e
                     )
-                    return await self._list_aliyun_directory_files(
-                        repo_name, directory_path, branch, recursive
+                    return await self._list_github_directory_files(
+                        repo_url, directory_path, branch, recursive
                     )
             if repo_type == RepoType.GITHUB:
                 return await self._list_github_directory_files(
@@ -512,7 +518,7 @@ class RepoFileManager:
         )
         if (
             any(is_binary_file(file_name) for file_name in file_path_mapping)
-            and repo_type == RepoType.ALIYUN
+            and repo_type != RepoType.GITHUB
             and sparse_path
             and target_dir
         ):
@@ -597,7 +603,7 @@ class RepoFileManager:
     ) -> FileDownloadResult:
         try:
             await sparse_checkout_clone(
-                repo_url=repo_url,
+                repo_url=prepare_aliyun_url(repo_url),
                 branch=branch,
                 sparse_path=sparse_path,
                 target_dir=target_dir,
@@ -606,13 +612,16 @@ class RepoFileManager:
             if target_dir.exists():
                 for f in target_dir.rglob("*"):
                     if f.is_file():
-                        try:
+                        with contextlib.suppress(Exception):
                             total_size += f.stat().st_size
-                        except Exception:
-                            pass
             result.success = True
             result.file_size = total_size
             logger.info(f"sparse-checkout 克隆成功: {target_dir}")
+            return result
+        except GitUnavailableError as e:
+            logger.error(f"Git不可用: {e}")
+            result.success = False
+            result.error_message = "Git不可用，请尝试添加参数 -s git"
             return result
         except Exception as e:
             logger.error(f"sparse-checkout 克隆失败: {e}")

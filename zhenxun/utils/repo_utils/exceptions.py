@@ -66,3 +66,10 @@ class ConfigError(RepoManagerError):
 
     def __init__(self, message: str):
         super().__init__(f"配置错误: {message}")
+
+
+class GitUnavailableError(RepoManagerError):
+    """Git不可用异常"""
+
+    def __init__(self, message: str = "Git命令不可用"):
+        super().__init__(f"Git不可用: {message}")
