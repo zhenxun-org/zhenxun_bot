@@ -80,11 +80,7 @@ class CacheDict(Generic[T]):
         返回:
             bool: 是否存在
         """
-        if key not in self._data:
-            return False
-
-        # 检查是否过期
-        return bool(self.expire_time(key))
+        return False if key not in self._data else bool(self.expire_time(key))
 
     def get(self, key: str, default: Any = None) -> T | None:
         """获取字典项，如果不存在返回默认值
@@ -96,8 +92,12 @@ class CacheDict(Generic[T]):
         返回:
             Any: 字典值或默认值
         """
-        value = self[key]
-        return default if value is None else value
+        if value := self._data.get(key):
+            if self.expire_time(key):
+                return default
+        if not value:
+            return default
+        return default if value.value is None else value.value
 
     def set(self, key: str, value: Any, expire: int | None = None):
         """设置字典项
