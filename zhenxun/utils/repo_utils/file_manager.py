@@ -82,18 +82,20 @@ class RepoFileManager:
                         )
                         if response.status_code == 200:
                             logger.info(f"获取github文件内容成功: {f}", LOG_COMMAND)
+                            text_content = response.content
                             # 确保使用UTF-8编码解析响应内容
-                            try:
-                                text_content = response.content.decode("utf-8")
-                            except UnicodeDecodeError:
-                                # 如果UTF-8解码失败，尝试其他编码
-                                text_content = response.content.decode(
-                                    "utf-8", errors="ignore"
-                                )
-                                logger.warning(
-                                    f"解码文件内容时出现错误，使用忽略错误模式: {f}",
-                                    LOG_COMMAND,
-                                )
+                            if not is_binary_file(f):
+                                try:
+                                    text_content = response.content.decode("utf-8")
+                                except UnicodeDecodeError:
+                                    # 如果UTF-8解码失败，尝试其他编码
+                                    text_content = response.content.decode(
+                                        "utf-8", errors="ignore"
+                                    )
+                                    logger.warning(
+                                        f"解码文件内容时出现错误，使用忽略错误模式:{f}",
+                                        LOG_COMMAND,
+                                    )
                             results.append((f, text_content))
                             break
                         else:
