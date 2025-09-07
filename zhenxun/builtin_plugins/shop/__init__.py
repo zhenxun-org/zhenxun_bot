@@ -153,7 +153,7 @@ async def _(session: Uninfo, arparma: Arparma, nickname: str = UserName()):
         nickname,
         PlatformUtils.get_platform(session),
     ):
-        await MessageUtils.build_message(image.pic2bytes()).finish(reply_to=True)  # type: ignore
+        await MessageUtils.build_message(image).finish(reply_to=True)  # type: ignore
     return await MessageUtils.build_message("你的道具为空捏...").send(reply_to=True)
 
 
