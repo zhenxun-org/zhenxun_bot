@@ -326,7 +326,7 @@ class RepoFileManager:
 
             # 获取仓库树信息
             strategy = GitHubStrategy()
-            strategy.body = await GitHubStrategy.parse_repo_info(repo_info)
+            strategy.body = await strategy.parse_repo_info(repo_info)
 
             # 处理目录路径，确保格式正确
             if directory_path and not directory_path.endswith("/") and recursive:
@@ -480,7 +480,7 @@ class RepoFileManager:
         target_dir: Path | None = None,
     ) -> FileDownloadResult:
         """
-        下载单个文件
+        下载多个文件
 
         参数:
             repo_url: 仓库URL

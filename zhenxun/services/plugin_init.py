@@ -87,7 +87,7 @@ class PluginInitManager:
 
     @classmethod
     async def remove(cls, module_path: str):
-        """运行指定插件安装方法"""
+        """运行指定插件移除方法"""
         if model := cls.plugins.get(module_path):
             if model.remove:
                 class_ = model.class_()

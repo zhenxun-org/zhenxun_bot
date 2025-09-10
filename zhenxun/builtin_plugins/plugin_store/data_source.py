@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import random
 import shutil
@@ -183,6 +184,8 @@ class StoreManager:
             StorePluginInfo: 插件信息
             bool: 是否是外部插件
         """
+        plugin_list: list[StorePluginInfo]
+        extra_plugin_list: list[StorePluginInfo]
         plugin_list, extra_plugin_list = await cls.get_data()
         plugin_info = None
         is_external = False
@@ -206,6 +209,10 @@ class StoreManager:
         if is_remove:
             if plugin_info.module not in modules:
                 raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法移除")
+            if plugin_obj := await PluginInfo.get_or_none(
+                name=plugin_info.name, module=plugin_info.module
+            ):
+                plugin_info.module_path = plugin_obj.module_path
             return plugin_info, is_external
 
         if is_update:
@@ -237,9 +244,7 @@ class StoreManager:
             plugin_info.github_url = f"{github_url_split[0]}/tree/{version_split[1]}"
         logger.info(f"正在安装插件 {plugin_info.name}...", LOG_COMMAND)
         await cls.install_plugin_with_repo(
-            plugin_info.github_url,
-            plugin_info.module_path,
-            plugin_info.is_dir,
+            plugin_info,
             is_external,
             source,
         )
@@ -248,9 +253,7 @@ class StoreManager:
     @classmethod
     async def install_plugin_with_repo(
         cls,
-        github_url: str,
-        module_path: str,
-        is_dir: bool,
+        plugin_info: StorePluginInfo,
         is_external: bool = False,
         source: str | None = None,
     ):
@@ -267,18 +270,26 @@ class StoreManager:
             repo_type = RepoType.ALIYUN
         elif source == "git":
             repo_type = RepoType.GITHUB
-        replace_module_path = module_path.replace(".", "/")
-        plugin_name = module_path.split(".")[-1]
+        module_path = plugin_info.module_path
+        is_dir = plugin_info.is_dir
+        github_url = plugin_info.github_url
+        assert github_url
+        replace_module_path = module_path.replace(".", "/").lstrip("/")
+        plugin_name = module_path.split(".")[-1] or plugin_info.module
         if is_dir:
             files = await RepoFileManager.list_directory_files(
                 github_url, replace_module_path, repo_type=repo_type
             )
         else:
             files = [RepoFileInfo(path=f"{replace_module_path}.py", is_dir=False)]
-        local_path = BASE_PATH / "plugins" if is_external else BASE_PATH
-        target_dir = BASE_PATH / "plugins" / plugin_name
+        if not is_external:
+            target_dir = BASE_PATH
+        elif is_dir:
+            target_dir = BASE_PATH / "plugins" / plugin_name
+        else:
+            target_dir = BASE_PATH / "plugins"
         files = [file for file in files if not file.is_dir]
-        download_files = [(file.path, local_path / file.path) for file in files]
+        download_files = [(file.path, target_dir / file.path) for file in files]
         result = await RepoFileManager.download_files(
             github_url,
             download_files,
@@ -298,7 +309,7 @@ class StoreManager:
 
         is_install_req = False
         for requirement_path in requirement_paths:
-            requirement_file = local_path / requirement_path.path
+            requirement_file = target_dir / requirement_path.path
             if requirement_file.exists():
                 is_install_req = True
                 await VirtualEnvPackageManager.install_requirement(requirement_file)
@@ -341,13 +352,11 @@ class StoreManager:
             str: 返回消息
         """
         plugin_info, _ = await cls.get_plugin_by_value(index_or_module, is_remove=True)
-        path = BASE_PATH
-        if plugin_info.github_url:
-            path = BASE_PATH / "plugins"
-        for p in plugin_info.module_path.split("."):
-            path = path / p
+        module_path = plugin_info.module_path
+        module = module_path.split(".")[-1]
+        path = BASE_PATH.parent / Path(module_path.replace(".", os.sep))
         if not plugin_info.is_dir:
-            path = Path(f"{path}.py")
+            path = path.parent / f"{module}.py"
         if not path.exists():
             return f"插件 {plugin_info.name} 不存在..."
         logger.debug(f"尝试移除插件 {plugin_info.name} 文件: {path}", LOG_COMMAND)
@@ -356,7 +365,7 @@ class StoreManager:
             shutil.rmtree(path, onerror=win_on_rm_error)
         else:
             path.unlink()
-        await PluginInitManager.remove(f"zhenxun.{plugin_info.module_path}")
+        await PluginInitManager.remove(module_path)
         return f"插件 {plugin_info.name} 移除成功! 重启后生效"
 
     @classmethod
@@ -423,9 +432,7 @@ class StoreManager:
         if plugin_info.github_url is None:
             plugin_info.github_url = DEFAULT_GITHUB_URL
         await cls.install_plugin_with_repo(
-            plugin_info.github_url,
-            plugin_info.module_path,
-            plugin_info.is_dir,
+            plugin_info,
             is_external,
         )
         return f"插件 {plugin_info.name} 更新成功! 重启后生效"
@@ -473,9 +480,7 @@ class StoreManager:
                     plugin_info.github_url = DEFAULT_GITHUB_URL
                     is_external = False
                 await cls.install_plugin_with_repo(
-                    plugin_info.github_url,
-                    plugin_info.module_path,
-                    plugin_info.is_dir,
+                    plugin_info,
                     is_external,
                 )
                 update_success_list.append(plugin_info.name)
