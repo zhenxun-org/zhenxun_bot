@@ -209,9 +209,7 @@ class StoreManager:
         if is_remove:
             if plugin_info.module not in modules:
                 raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法移除")
-            if plugin_obj := await PluginInfo.get_or_none(
-                name=plugin_info.name, module=plugin_info.module
-            ):
+            if plugin_obj := await PluginInfo.get_plugin(module=plugin_info.module):
                 plugin_info.module_path = plugin_obj.module_path
             return plugin_info, is_external
 
