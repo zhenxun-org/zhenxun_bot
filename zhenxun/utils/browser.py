@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from nonebot_plugin_alconna import UniMessage
-from nonebot_plugin_htmlrender import get_browser
+from nonebot_plugin_htmlrender.browser import get_browser
 from playwright.async_api import Page
 
 from zhenxun.utils.message import MessageUtils
