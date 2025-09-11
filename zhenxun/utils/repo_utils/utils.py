@@ -7,6 +7,7 @@ import base64
 from pathlib import Path
 import re
 import shutil
+import tempfile
 
 from zhenxun.services.log import logger
 
@@ -145,80 +146,85 @@ async def sparse_checkout_clone(
     target_dir: Path,
 ) -> None:
     """
-    使用 git 稀疏检出克隆指定路径到目标目录（完全独立于主项目 git）。
+    使用 git 稀疏检出克隆指定路径到目标目录（在临时目录中操作）。
 
     关键保障:
-    - 在 target_dir 下检测/初始化 .git，所有 git 操作均以 cwd=target_dir 执行
-    - 强制拉取与工作区覆盖: fetch --force、checkout -B、reset --hard、clean -xdf
-    - 反复设置 sparse-checkout 路径，确保路径更新生效
+    - 在临时目录中执行所有 git 操作，避免影响 target_dir 中的现有内容
+    - 只操作 target_dir/sparse_path 路径，不影响 target_dir 其他内容
     """
     target_dir.mkdir(parents=True, exist_ok=True)
 
     if not await check_git():
         raise GitUnavailableError()
 
-    git_dir = target_dir / ".git"
-    if not git_dir.exists():
-        success, out, err = await run_git_command("init", target_dir)
+    # 在临时目录中进行 git 操作
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # 初始化临时目录为 git 仓库
+        success, out, err = await run_git_command("init", temp_path)
         if not success:
             raise RuntimeError(f"git init 失败: {err or out}")
         success, out, err = await run_git_command(
-            f"remote add origin {repo_url}", target_dir
+            f"remote add origin {repo_url}", temp_path
         )
         if not success:
             raise RuntimeError(f"添加远程失败: {err or out}")
-    else:
+
+        # 启用稀疏检出（使用 --no-cone 模式以获得更精确的控制）
+        await run_git_command("config core.sparseCheckout true", temp_path)
+        await run_git_command("sparse-checkout init --no-cone", temp_path)
+
+        # 设置需要检出的路径（每次都覆盖配置）
+        if not sparse_path:
+            raise RuntimeError("sparse-checkout 路径不能为空")
+
+        # 使用 --no-cone 模式，直接指定要检出的具体路径
         success, out, err = await run_git_command(
-            f"remote set-url origin {repo_url}", target_dir
+            f"sparse-checkout set {sparse_path}/", temp_path
         )
         if not success:
-            # 兜底尝试添加
-            await run_git_command(f"remote add origin {repo_url}", target_dir)
+            raise RuntimeError(f"配置稀疏路径失败: {err or out}")
 
-    # 启用稀疏检出（使用 --no-cone 模式以获得更精确的控制）
-    await run_git_command("config core.sparseCheckout true", target_dir)
-    await run_git_command("sparse-checkout init --no-cone", target_dir)
+        # 强制拉取并同步到远端
+        success, out, err = await run_git_command(
+            f"fetch --force --depth 1 origin {branch}", temp_path
+        )
+        if not success:
+            raise RuntimeError(f"fetch 失败: {err or out}")
 
-    # 设置需要检出的路径（每次都覆盖配置）
-    if not sparse_path:
-        raise RuntimeError("sparse-checkout 路径不能为空")
+        # 使用远端强制更新本地分支并覆盖工作区
+        success, out, err = await run_git_command(
+            f"checkout -B {branch} origin/{branch}", temp_path
+        )
+        if not success:
+            # 回退方案
+            success2, out2, err2 = await run_git_command(
+                f"checkout {branch}", temp_path
+            )
+            if not success2:
+                raise RuntimeError(f"checkout 失败: {(err or out) or (err2 or out2)}")
 
-    # 使用 --no-cone 模式，直接指定要检出的具体路径
-    # 例如：sparse_path="plugins/mahiro" -> 只检出 plugins/mahiro/ 下的内容
-    success, out, err = await run_git_command(
-        f"sparse-checkout set {sparse_path}/", target_dir
-    )
-    if not success:
-        raise RuntimeError(f"配置稀疏路径失败: {err or out}")
+        # 强制对齐工作区
+        await run_git_command(f"reset --hard origin/{branch}", temp_path)
+        await run_git_command("clean -xdf", temp_path)
 
-    # 强制拉取并同步到远端
-    success, out, err = await run_git_command(
-        f"fetch --force --depth 1 origin {branch}", target_dir
-    )
-    if not success:
-        raise RuntimeError(f"fetch 失败: {err or out}")
+        # 将检出的文件移动到目标位置
+        source_path = temp_path / sparse_path
+        if source_path.exists():
+            # 确保目标路径存在
+            target_path = target_dir / sparse_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 使用远端强制更新本地分支并覆盖工作区
-    success, out, err = await run_git_command(
-        f"checkout -B {branch} origin/{branch}", target_dir
-    )
-    if not success:
-        # 回退方案
-        success2, out2, err2 = await run_git_command(f"checkout {branch}", target_dir)
-        if not success2:
-            raise RuntimeError(f"checkout 失败: {(err or out) or (err2 or out2)}")
+            # 如果目标路径已存在，先清理
+            if target_path.exists():
+                if target_path.is_dir():
+                    shutil.rmtree(target_path)
+                else:
+                    target_path.unlink()
 
-    # 强制对齐工作区
-    await run_git_command(f"reset --hard origin/{branch}", target_dir)
-    await run_git_command("clean -xdf", target_dir)
-
-    dir_path = target_dir / Path(sparse_path)
-    for f in dir_path.iterdir():
-        shutil.move(f, target_dir / f.name)
-    dir_name = sparse_path.split("/")[0]
-    rm_path = target_dir / dir_name
-    if rm_path.exists():
-        shutil.rmtree(rm_path)
+            # 移动整个目录结构到目标位置
+            shutil.move(str(source_path), str(target_path))
 
 
 def prepare_aliyun_url(repo_url: str) -> str:
