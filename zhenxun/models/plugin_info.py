@@ -77,7 +77,7 @@ class PluginInfo(Model):
         返回:
             Self | None: 插件
         """
-        if filter_parent:
+        if not kwargs.get("plugin_type") and filter_parent:
             return await cls.get_or_none(
                 load_status=load_status, plugin_type__not=PluginType.PARENT, **kwargs
             )
@@ -96,7 +96,7 @@ class PluginInfo(Model):
         返回:
             list[Self]: 插件列表
         """
-        if filter_parent:
+        if not kwargs.get("plugin_type") and filter_parent:
             return await cls.filter(
                 load_status=load_status, plugin_type__not=PluginType.PARENT, **kwargs
             ).all()
