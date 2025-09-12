@@ -11,6 +11,7 @@ from zhenxun.configs.path_config import TEMP_PATH
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.services.log import logger
 from zhenxun.services.plugin_init import PluginInitManager
+from zhenxun.utils.enum import PluginType
 from zhenxun.utils.image_utils import BuildImage, ImageTemplate, RowStyle
 from zhenxun.utils.manager.virtual_env_package_manager import VirtualEnvPackageManager
 from zhenxun.utils.repo_utils import RepoFileManager
@@ -209,7 +210,11 @@ class StoreManager:
         if is_remove:
             if plugin_info.module not in modules:
                 raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法移除")
-            if plugin_obj := await PluginInfo.get_plugin(module=plugin_info.module):
+            if plugin_obj := await PluginInfo.get_plugin(
+                module=plugin_info.module, plugin_type=PluginType.PARENT
+            ):
+                plugin_info.module_path = plugin_obj.module_path
+            elif plugin_obj := await PluginInfo.get_plugin(module=plugin_info.module):
                 plugin_info.module_path = plugin_obj.module_path
             return plugin_info, is_external
 
