@@ -213,13 +213,9 @@ class StoreManager:
             if plugin_obj := await PluginInfo.get_plugin(
                 module=plugin_info.module, plugin_type=PluginType.PARENT
             ):
-                plugin_info.module_path = ".".join(
-                    plugin_obj.module_path.split(".")[:-1]
-                )
+                plugin_info.module_path = plugin_obj.module_path
             elif plugin_obj := await PluginInfo.get_plugin(module=plugin_info.module):
-                plugin_info.module_path = ".".join(
-                    plugin_obj.module_path.split(".")[:-1]
-                )
+                plugin_info.module_path = plugin_obj.module_path
             return plugin_info, is_external
 
         if is_update:
@@ -291,7 +287,7 @@ class StoreManager:
             files = [RepoFileInfo(path=f"{replace_module_path}.py", is_dir=False)]
         if not is_external:
             target_dir = BASE_PATH
-        elif is_dir:
+        elif is_dir and module_path == ".":
             target_dir = BASE_PATH / "plugins" / plugin_name
         else:
             target_dir = BASE_PATH / "plugins"
