@@ -213,9 +213,13 @@ class StoreManager:
             if plugin_obj := await PluginInfo.get_plugin(
                 module=plugin_info.module, plugin_type=PluginType.PARENT
             ):
-                plugin_info.module_path = plugin_obj.module_path
+                plugin_info.module_path = ".".join(
+                    plugin_obj.module_path.split(".")[:-1]
+                )
             elif plugin_obj := await PluginInfo.get_plugin(module=plugin_info.module):
-                plugin_info.module_path = plugin_obj.module_path
+                plugin_info.module_path = ".".join(
+                    plugin_obj.module_path.split(".")[:-1]
+                )
             return plugin_info, is_external
 
         if is_update:
