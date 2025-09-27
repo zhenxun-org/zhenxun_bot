@@ -1,3 +1,4 @@
+import contextlib
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -18,7 +19,47 @@ BAIDU_URL = "https://www.baidu.com/"
 GOOGLE_URL = "https://www.google.com/"
 
 VERSION_FILE = Path() / "__version__"
-ARM_KEY = "aarch64"
+
+
+def get_arm_cpu_freq_safe():
+    """获取ARM设备CPU频率"""
+    # 方法1: 优先从系统频率文件读取
+    freq_files = [
+        "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
+        "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq",
+        "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq",
+        "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq",
+    ]
+
+    for freq_file in freq_files:
+        try:
+            with open(freq_file) as f:
+                frequency = int(f.read().strip())
+                return round(frequency / 1000000, 2)  # 转换为GHz
+        except (OSError, ValueError):
+            continue
+
+    # 方法2: 解析/proc/cpuinfo
+    with contextlib.suppress(OSError, FileNotFoundError, ValueError, PermissionError):
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if "CPU MHz" in line:
+                    freq = float(line.split(":")[1].strip())
+                    return round(freq / 1000, 2)  # 转换为GHz
+    # 方法3: 使用lscpu命令
+    with contextlib.suppress(OSError, subprocess.SubprocessError, ValueError):
+        env = os.environ.copy()
+        env["LC_ALL"] = "C"
+        result = subprocess.run(
+            ["lscpu"], capture_output=True, text=True, env=env, timeout=10
+        )
+
+        if result.returncode == 0:
+            for line in result.stdout.split("\n"):
+                if "CPU max MHz" in line or "CPU MHz" in line:
+                    freq = float(line.split(":")[1].strip())
+                    return round(freq / 1000, 2)  # 转换为GHz
+    return 0  # 如果所有方法都失败，返回0
 
 
 @dataclass
@@ -37,7 +78,7 @@ class CPUInfo:
         if _cpu_freq := psutil.cpu_freq():
             cpu_freq = round(_cpu_freq.current / 1000, 2)
         else:
-            cpu_freq = 0
+            cpu_freq = get_arm_cpu_freq_safe()
         return CPUInfo(core=cpu_core, usage=cpu_usage, freq=cpu_freq)
 
 
@@ -160,44 +201,13 @@ def __get_version() -> str | None:
     return None
 
 
-def __get_arm_cpu():
-    env = os.environ.copy()
-    env["LC_ALL"] = "en_US.UTF-8"
-    cpu_info = subprocess.check_output(["lscpu"], env=env).decode()
-    model_name = ""
-    cpu_freq = 0
-    for line in cpu_info.splitlines():
-        if "Model name" in line:
-            model_name = line.split(":")[1].strip()
-        if "CPU MHz" in line:
-            cpu_freq = float(line.split(":")[1].strip())
-    return model_name, cpu_freq
-
-
-def __get_arm_oracle_cpu_freq():
-    cpu_freq = subprocess.check_output(
-        ["dmidecode", "-s", "processor-frequency"]
-    ).decode()
-    return round(float(cpu_freq.split()[0]) / 1000, 2)
-
-
 async def get_status_info() -> dict:
     """获取信息"""
     data = await __build_status()
 
     system = platform.uname()
-    if system.machine == ARM_KEY and not (
-        cpuinfo.get_cpu_info().get("brand_raw") and data.cpu.freq
-    ):
-        model_name, cpu_freq = __get_arm_cpu()
-        if not data.cpu.freq:
-            data.cpu.freq = cpu_freq or __get_arm_oracle_cpu_freq()
-        data = data.get_system_info()
-        data["brand_raw"] = model_name
-    else:
-        data = data.get_system_info()
-        data["brand_raw"] = cpuinfo.get_cpu_info().get("brand_raw", "Unknown")
-
+    data = data.get_system_info()
+    data["brand_raw"] = cpuinfo.get_cpu_info().get("brand_raw", "Unknown")
     baidu, google = await __get_network_info()
     data["baidu"] = "#8CC265" if baidu else "red"
     data["google"] = "#8CC265" if google else "red"
