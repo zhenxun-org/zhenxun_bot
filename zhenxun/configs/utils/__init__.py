@@ -344,7 +344,9 @@ class ConfigsManager:
         返回:
             ConfigGroup: ConfigGroup
         """
-        return self._data.get(key) or ConfigGroup(module="")
+        if key not in self._data:
+            self._data[key] = ConfigGroup(module=key)
+        return self._data[key]
 
     def save(self, path: str | Path | None = None, save_simple_data: bool = False):
         """保存数据
