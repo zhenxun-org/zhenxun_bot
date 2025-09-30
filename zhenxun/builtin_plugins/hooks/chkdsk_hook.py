@@ -43,17 +43,19 @@ class BanCheckLimiter:
 
     def check(self, key: str | float) -> bool:
         if time.time() - self.mtime[key] > self.default_check_time:
-            self.mtime[key] = time.time()
-            self.mint[key] = 0
-            return False
+            return self._extracted_from_check_3(key, False)
         if (
             self.mint[key] >= self.default_count
             and time.time() - self.mtime[key] < self.default_check_time
         ):
-            self.mtime[key] = time.time()
-            self.mint[key] = 0
-            return True
+            return self._extracted_from_check_3(key, True)
         return False
+
+    # TODO Rename this here and in `check`
+    def _extracted_from_check_3(self, key, arg1):
+        self.mtime[key] = time.time()
+        self.mint[key] = 0
+        return arg1
 
 
 _blmt = BanCheckLimiter(
@@ -70,16 +72,15 @@ async def _(
     module = None
     if plugin := matcher.plugin:
         module = plugin.module_name
-        if metadata := plugin.metadata:
-            extra = metadata.extra
-            if extra.get("plugin_type") in [
-                PluginType.HIDDEN,
-                PluginType.DEPENDANT,
-                PluginType.ADMIN,
-                PluginType.SUPERUSER,
-            ]:
-                return
-        else:
+        if not (metadata := plugin.metadata):
+            return
+        extra = metadata.extra
+        if extra.get("plugin_type") in [
+            PluginType.HIDDEN,
+            PluginType.DEPENDANT,
+            PluginType.ADMIN,
+            PluginType.SUPERUSER,
+        ]:
             return
     if matcher.type == "notice":
         return
@@ -88,32 +89,31 @@ async def _(
     malicious_ban_time = Config.get_config("hook", "MALICIOUS_BAN_TIME")
     if not malicious_ban_time:
         raise ValueError("模块: [hook], 配置项: [MALICIOUS_BAN_TIME] 为空或小于0")
-    if user_id:
-        if module:
-            if _blmt.check(f"{user_id}__{module}"):
-                await BanConsole.ban(
-                    user_id,
-                    group_id,
-                    9,
-                    "恶意触发命令检测",
-                    malicious_ban_time * 60,
-                    bot.self_id,
-                )
-                logger.info(
-                    f"触发了恶意触发检测: {matcher.plugin_name}",
-                    "HOOK",
-                    session=session,
-                )
-                await MessageUtils.build_message(
-                    [
-                        At(flag="user", target=user_id),
-                        "检测到恶意触发命令，您将被封禁 30 分钟",
-                    ]
-                ).send()
-                logger.debug(
-                    f"触发了恶意触发检测: {matcher.plugin_name}",
-                    "HOOK",
-                    session=session,
-                )
-                raise IgnoredException("检测到恶意触发命令")
-            _blmt.add(f"{user_id}__{module}")
+    if user_id and module:
+        if _blmt.check(f"{user_id}__{module}"):
+            await BanConsole.ban(
+                user_id,
+                group_id,
+                9,
+                "恶意触发命令检测",
+                malicious_ban_time * 60,
+                bot.self_id,
+            )
+            logger.info(
+                f"触发了恶意触发检测: {matcher.plugin_name}",
+                "HOOK",
+                session=session,
+            )
+            await MessageUtils.build_message(
+                [
+                    At(flag="user", target=user_id),
+                    "检测到恶意触发命令，您将被封禁 30 分钟",
+                ]
+            ).send()
+            logger.debug(
+                f"触发了恶意触发检测: {matcher.plugin_name}",
+                "HOOK",
+                session=session,
+            )
+            raise IgnoredException("检测到恶意触发命令")
+        _blmt.add(f"{user_id}__{module}")

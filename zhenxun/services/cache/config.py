@@ -5,6 +5,9 @@
 # 日志标识
 LOG_COMMAND = "CacheRoot"
 
+# 缓存获取超时时间（秒）
+CACHE_TIMEOUT = 10
+
 # 默认缓存过期时间（秒）
 DEFAULT_EXPIRE = 600
 

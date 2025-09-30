@@ -98,6 +98,7 @@ from .cache_containers import CacheDict, CacheList
 from .config import (
     CACHE_KEY_PREFIX,
     CACHE_KEY_SEPARATOR,
+    CACHE_TIMEOUT,
     DEFAULT_EXPIRE,
     LOG_COMMAND,
     SPECIAL_KEY_FORMATS,
@@ -551,7 +552,6 @@ class CacheManager:
         返回:
             Any: 缓存数据，如果不存在返回默认值
         """
-        from zhenxun.services.db_context import DB_TIMEOUT_SECONDS
 
         # 如果缓存被禁用或缓存模式为NONE，直接返回默认值
         if not self.enabled or cache_config.cache_mode == CacheMode.NONE:
@@ -561,7 +561,7 @@ class CacheManager:
             cache_key = self._build_key(cache_type, key)
             data = await asyncio.wait_for(
                 self.cache_backend.get(cache_key),  # type: ignore
-                timeout=DB_TIMEOUT_SECONDS,
+                timeout=CACHE_TIMEOUT,
             )
 
             if data is None:
