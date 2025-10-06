@@ -367,7 +367,7 @@ class ShopManage:
         else:
             goods_info = await GoodsInfo.get_or_none(goods_name=goods_name)
         if not goods_info:
-            return f"{goods_name} 不存在..."
+            return "对应的道具不存在..."
         if goods_info.is_passive:
             return f"{goods_info.goods_name} 是被动道具, 无法使用..."
         goods = cls.uuid2goods.get(goods_info.uuid)
