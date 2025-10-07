@@ -425,7 +425,7 @@ class LLMResponse(BaseModel):
     """LLM 响应"""
 
     text: str
-    image_bytes: bytes | None = None
+    images: list[bytes] | None = None
     usage_info: dict[str, Any] | None = None
     raw_response: dict[str, Any] | None = None
     tool_calls: list[Any] | None = None

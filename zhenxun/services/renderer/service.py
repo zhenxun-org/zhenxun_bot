@@ -217,16 +217,17 @@ class RendererService:
         context.processed_components.add(component_id)
 
         component_path_base = str(component.template_name)
+        variant = getattr(component, "variant", None)
         manifest = await context.theme_manager.get_template_manifest(
-            component_path_base
+            component_path_base, skin=variant
         )
 
         style_paths_to_load = []
-        if manifest and manifest.styles:
+        if manifest and "styles" in manifest:
             styles = (
-                [manifest.styles]
-                if isinstance(manifest.styles, str)
-                else manifest.styles
+                [manifest["styles"]]
+                if isinstance(manifest["styles"], str)
+                else manifest["styles"]
             )
             for style_path in styles:
                 full_style_path = str(Path(component_path_base) / style_path).replace(
@@ -383,6 +384,7 @@ class RendererService:
                 )
 
                 temp_env.globals.update(context.theme_manager.jinja_env.globals)
+                temp_env.filters.update(context.theme_manager.jinja_env.filters)
                 temp_env.globals["asset"] = (
                     context.theme_manager._create_standalone_asset_loader(template_dir)
                 )
@@ -431,10 +433,11 @@ class RendererService:
                     component_render_options = {}
 
                 manifest_options = {}
+                variant = getattr(component, "variant", None)
                 if manifest := await context.theme_manager.get_template_manifest(
-                    component.template_name
+                    component.template_name, skin=variant
                 ):
-                    manifest_options = manifest.render_options or {}
+                    manifest_options = manifest.get("render_options", {})
 
                 final_render_options = component_render_options.copy()
                 final_render_options.update(manifest_options)
@@ -557,6 +560,8 @@ class RendererService:
             await self.initialize()
         assert self._theme_manager is not None, "ThemeManager 未初始化"
 
+        self._theme_manager._manifest_cache.clear()
+        logger.debug("已清除UI清单缓存 (manifest cache)。")
         current_theme_name = Config.get_config("UI", "THEME", "default")
         await self._theme_manager.load_theme(current_theme_name)
         logger.info(f"主题 '{current_theme_name}' 已成功重载。")

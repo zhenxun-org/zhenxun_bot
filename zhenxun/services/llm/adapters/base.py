@@ -35,7 +35,7 @@ class ResponseData(BaseModel):
     """响应数据封装 - 支持所有高级功能"""
 
     text: str
-    image_bytes: bytes | None = None
+    images: list[bytes] | None = None
     usage_info: dict[str, Any] | None = None
     raw_response: dict[str, Any] | None = None
     tool_calls: list[LLMToolCall] | None = None
@@ -246,17 +246,17 @@ class BaseAdapter(ABC):
             if content:
                 content = content.strip()
 
-            image_bytes: bytes | None = None
+            images_bytes: list[bytes] = []
             if content and content.startswith("{") and content.endswith("}"):
                 try:
                     content_json = json.loads(content)
                     if "b64_json" in content_json:
-                        image_bytes = base64.b64decode(content_json["b64_json"])
+                        images_bytes.append(base64.b64decode(content_json["b64_json"]))
                         content = "[图片已生成]"
                     elif "data" in content_json and isinstance(
                         content_json["data"], str
                     ):
-                        image_bytes = base64.b64decode(content_json["data"])
+                        images_bytes.append(base64.b64decode(content_json["data"]))
                         content = "[图片已生成]"
 
                 except (json.JSONDecodeError, KeyError, binascii.Error):
@@ -273,7 +273,7 @@ class BaseAdapter(ABC):
                     if url_str.startswith("data:image/png;base64,"):
                         try:
                             b64_data = url_str.split(",", 1)[1]
-                            image_bytes = base64.b64decode(b64_data)
+                            images_bytes.append(base64.b64decode(b64_data))
                             content = content if content else "[图片已生成]"
                         except (IndexError, binascii.Error) as e:
                             logger.warning(f"解析OpenRouter Base64图片数据失败: {e}")
@@ -316,7 +316,7 @@ class BaseAdapter(ABC):
                 text=final_text,
                 tool_calls=parsed_tool_calls,
                 usage_info=usage_info,
-                image_bytes=image_bytes,
+                images=images_bytes if images_bytes else None,
                 raw_response=response_json,
             )
 

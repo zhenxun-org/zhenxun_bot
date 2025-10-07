@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import aiofiles
 from jinja2 import (
     ChoiceLoader,
     Environment,
@@ -21,7 +21,6 @@ import ujson as json
 
 from zhenxun.configs.path_config import THEMES_PATH
 from zhenxun.services.log import logger
-from zhenxun.services.renderer.models import TemplateManifest
 from zhenxun.services.renderer.protocols import Renderable
 from zhenxun.services.renderer.registry import asset_registry
 from zhenxun.utils.pydantic_compat import model_dump
@@ -30,6 +29,20 @@ if TYPE_CHECKING:
     from .service import RenderContext
 
 from .config import RESERVED_TEMPLATE_KEYS
+
+
+def deep_merge_dict(base: dict, new: dict) -> dict:
+    """
+    递归地将 new 字典合并到 base 字典中。
+    new 字典中的值会覆盖 base 字典中的值。
+    """
+    result = base.copy()
+    for key, value in new.items():
+        if isinstance(value, dict) and key in result and isinstance(result[key], dict):
+            result[key] = deep_merge_dict(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 class RelativePathEnvironment(Environment):
@@ -151,14 +164,42 @@ class ResourceResolver:
 
     def resolve_asset_uri(self, asset_path: str, current_template_name: str) -> str:
         """解析资源路径，实现完整的回退逻辑，并返回可用的URI。"""
-        if not self.theme_manager.current_theme:
+        if (
+            not self.theme_manager.current_theme
+            or not self.theme_manager.jinja_env.loader
+        ):
             return ""
 
+        if asset_path.startswith("@"):
+            try:
+                full_asset_path = self.theme_manager.jinja_env.join_path(
+                    asset_path, current_template_name
+                )
+                _source, file_abs_path, _uptodate = (
+                    self.theme_manager.jinja_env.loader.get_source(
+                        self.theme_manager.jinja_env, full_asset_path
+                    )
+                )
+                if file_abs_path:
+                    logger.debug(
+                        f"Jinja Loader resolved asset '{asset_path}'->'{file_abs_path}'"
+                    )
+                    return Path(file_abs_path).absolute().as_uri()
+            except TemplateNotFound:
+                logger.warning(
+                    f"资源文件在命名空间中未找到: '{asset_path}'"
+                    f"(在模板 '{current_template_name}' 中引用)"
+                )
+                return ""
+
         search_paths: list[tuple[str, Path]] = []
-        if asset_path.startswith("./"):
+        if asset_path.startswith("./") or asset_path.startswith("../"):
+            relative_part = (
+                asset_path[2:] if asset_path.startswith("./") else asset_path
+            )
             search_paths.extend(
                 self._search_paths_for_relative_asset(
-                    asset_path[2:], current_template_name
+                    relative_part, current_template_name
                 )
             )
         else:
@@ -208,6 +249,9 @@ class ThemeManager:
         self.jinja_env.globals["resolve_template"] = self._resolve_component_template
 
         self.jinja_env.filters["md"] = self._markdown_filter
+
+        self._manifest_cache: dict[str, Any] = {}
+        self._manifest_cache_lock = asyncio.Lock()
 
     def list_available_themes(self) -> list[str]:
         """扫描主题目录并返回所有可用的主题名称。"""
@@ -377,16 +421,26 @@ class ThemeManager:
                 logger.error(f"指定的模板文件路径不存在: '{component_path_base}'", e=e)
                 raise e
 
-        entrypoint_filename = "main.html"
-        manifest = await self.get_template_manifest(component_path_base)
-        if manifest and manifest.entrypoint:
-            entrypoint_filename = manifest.entrypoint
+        base_manifest = await self.get_template_manifest(component_path_base)
+
+        skin_to_use = variant or (base_manifest.get("skin") if base_manifest else None)
+
+        final_manifest = await self.get_template_manifest(
+            component_path_base, skin=skin_to_use
+        )
+        logger.debug(f"final_manifest: {final_manifest}")
+
+        entrypoint_filename = (
+            final_manifest.get("entrypoint", "main.html")
+            if final_manifest
+            else "main.html"
+        )
 
         potential_paths = []
 
-        if variant:
+        if skin_to_use:
             potential_paths.append(
-                f"{component_path_base}/skins/{variant}/{entrypoint_filename}"
+                f"{component_path_base}/skins/{skin_to_use}/{entrypoint_filename}"
             )
 
         potential_paths.append(f"{component_path_base}/{entrypoint_filename}")
@@ -410,28 +464,88 @@ class ThemeManager:
         logger.error(err_msg)
         raise TemplateNotFound(err_msg)
 
-    async def get_template_manifest(
-        self, component_path: str
-    ) -> TemplateManifest | None:
-        """
-        查找并解析组件的 manifest.json 文件。
-        """
-        manifest_path_str = f"{component_path}/manifest.json"
+    async def _load_single_manifest(self, path_str: str) -> dict[str, Any] | None:
+        """从指定路径加载单个 manifest.json 文件。"""
+        normalized_path = path_str.replace("\\", "/")
+        manifest_path_str = f"{normalized_path}/manifest.json"
 
         if not self.jinja_env.loader:
             return None
 
         try:
-            _, full_path, _ = self.jinja_env.loader.get_source(
+            source, filepath, _ = self.jinja_env.loader.get_source(
                 self.jinja_env, manifest_path_str
             )
-            if full_path and Path(full_path).exists():
-                async with aiofiles.open(full_path, encoding="utf-8") as f:
-                    manifest_data = json.loads(await f.read())
-                return TemplateManifest(**manifest_data)
+            logger.debug(f"找到清单文件: '{manifest_path_str}' (从 '{filepath}' 加载)")
+            return json.loads(source)
         except TemplateNotFound:
+            logger.trace(f"未找到清单文件: '{manifest_path_str}'")
             return None
-        return None
+        except json.JSONDecodeError:
+            logger.warning(f"清单文件 '{manifest_path_str}' 解析失败")
+            return None
+
+    async def _load_and_merge_manifests(
+        self, component_path: Path | str, skin: str | None = None
+    ) -> dict[str, Any] | None:
+        """加载基础和皮肤清单并进行合并。"""
+        logger.debug(f"开始加载清单: component_path='{component_path}', skin='{skin}'")
+
+        base_manifest = await self._load_single_manifest(str(component_path))
+
+        if skin:
+            skin_path = Path(component_path) / "skins" / skin
+            skin_manifest = await self._load_single_manifest(str(skin_path))
+
+            if skin_manifest:
+                if base_manifest:
+                    merged = deep_merge_dict(base_manifest, skin_manifest)
+                    logger.debug(
+                        f"已合并基础清单和皮肤清单: '{component_path}' + skin '{skin}'"
+                    )
+                    return merged
+                else:
+                    logger.debug(f"只找到皮肤清单: '{skin_path}'")
+                    return skin_manifest
+
+        if base_manifest:
+            logger.debug(f"只找到基础清单: '{component_path}'")
+        else:
+            logger.debug(f"未找到任何清单: '{component_path}'")
+
+        return base_manifest
+
+    async def get_template_manifest(
+        self, component_path: str, skin: str | None = None
+    ) -> dict[str, Any] | None:
+        """
+        查找并解析组件的 manifest.json 文件。
+        支持皮肤清单的继承与合并,并带有缓存。
+
+        Args:
+            component_path: 组件路径
+            skin: 皮肤名称(可选)
+
+        Returns:
+            合并后的清单字典,如果不存在则返回 None
+        """
+        cache_key = f"{component_path}:{skin or 'base'}"
+
+        if cache_key in self._manifest_cache:
+            logger.debug(f"清单缓存命中: '{cache_key}'")
+            return self._manifest_cache[cache_key]
+
+        async with self._manifest_cache_lock:
+            if cache_key in self._manifest_cache:
+                logger.debug(f"清单缓存命中(锁内): '{cache_key}'")
+                return self._manifest_cache[cache_key]
+
+            manifest = await self._load_and_merge_manifests(component_path, skin)
+
+            self._manifest_cache[cache_key] = manifest
+            logger.debug(f"清单已缓存: '{cache_key}'")
+
+            return manifest
 
     async def resolve_markdown_style_path(
         self, style_name: str, context: "RenderContext"

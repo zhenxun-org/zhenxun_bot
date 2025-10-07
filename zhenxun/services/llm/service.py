@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from zhenxun.services.log import logger
 from zhenxun.utils.log_sanitizer import sanitize_for_logging
+from zhenxun.utils.pydantic_compat import dump_json_safely
 
 from .adapters.base import RequestData
 from .config import LLMGenerationConfig
@@ -194,13 +195,15 @@ class LLMModel(LLMModelBase):
             sanitized_body = sanitize_for_logging(
                 request_data.body, context=sanitizer_req_context
             )
-            request_body_str = json.dumps(sanitized_body, ensure_ascii=False, indent=2)
+            request_body_str = dump_json_safely(
+                sanitized_body, ensure_ascii=False, indent=2
+            )
             logger.debug(f"📦 请求体: {request_body_str}")
 
             http_response = await http_client.post(
                 request_data.url,
                 headers=request_data.headers,
-                json=request_data.body,
+                content=dump_json_safely(request_data.body, ensure_ascii=False),
             )
 
             logger.debug(f"📥 响应状态码: {http_response.status_code}")
@@ -394,7 +397,7 @@ class LLMModel(LLMModelBase):
             return LLMResponse(
                 text=response_data.text,
                 usage_info=response_data.usage_info,
-                image_bytes=response_data.image_bytes,
+                images=response_data.images,
                 raw_response=response_data.raw_response,
                 tool_calls=response_tool_calls if response_tool_calls else None,
                 code_executions=response_data.code_executions,
@@ -424,7 +427,7 @@ class LLMModel(LLMModelBase):
 
             policy = config.validation_policy
             if policy:
-                if policy.get("require_image") and not parsed_data.image_bytes:
+                if policy.get("require_image") and not parsed_data.images:
                     if self.api_type == "gemini" and parsed_data.raw_response:
                         usage_metadata = parsed_data.raw_response.get(
                             "usageMetadata", {}

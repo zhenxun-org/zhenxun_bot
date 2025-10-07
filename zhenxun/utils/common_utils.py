@@ -126,12 +126,15 @@ class SqlUtils:
 def format_usage_for_markdown(text: str) -> str:
     """
     智能地将Python多行字符串转换为适合Markdown渲染的格式。
-    - 将单个换行符替换为Markdown的硬换行（行尾加两个空格）。
+    - 在列表、标题等块级元素前自动插入换行，确保正确解析。
+    - 将段落内的单个换行符替换为Markdown的硬换行（行尾加两个空格）。
     - 保留两个或更多的连续换行符，使其成为Markdown的段落分隔。
     """
     if not text:
         return ""
-    text = re.sub(r"\n{2,}", "<<PARAGRAPH_BREAK>>", text)
-    text = text.replace("\n", "  \n")
-    text = text.replace("<<PARAGRAPH_BREAK>>", "\n\n")
+
+    text = re.sub(r"([^\n])\n(\s*[-*] |\s*#+\s|\s*>)", r"\1\n\n\2", text)
+
+    text = re.sub(r"(?<!\n)\n(?!\n)", "  \n", text)
+
     return text

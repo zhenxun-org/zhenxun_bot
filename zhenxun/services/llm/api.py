@@ -339,7 +339,7 @@ async def _generate_image_from_message(
 
             response = await model_instance.generate_response(messages, config=config)
 
-            if not response.image_bytes:
+            if not response.images:
                 error_text = response.text or "模型未返回图片数据。"
                 logger.warning(f"图片生成调用未返回图片，返回文本内容: {error_text}")
 

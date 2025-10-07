@@ -408,7 +408,7 @@ class GeminiAdapter(BaseAdapter):
             parts = content_data.get("parts", [])
 
             text_content = ""
-            image_bytes: bytes | None = None
+            images_bytes: list[bytes] = []
             parsed_tool_calls: list["LLMToolCall"] | None = None
             thought_summary_parts = []
             answer_parts = []
@@ -423,10 +423,7 @@ class GeminiAdapter(BaseAdapter):
                 elif "inlineData" in part:
                     inline_data = part["inlineData"]
                     if "data" in inline_data:
-                        image_bytes = base64.b64decode(inline_data["data"])
-                        answer_parts.append(
-                            f"[图片已生成: {inline_data.get('mimeType', 'image')}]"
-                        )
+                        images_bytes.append(base64.b64decode(inline_data["data"]))
 
                 elif "functionCall" in part:
                     if parsed_tool_calls is None:
@@ -494,7 +491,7 @@ class GeminiAdapter(BaseAdapter):
             return ResponseData(
                 text=text_content,
                 tool_calls=parsed_tool_calls,
-                image_bytes=image_bytes,
+                images=images_bytes if images_bytes else None,
                 usage_info=usage_info,
                 raw_response=response_json,
                 grounding_metadata=grounding_metadata_obj,
