@@ -1,49 +1,35 @@
-import asyncio
 import time
 
 from nonebot_plugin_alconna import UniMsg
 
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.plugin_info import PluginInfo
-from zhenxun.services.data_access import DataAccess
-from zhenxun.services.db_context import DB_TIMEOUT_SECONDS
 from zhenxun.services.log import logger
-from zhenxun.utils.utils import EntityIDs
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD, SwitchEnum
 from .exception import SkipPluginException
 
 
-async def auth_group(plugin: PluginInfo, entity: EntityIDs, message: UniMsg):
+async def auth_group(
+    plugin: PluginInfo,
+    group: GroupConsole | None,
+    message: UniMsg,
+    group_id: str | None,
+):
     """群黑名单检测 群总开关检测
 
     参数:
         plugin: PluginInfo
-        entity: EntityIDs
+        group: GroupConsole
         message: UniMsg
     """
-    start_time = time.time()
-
-    if not entity.group_id:
+    if not group_id:
         return
+
+    start_time = time.time()
 
     try:
         text = message.extract_plain_text()
-
-        # 从数据库或缓存中获取群组信息
-        group_dao = DataAccess(GroupConsole)
-
-        try:
-            group: GroupConsole | None = await asyncio.wait_for(
-                group_dao.safe_get_or_none(
-                    group_id=entity.group_id, channel_id__isnull=True
-                ),
-                timeout=DB_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            logger.error("查询群组信息超时", LOGGER_COMMAND, session=entity.user_id)
-            # 超时时不阻塞，继续执行
-            return
 
         if not group:
             raise SkipPluginException("群组信息不存在...")
@@ -63,6 +49,5 @@ async def auth_group(plugin: PluginInfo, entity: EntityIDs, message: UniMsg):
             logger.warning(
                 f"auth_group 耗时: {elapsed:.3f}s, plugin={plugin.module}",
                 LOGGER_COMMAND,
-                session=entity.user_id,
-                group_id=entity.group_id,
+                group_id=group_id,
             )

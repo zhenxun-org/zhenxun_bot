@@ -96,7 +96,6 @@ async def is_ban(user_id: str | None, group_id: str | None) -> int:
                     f"查询ban记录超时: user_id={user_id}, group_id={group_id}",
                     LOGGER_COMMAND,
                 )
-                # 超时时返回0，避免阻塞
                 return 0
 
         # 检查记录并计算ban时间
@@ -199,7 +198,7 @@ async def group_handle(group_id: str) -> None:
             )
 
 
-async def user_handle(module: str, entity: EntityIDs, session: Uninfo) -> None:
+async def user_handle(plugin: PluginInfo, entity: EntityIDs, session: Uninfo) -> None:
     """用户ban检查
 
     参数:
@@ -217,22 +216,12 @@ async def user_handle(module: str, entity: EntityIDs, session: Uninfo) -> None:
         if not time_val:
             return
         time_str = format_time(time_val)
-        plugin_dao = DataAccess(PluginInfo)
-        try:
-            db_plugin = await asyncio.wait_for(
-                plugin_dao.safe_get_or_none(module=module), timeout=DB_TIMEOUT_SECONDS
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"查询插件信息超时: {module}", LOGGER_COMMAND)
-            # 超时时不阻塞，继续执行
-            raise SkipPluginException("用户处于黑名单中...")
 
         if (
-            db_plugin
-            and not db_plugin.ignore_prompt
+            plugin
             and time_val != -1
             and ban_result
-            and freq.is_send_limit_message(db_plugin, entity.user_id, False)
+            and freq.is_send_limit_message(plugin, entity.user_id, False)
         ):
             try:
                 await asyncio.wait_for(
@@ -260,7 +249,9 @@ async def user_handle(module: str, entity: EntityIDs, session: Uninfo) -> None:
             )
 
 
-async def auth_ban(matcher: Matcher, bot: Bot, session: Uninfo) -> None:
+async def auth_ban(
+    matcher: Matcher, bot: Bot, session: Uninfo, plugin: PluginInfo
+) -> None:
     """权限检查 - ban 检查
 
     参数:
@@ -289,7 +280,7 @@ async def auth_ban(matcher: Matcher, bot: Bot, session: Uninfo) -> None:
         if entity.user_id:
             try:
                 await asyncio.wait_for(
-                    user_handle(matcher.plugin_name, entity, session),
+                    user_handle(plugin, entity, session),
                     timeout=DB_TIMEOUT_SECONDS,
                 )
             except asyncio.TimeoutError:

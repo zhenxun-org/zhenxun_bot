@@ -8,6 +8,7 @@ from nonebot_plugin_alconna import UniMsg
 from nonebot_plugin_uninfo import Uninfo
 from tortoise.exceptions import IntegrityError
 
+from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.user_console import UserConsole
 from zhenxun.services.data_access import DataAccess
@@ -31,6 +32,7 @@ from .auth.exception import (
     PermissionExemption,
     SkipPluginException,
 )
+from .auth.utils import base_config
 
 # 超时设置（秒）
 TIMEOUT_SECONDS = 5.0
@@ -45,6 +47,16 @@ CIRCUIT_BREAKERS = {
 }
 # 熔断重置时间（秒）
 CIRCUIT_RESET_TIME = 300  # 5分钟
+
+# 并发控制：限制同时进入 hooks 并行检查的协程数
+
+# 默认为 6，可通过环境变量 AUTH_HOOKS_CONCURRENCY_LIMIT 调整
+HOOKS_CONCURRENCY_LIMIT = base_config.get("AUTH_HOOKS_CONCURRENCY_LIMIT")
+
+# 全局信号量与计数器
+HOOKS_SEMAPHORE = asyncio.Semaphore(HOOKS_CONCURRENCY_LIMIT)
+HOOKS_ACTIVE_COUNT = 0
+HOOKS_ACTIVE_LOCK = asyncio.Lock()
 
 
 # 超时装饰器
@@ -259,6 +271,30 @@ async def time_hook(coro, name, time_dict):
             time_dict[name] = f"{time.time() - start:.3f}s"
 
 
+async def _enter_hooks_section():
+    """尝试获取全局信号量并更新计数器，超时则抛出 PermissionExemption。"""
+    global HOOKS_ACTIVE_COUNT
+    # 队列模式：如果达到上限，协程将排队等待直到获取到信号量
+    await HOOKS_SEMAPHORE.acquire()
+    async with HOOKS_ACTIVE_LOCK:
+        HOOKS_ACTIVE_COUNT += 1
+        logger.debug(f"当前并发权限检查数量: {HOOKS_ACTIVE_COUNT}", LOGGER_COMMAND)
+
+
+async def _leave_hooks_section():
+    """释放信号量并更新计数器。"""
+    global HOOKS_ACTIVE_COUNT
+    from contextlib import suppress
+
+    with suppress(Exception):
+        HOOKS_SEMAPHORE.release()
+    async with HOOKS_ACTIVE_LOCK:
+        HOOKS_ACTIVE_COUNT -= 1
+        # 保证计数不为负
+        HOOKS_ACTIVE_COUNT = max(HOOKS_ACTIVE_COUNT, 0)
+        logger.debug(f"当前并发权限检查数量: {HOOKS_ACTIVE_COUNT}", LOGGER_COMMAND)
+
+
 async def auth(
     matcher: Matcher,
     event: Event,
@@ -285,6 +321,9 @@ async def auth(
     hook_times = {}
     hooks_time = 0  # 初始化 hooks_time 变量
 
+    # 记录是否已进入 hooks 区域（用于 finally 中释放）
+    entered_hooks = False
+
     try:
         if not module:
             raise PermissionExemption("Matcher插件名称不存在...")
@@ -304,6 +343,10 @@ async def auth(
             )
             raise PermissionExemption("获取插件和用户数据超时，请稍后再试...")
 
+        # 进入 hooks 并行检查区域（会在高并发时排队）
+        await _enter_hooks_section()
+        entered_hooks = True
+
         # 获取插件费用
         cost_start = time.time()
         try:
@@ -320,16 +363,32 @@ async def auth(
         # 执行 bot_filter
         bot_filter(session)
 
+        group = None
+        if entity.group_id:
+            group_dao = DataAccess(GroupConsole)
+            group = await with_timeout(
+                group_dao.safe_get_or_none(
+                    group_id=entity.group_id, channel_id__isnull=True
+                ),
+                name="get_group",
+            )
+
         # 并行执行所有 hook 检查，并记录执行时间
         hooks_start = time.time()
 
         # 创建所有 hook 任务
         hook_tasks = [
-            time_hook(auth_ban(matcher, bot, session), "auth_ban", hook_times),
+            time_hook(auth_ban(matcher, bot, session, plugin), "auth_ban", hook_times),
             time_hook(auth_bot(plugin, bot.self_id), "auth_bot", hook_times),
-            time_hook(auth_group(plugin, entity, message), "auth_group", hook_times),
+            time_hook(
+                auth_group(plugin, group, message, entity.group_id),
+                "auth_group",
+                hook_times,
+            ),
             time_hook(auth_admin(plugin, session), "auth_admin", hook_times),
-            time_hook(auth_plugin(plugin, session, event), "auth_plugin", hook_times),
+            time_hook(
+                auth_plugin(plugin, group, session, event), "auth_plugin", hook_times
+            ),
             time_hook(auth_limit(plugin, session), "auth_limit", hook_times),
         ]
 
@@ -358,7 +417,17 @@ async def auth(
         logger.debug("超级用户跳过权限检测...", LOGGER_COMMAND, session=session)
     except PermissionExemption as e:
         logger.info(str(e), LOGGER_COMMAND, session=session)
-
+    finally:
+        # 如果进入过 hooks 区域，确保释放信号量（即使上层处理抛出了异常）
+        if entered_hooks:
+            try:
+                await _leave_hooks_section()
+            except Exception:
+                logger.error(
+                    "释放 hooks 信号量时出错",
+                    LOGGER_COMMAND,
+                    session=session,
+                )
     # 扣除金币
     if not ignore_flag and cost_gold > 0:
         gold_start = time.time()

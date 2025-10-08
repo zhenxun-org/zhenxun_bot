@@ -85,7 +85,7 @@ class FreqUtils:
             return False
         if plugin.plugin_type == PluginType.DEPENDANT:
             return False
-        return plugin.module != "ai" if self._flmt_s.check(sid) else False
+        return False if plugin.ignore_prompt else self._flmt_s.check(sid)
 
 
 freq = FreqUtils()
