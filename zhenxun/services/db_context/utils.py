@@ -1,5 +1,4 @@
 import asyncio
-import random
 import time
 
 from zhenxun.services.log import logger
