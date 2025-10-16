@@ -262,6 +262,12 @@ class AsyncHttpx:
                         "AsyncHttpx:FallbackExecutor",
                     )
                 return result
+            except HTTPStatusError as e:
+                exceptions.append(e)
+                logger.debug(
+                    f"请求失败: {url} {e.response.status_code} {e.response.text}",
+                    "AsyncHttpx:FallbackExecutor",
+                )
             except Exception as e:
                 exceptions.append(e)
                 if url != url_list[-1]:
