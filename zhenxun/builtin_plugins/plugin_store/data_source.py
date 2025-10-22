@@ -263,10 +263,9 @@ class StoreManager:
         """安装插件
 
         参数:
-            github_url: 仓库地址
-            module_path: 模块路径
-            is_dir: 是否是文件夹
+            plugin_info: 插件信息
             is_external: 是否是外部仓库
+            source: 源
         """
         repo_type = RepoType.GITHUB if is_external else None
         if source == "ali":
