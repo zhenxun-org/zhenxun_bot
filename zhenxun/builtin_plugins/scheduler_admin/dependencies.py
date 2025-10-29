@@ -158,7 +158,7 @@ async def GetTargeter(
     event: Event,
     bot: Bot,
     arp: Arparma = AlconnaMatches(),
-    schedule_id: Match[int] = AlconnaMatch("schedule_id"),
+    schedule_ids: Match[list[int]] = AlconnaMatch("schedule_ids"),
     plugin_name: Match[str] = AlconnaMatch("plugin_name"),
     group_ids: Match[list[str]] = AlconnaMatch("group_ids"),
     user_id: Match[str] = AlconnaMatch("user_id"),
@@ -172,8 +172,8 @@ async def GetTargeter(
     if not subcommand:
         await matcher.finish("内部错误：无法解析子命令。")
 
-    if schedule_id.available:
-        return scheduler_manager.target(id=schedule_id.result)
+    if schedule_ids.available:
+        return scheduler_manager.target(id__in=schedule_ids.result)
 
     all_enabled = arp.query(f"{subcommand}.all.value", False)
     global_flag = arp.query(f"{subcommand}.global.value", False)

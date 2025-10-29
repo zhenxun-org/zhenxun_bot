@@ -147,8 +147,8 @@ schedule_cmd = on_alconna(
         Subcommand(
             "删除",
             Args[
-                "schedule_id?",
-                int,
+                "schedule_ids?",
+                MultiVar(int),
                 Field(unmatch_tips=lambda text: f"任务ID '{text}' 必须是数字！"),
             ],
             *create_targeting_options(),
@@ -158,8 +158,8 @@ schedule_cmd = on_alconna(
         Subcommand(
             "暂停",
             Args[
-                "schedule_id?",
-                int,
+                "schedule_ids?",
+                MultiVar(int),
                 Field(unmatch_tips=lambda text: f"任务ID '{text}' 必须是数字！"),
             ],
             *create_targeting_options(),
@@ -169,8 +169,8 @@ schedule_cmd = on_alconna(
         Subcommand(
             "恢复",
             Args[
-                "schedule_id?",
-                int,
+                "schedule_ids?",
+                MultiVar(int),
                 Field(unmatch_tips=lambda text: f"任务ID '{text}' 必须是数字！"),
             ],
             *create_targeting_options(),
