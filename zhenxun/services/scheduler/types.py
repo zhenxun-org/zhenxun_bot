@@ -77,6 +77,7 @@ class Trigger:
         """创建一个 Date 触发器配置。"""
         return DateTrigger(**kwargs)
 
+
 class ExecutionOptions(BaseModel):
     """
     封装定时任务的执行策略，包括重试和回调。

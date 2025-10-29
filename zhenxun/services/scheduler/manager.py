@@ -472,9 +472,7 @@ class SchedulerManager:
             "required_permission": required_permission,
             "source": source,
             "is_one_off": is_one_off,
-            "execution_options": model_dump(
-                validated_options, exclude_none=True
-            ),
+            "execution_options": model_dump(validated_options, exclude_none=True),
         }
 
         defaults = {k: v for k, v in defaults.items() if v is not None}

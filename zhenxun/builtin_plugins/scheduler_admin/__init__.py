@@ -120,5 +120,5 @@ __plugin_meta__ = PluginMetadata(
                 type=int,
             ),
         ],
-     ).to_dict(),
- )
+    ).to_dict(),
+)

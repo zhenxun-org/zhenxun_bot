@@ -47,7 +47,7 @@ class ScheduledJob(Model):
     execution_options = fields.JSONField(
         null=True,
         description="任务执行的额外选项 (例如: jitter, spread, "
-                   "interval, concurrency_policy)",
+        "interval, concurrency_policy)",
     )
     create_time = fields.DatetimeField(auto_now_add=True)
 
