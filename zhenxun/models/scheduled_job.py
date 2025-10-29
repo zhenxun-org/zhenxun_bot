@@ -46,7 +46,8 @@ class ScheduledJob(Model):
     consecutive_failures = fields.IntField(default=0, description="连续失败次数")
     execution_options = fields.JSONField(
         null=True,
-        description="任务执行的额外选项 (例如: jitter, spread, concurrency_policy)",
+        description="任务执行的额外选项 (例如: jitter, spread, "
+                   "interval, concurrency_policy)",
     )
     create_time = fields.DatetimeField(auto_now_add=True)
 

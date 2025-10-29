@@ -412,16 +412,44 @@ async def _execute_job(
             if isinstance(schedule.execution_options, dict)
             else {}
         )
-        spread_seconds = spread_config.get("spread", 1.0)
+        interval_seconds = spread_config.get("interval")
 
-        async def worker(target_id: str | None):
-            await asyncio.sleep(random.uniform(0.1, spread_seconds))
-            async with semaphore:
+        if interval_seconds is not None and interval_seconds > 0:
+            logger.debug(
+                f"任务 {schedule.id}: 使用串行模式执行 {len(resolved_targets)} "
+                f"个目标，固定间隔 {interval_seconds} 秒。"
+            )
+            for i, target_id in enumerate(resolved_targets):
+                if i > 0:
+                    logger.debug(
+                        f"任务 {schedule.id} 目标 [{target_id or '全局'}]: "
+                        f"等待 {interval_seconds} 秒后执行。"
+                    )
+                    await asyncio.sleep(interval_seconds)
                 await _execute_single_job_instance(schedule, bot, group_id=target_id)
+        else:
+            spread_seconds = spread_config.get("spread", 1.0)
 
-        tasks_to_run = [worker(target_id) for target_id in resolved_targets]
-        if tasks_to_run:
-            await asyncio.gather(*tasks_to_run, return_exceptions=True)
+            logger.debug(
+                f"任务 {schedule.id}: 将在 {spread_seconds:.2f} 秒内分散执行 "
+                f"{len(resolved_targets)} 个目标。"
+            )
+
+            async def worker(target_id: str | None):
+                delay = random.uniform(0.1, spread_seconds)
+                logger.debug(
+                    f"任务 {schedule.id} 目标 [{target_id or '全局'}]: "
+                    f"随机延迟 {delay:.2f} 秒后执行。"
+                )
+                await asyncio.sleep(delay)
+                async with semaphore:
+                    await _execute_single_job_instance(
+                        schedule, bot, group_id=target_id
+                    )
+
+            tasks_to_run = [worker(target_id) for target_id in resolved_targets]
+            if tasks_to_run:
+                await asyncio.gather(*tasks_to_run, return_exceptions=True)
 
         schedule.last_run_at = datetime.now()
         schedule.last_run_status = "SUCCESS"

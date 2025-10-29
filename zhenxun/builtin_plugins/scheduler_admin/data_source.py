@@ -65,6 +65,7 @@ class SchedulerAdminService:
         job_name: str | None,
         jitter: int | None,
         spread: int | None,
+        interval: int | None,
         created_by: str,
     ) -> str:
         """创建或更新一个定时任务"""
@@ -77,6 +78,8 @@ class SchedulerAdminService:
             execution_options["jitter"] = jitter
         if spread is not None:
             execution_options["spread"] = spread
+        if interval is not None:
+            execution_options["interval"] = interval
 
         for target_desc in targets:
             target_type, target_id = self._resolve_target_descriptor(target_desc)

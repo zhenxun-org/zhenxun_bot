@@ -111,6 +111,14 @@ __plugin_meta__ = PluginMetadata(
                 default_value=300,
                 type=int,
             ),
+            RegisterConfig(
+                module="SchedulerManager",
+                key="DEFAULT_INTERVAL_SECONDS",
+                value=0,
+                help="为多目标定时任务设置的默认串行执行间隔秒数(大于0时生效)，用于控制任务间的固定时间间隔。",
+                default_value=0,
+                type=int,
+            ),
         ],
-    ).to_dict(),
-)
+     ).to_dict(),
+ )

@@ -63,6 +63,7 @@ async def handle_set(
     tag_name: Match[str] = AlconnaMatch("tag_name"),
     jitter: Match[int] = AlconnaMatch("jitter_seconds"),
     spread: Match[int] = AlconnaMatch("spread_seconds"),
+    interval: Match[int] = AlconnaMatch("interval_seconds"),
     job_name: Match[str] = AlconnaMatch("job_name"),
     bot_id_to_operate: str = Depends(GetBotId),
     trigger_info: tuple[str, dict] = Depends(GetTriggerInfo),
@@ -74,6 +75,7 @@ async def handle_set(
     p_name = plugin_name.result
     jitter_val: int | None = jitter.result if jitter.available else None
     spread_val: int | None = spread.result if spread.available else None
+    interval_val: int | None = interval.result if interval.available else None
 
     is_multi_target = (
         len(target_groups) > 1
@@ -100,6 +102,14 @@ async def handle_set(
                     "SchedulerManager", "DEFAULT_SPREAD_SECONDS"
                 )
 
+        if interval_val is None:
+            if task_meta and task_meta.get("default_interval") is not None:
+                interval_val = cast(int | None, task_meta["default_interval"])
+            else:
+                interval_val = Config.get_config(
+                    "SchedulerManager", "DEFAULT_INTERVAL_SECONDS"
+                )
+
     result_message = await scheduler_admin_service.set_schedule(
         targets=target_groups,
         creator_permission_level=creator_permission_level,
@@ -111,6 +121,7 @@ async def handle_set(
         job_name=job_name.result if job_name.available else None,
         jitter=jitter_val,
         spread=spread_val,
+        interval=interval_val,
         created_by=session.user.id,
     )
     await MessageUtils.build_message(result_message).send()

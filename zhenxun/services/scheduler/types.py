@@ -83,7 +83,12 @@ class ExecutionOptions(BaseModel):
     """
 
     jitter: int | None = Field(None, description="触发时间抖动(秒)")
-    spread: int | None = Field(None, description="多目标执行的分散延迟(秒)")
+    spread: int | None = Field(
+        None, description="(并发模式)多目标执行的最大分散延迟(秒)"
+    )
+    interval: int | None = Field(
+        None, description="多目标执行的固定间隔(秒)，设置后将强制串行执行"
+    )
     concurrency_policy: Literal["ALLOW", "SKIP", "QUEUE"] = Field(
         "ALLOW", description="并发策略"
     )

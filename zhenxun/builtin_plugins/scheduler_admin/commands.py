@@ -129,6 +129,11 @@ schedule_cmd = on_alconna(
                 help_text="设置多目标执行的分散延迟(秒)",
             ),
             Option(
+                "--fixed-interval",
+                Args["interval_seconds", int],
+                help_text="设置任务间的固定执行间隔(秒)，将强制串行",
+            ),
+            Option(
                 "--permission",
                 Args["perm_level", int],
                 help_text="设置任务的管理权限等级",

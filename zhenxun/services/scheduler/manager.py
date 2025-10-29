@@ -109,6 +109,7 @@ class SchedulerManager:
         policy: ExecutionPolicy | None = None,
         default_jitter: int | None = None,
         default_spread: int | None = None,
+        default_interval: int | None = None,
     ):
         """
         声明式定时任务的统一装饰器。
@@ -140,6 +141,7 @@ class SchedulerManager:
                     "model": params_model,
                     "default_jitter": default_jitter,
                     "default_spread": default_spread,
+                    "default_interval": default_interval,
                 }
 
                 job_kwargs = model_dump(default_params) if default_params else {}
@@ -205,6 +207,7 @@ class SchedulerManager:
         default_permission: int = 5,
         default_jitter: int | None = None,
         default_spread: int | None = None,
+        default_interval: int | None = None,
     ) -> Callable:
         """
         注册可调度的任务函数
@@ -220,6 +223,7 @@ class SchedulerManager:
                 "default_permission": default_permission,
                 "default_jitter": default_jitter,
                 "default_spread": default_spread,
+                "default_interval": default_interval,
             }
             model_name = params_model.__name__ if params_model else "无"
             logger.debug(
