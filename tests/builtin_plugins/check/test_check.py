@@ -101,9 +101,9 @@ async def test_check(
     from zhenxun.builtin_plugins.check import _self_check_matcher
 
     (
-        mock_psutil,
-        mock_cpuinfo,
-        mock_platform,
+        _mock_psutil,
+        _mock_cpuinfo,
+        _mock_platform,
         mock_render_service,
         mock_render_service_return,
         mock_build_message,

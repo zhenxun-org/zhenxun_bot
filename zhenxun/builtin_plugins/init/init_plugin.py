@@ -80,6 +80,7 @@ async def _handle_setting(
             ignore_prompt=extra_data.ignore_prompt,
             parent=(plugin.parent_plugin.module_name if plugin.parent_plugin else None),
             impression=setting.impression,
+            is_count=setting.is_count,
         )
     )
     if extra_data.limits:
@@ -130,6 +131,7 @@ async def _():
                         "admin_level",
                         "plugin_type",
                         "is_show",
+                        "is_count",
                     ]
                 )
             )

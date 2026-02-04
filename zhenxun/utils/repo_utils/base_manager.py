@@ -261,7 +261,7 @@ class BaseRepoManager(ABC):
             if not local_path.exists():
                 # 如果不存在，则克隆仓库
                 logger.info(f"克隆仓库 {repo_url} 到 {local_path}", LOG_COMMAND)
-                success, stdout, stderr = await run_git_command(
+                success, _stdout, stderr = await run_git_command(
                     f"clone -b {branch} {repo_url} {local_path}"
                 )
                 if not success:

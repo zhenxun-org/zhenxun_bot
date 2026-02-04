@@ -46,7 +46,7 @@ async def _(
             if plugin:
                 PluginInfoMemoryCache.set_plugin(plugin)
         plugin_type = plugin.plugin_type if plugin else None
-        if plugin_type == PluginType.NORMAL:
+        if plugin_type == PluginType.NORMAL and plugin.is_count:
             logger.debug(f"提交调用记录: {matcher.plugin_name}...", session=session)
             TEMP_LIST.append(
                 Statistics(
