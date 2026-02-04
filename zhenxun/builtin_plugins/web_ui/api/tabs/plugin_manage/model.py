@@ -99,6 +99,7 @@ class PluginConfig(BaseModel):
     default_value: Any = Field(None, description="默认值")
     type: str | None = Field(None, description="类型")
     type_inner: list[str] | None = Field(None, description="内部类型")
+    is_count: bool = True
 
 
 class PluginCount(BaseModel):
