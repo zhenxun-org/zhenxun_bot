@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Pydantic V1 & V2 兼容层模块
 

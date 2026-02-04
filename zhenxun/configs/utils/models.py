@@ -148,6 +148,8 @@ class PluginSetting(BaseModel):
     """调用插件花费金币"""
     impression: float = 0.0
     """调用插件好感度限制"""
+    is_count: bool = True
+    """是否统计调用次数"""
 
 
 class AICallableProperties(BaseModel):
