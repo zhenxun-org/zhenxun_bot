@@ -250,7 +250,7 @@ async def test_check_update_release(
         mock_pyproject_file,
         mock_pyproject_lock_file,
         mock_req_txt_file,
-        mock_version_file,
+        _mock_version_file,
     ) = init_mocker_path(mocker, tmp_path)
 
     # 确保目录下有一个子目录，以便 os.listdir() 能返回一个目录名
@@ -349,7 +349,7 @@ async def test_check_update_main(
         mock_pyproject_file,
         mock_pyproject_lock_file,
         mock_req_txt_file,
-        mock_version_file,
+        _mock_version_file,
     ) = init_mocker_path(mocker, tmp_path)
 
     # 确保目录下有一个子目录，以便 os.listdir() 能返回一个目录名

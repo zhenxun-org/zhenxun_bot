@@ -426,8 +426,9 @@ async def handle_delete(names: Match[list[str]]):
 async def handle_clear():
     confirm = await prompt_until(
         "【警告】此操作将删除所有群组标签，是否继续？\n请输入 `是` 或 `确定` 确认操作",
-        lambda msg: msg.extract_plain_text().lower()
-        in ["是", "确定", "yes", "confirm"],
+        lambda msg: (
+            msg.extract_plain_text().lower() in ["是", "确定", "yes", "confirm"]
+        ),
         timeout=30,
         retry=1,
     )

@@ -361,7 +361,7 @@ class BuildMat:
             _x_index = _tmp
             """额外增加字体宽度"""
             for s in self.build_data.x_index:
-                s_w, s_h = BuildImage.get_text_size(s, font)
+                s_w, _s_h = BuildImage.get_text_size(s, font)
                 if s_w > _barh_max_text_width:
                     _barh_max_text_width = s_w
             width += _barh_max_text_width
