@@ -118,7 +118,7 @@ async def create_help_img(
         is_detail=is_detail,
         plugin_count=plugin_count,
         active_count=active_count,
-        categories=categories_objects
+        categories=categories_objects,
     )
 
     return await ui.render(menu_data)

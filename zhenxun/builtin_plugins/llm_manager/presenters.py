@@ -33,9 +33,9 @@ class Presenters:
         title = "LLM模型列表" + (" (所有已配置模型)" if show_all else " (仅可用)")
 
         if not models:
-            table = ui.table(
-                title=title, tip="当前没有配置任何LLM模型。"
-            ).set_headers(["提供商", "模型名称", "API类型", "状态"])
+            table = ui.table(title=title, tip="当前没有配置任何LLM模型。").set_headers(
+                ["提供商", "模型名称", "API类型", "状态"]
+            )
             return await renderer_service.render(table)
 
         column_name = ["提供商", "模型名称", "API类型", "状态"]
@@ -167,9 +167,7 @@ class Presenters:
                 ]
             )
 
-        table = ui.table(
-            title=title, tip="使用 `llm reset-key <Provider>` 重置Key状态"
-        )
+        table = ui.table(title=title, tip="使用 `llm reset-key <Provider>` 重置Key状态")
         table.set_headers(
             [
                 "Key (部分)",

@@ -108,7 +108,7 @@ async def create_plugin_help_image(
     page_data = PluginHelpPageData(
         bot_nickname=BotConfig.self_nickname,
         page_title=page_title,
-        categories=categories
+        categories=categories,
     )
 
     image_bytes = await ui.render(page_data, use_cache=True)
