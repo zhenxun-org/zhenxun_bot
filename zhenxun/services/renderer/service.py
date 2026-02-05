@@ -1,53 +1,36 @@
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 import hashlib
-import inspect
 from pathlib import Path
 from typing import Any, ClassVar
 
 import aiofiles
-from jinja2 import (
-    ChoiceLoader,
-    Environment,
-    FileSystemLoader,
-    PrefixLoader,
-    TemplateNotFound,
-    select_autoescape,
-)
+from jinja2 import TemplateNotFound
 from nonebot.utils import is_coroutine_callable
 import ujson as json
 
 from zhenxun.configs.config import Config
-from zhenxun.configs.path_config import THEMES_PATH, UI_CACHE_PATH
+from zhenxun.configs.path_config import UI_CACHE_PATH
 from zhenxun.services.log import logger
+from zhenxun.services.renderer.template import (
+    ComponentRenderStrategy,
+    JinjaTemplateEngine,
+    TemplateFileRenderStrategy,
+)
+from zhenxun.services.renderer.theme import DependencyCollector, asset_registry
+from zhenxun.services.renderer.types import (
+    BaseScreenshotEngine,
+    Renderable,
+    RenderContext,
+    RenderResult,
+    RenderStrategy,
+)
 from zhenxun.utils.exception import RenderingError
 from zhenxun.utils.log_sanitizer import sanitize_for_logging
 from zhenxun.utils.pydantic_compat import _dump_pydantic_obj
 
-from .config import RESERVED_TEMPLATE_KEYS
-from .engine import get_screenshot_engine
-from .protocols import Renderable, RenderResult, ScreenshotEngine
-from .registry import asset_registry
-from .theme import RelativePathEnvironment, ThemeManager
-
-
-@dataclass
-class RenderContext:
-    """单次渲染任务的上下文对象，用于状态传递和缓存。"""
-
-    renderer: "RendererService"
-    theme_manager: ThemeManager
-    screenshot_engine: ScreenshotEngine
-    component: Renderable
-    use_cache: bool
-    render_options: dict[str, Any]
-    resolved_template_paths: dict[str, str] = field(default_factory=dict)
-    resolved_style_paths: dict[str, Path | None] = field(default_factory=dict)
-    collected_asset_styles: set[str] = field(default_factory=set)
-    collected_scripts: set[str] = field(default_factory=set)
-    collected_inline_css: list[str] = field(default_factory=list)
-    processed_components: set[int] = field(default_factory=set)
+from .engine import engine_manager
+from .theme import ThemeManager
 
 
 class RendererService:
@@ -66,9 +49,9 @@ class RendererService:
     _plugin_template_paths: ClassVar[dict[str, Path]] = {}
 
     def __init__(self):
-        self._jinja_env: Environment | None = None
+        self._template_engine: JinjaTemplateEngine | None = None
         self._theme_manager: ThemeManager | None = None
-        self._screenshot_engine: ScreenshotEngine | None = None
+        self._screenshot_engine: BaseScreenshotEngine | None = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
         self._custom_filters: dict[str, Callable] = {}
@@ -76,36 +59,6 @@ class RendererService:
 
         self.filter("dump_json")(self._pydantic_tojson_filter)
         self.global_function("inline_asset")(self._inline_asset_global)
-
-    def _create_jinja_env(self) -> Environment:
-        """
-        创建并配置 Jinja2 渲染环境。
-
-        构建一个完整的 Jinja2 环境，包含：
-        - PrefixLoader：用于插件模板的命名空间加载
-        - FileSystemLoader：用于主题模板的文件系统加载
-        - RelativePathEnvironment：支持模板间相对路径引用的自定义环境
-
-        返回:
-            Environment: 完全配置好的 Jinja2 环境实例，准备接收自定义过滤器和全局函数。
-        """
-        prefix_loader = PrefixLoader(
-            {
-                namespace: FileSystemLoader(str(path.absolute()))
-                for namespace, path in self._plugin_template_paths.items()
-            }
-        )
-        theme_loader = FileSystemLoader(str(THEMES_PATH / "default"))
-        final_loader = ChoiceLoader([prefix_loader, theme_loader])
-
-        env = RelativePathEnvironment(
-            loader=final_loader,
-            enable_async=True,
-            autoescape=select_autoescape(["html", "xml"]),
-            trim_blocks=True,
-            lstrip_blocks=True,
-        )
-        return env
 
     def register_template_namespace(self, namespace: str, path: Path):
         """
@@ -116,8 +69,11 @@ class RendererService:
         避免了与核心或其他插件的模板命名冲突。
 
         参数:
-            namespace: 插件的唯一命名空间，例如插件名。
-            path: 包含该插件模板的目录路径。
+            namespace: 插件的唯一命名空间，建议使用插件模块名
+            path: 包含该插件模板的目录路径
+
+        异常:
+            ValueError: 当提供的路径不是有效目录时抛出
         """
         if namespace in self._plugin_template_paths:
             logger.warning(f"模板命名空间 '{namespace}' 已被注册，将被覆盖。")
@@ -182,11 +138,11 @@ class RendererService:
         一个Jinja2全局函数，用于读取并内联一个已注册命名空间下的资源文件内容。
         主要用于内联SVG，以解决浏览器的跨域安全问题。
         """
-        if not self._jinja_env or not self._jinja_env.loader:
+        if not self._template_engine or not self._template_engine.env.loader:
             return f"<!-- Error: Jinja env not ready for {namespaced_path} -->"
         try:
-            source, _, _ = self._jinja_env.loader.get_source(
-                self._jinja_env, namespaced_path
+            source, _, _ = self._template_engine.env.loader.get_source(
+                self._template_engine.env, namespaced_path
             )
             return source
         except TemplateNotFound:
@@ -205,115 +161,72 @@ class RendererService:
             if self._initialized:
                 return
 
-            self._jinja_env = self._create_jinja_env()
+            try:
+                hot_reload = Config.get_config("UI", "HOT_RELOAD", False)
+                self._template_engine = JinjaTemplateEngine(
+                    self._plugin_template_paths, auto_reload=hot_reload
+                )
 
-            self._jinja_env.filters.update(self._custom_filters)
-            self._jinja_env.globals.update(self._custom_globals)
+                self._template_engine.env.filters.update(self._custom_filters)
+                self._template_engine.env.globals.update(self._custom_globals)
 
-            self._screenshot_engine = get_screenshot_engine()
+                self._theme_manager = ThemeManager()
+                self._theme_manager.bind_template_engine(self._template_engine.env)
 
-            self._theme_manager = ThemeManager(self._jinja_env)
+                self._template_engine.set_global(
+                    "render", self._theme_manager._global_render_component
+                )
+                self._template_engine.set_global(
+                    "asset", self._theme_manager.create_asset_loader()
+                )
+                self._template_engine.set_global(
+                    "random_asset", self._theme_manager.create_random_asset_loader()
+                )
+                self._template_engine.set_global(
+                    "resolve_template", self._theme_manager.resolve_component_template
+                )
+                self._template_engine.set_filter(
+                    "md", self._theme_manager._markdown_filter
+                )
 
-            current_theme_name = Config.get_config("UI", "THEME", "default")
-            await self._theme_manager.load_theme(current_theme_name)
-            self._initialized = True
+                self._screenshot_engine = await engine_manager.get_engine()
+
+                current_theme_name = Config.get_config("UI", "THEME", "default")
+                await self._theme_manager.load_theme(current_theme_name)
+
+                if self._theme_manager.current_theme:
+                    self._template_engine.update_theme_loaders(
+                        self._theme_manager.current_theme.assets_dir.parent
+                    )
+
+                self._template_engine.set_global(
+                    "theme", self._theme_manager.current_theme_context
+                )
+                self._template_engine.set_global(
+                    "default_theme_palette", self._theme_manager.current_default_palette
+                )
+
+                self._initialized = True
+            except Exception as e:
+                logger.error(
+                    f"渲染服务初始化失败，UI功能将不可用: {e}", "RendererService"
+                )
 
     async def _collect_dependencies_recursive(
         self, component: Renderable, context: "RenderContext"
     ):
         """
         递归遍历组件树，收集所有依赖项（CSS, JS, 额外CSS）并存入上下文。
-
-        这是实现组件化样式和脚本管理的基础，确保即使是深层嵌套的组件
-        所需的资源也能被正确加载到最终的HTML页面中。
         """
-        component_id = id(component)
-        if component_id in context.processed_components:
-            return
-        context.processed_components.add(component_id)
-
-        component_path_base = str(component.template_name)
-        variant = getattr(component, "variant", None)
-        manifest = await context.theme_manager.get_template_manifest(
-            component_path_base, skin=variant
-        )
-
-        style_paths_to_load = []
-        if manifest and manifest.get("styles"):
-            styles = manifest["styles"]
-            styles = [styles] if isinstance(styles, str) else styles
-
-            resolution_base_path = Path(component_path_base)
-            if variant:
-                skin_manifest_path = str(Path(component_path_base) / "skins" / variant)
-                skin_manifest = await context.theme_manager._load_single_manifest(
-                    skin_manifest_path
-                )
-                if skin_manifest and "styles" in skin_manifest:
-                    resolution_base_path = Path(skin_manifest_path)
-
-            style_paths_to_load.extend(
-                str(resolution_base_path / style).replace("\\", "/") for style in styles
-            )
-        else:
-            base_template_path = (
-                await context.theme_manager._resolve_component_template(
-                    component, context
-                )
-            )
-            base_style_path = str(
-                Path(base_template_path).with_name("style.css")
-            ).replace("\\", "/")
-            style_paths_to_load.append(base_style_path)
-
-            if variant:
-                skin_style_path = f"{component_path_base}/skins/{variant}/style.css"
-                style_paths_to_load.append(skin_style_path)
-
-        for css_template_path in style_paths_to_load:
-            try:
-                css_template = context.theme_manager.jinja_env.get_template(
-                    css_template_path
-                )
-                theme_context = {
-                    "theme": context.theme_manager.jinja_env.globals.get("theme", {})
-                }
-                css_content = await css_template.render_async(**theme_context)
-                context.collected_inline_css.append(css_content)
-            except TemplateNotFound:
-                pass
-
-        context.collected_scripts.update(component.get_required_scripts())
-        context.collected_asset_styles.update(component.get_required_styles())
-
-        if hasattr(component, "get_extra_css"):
-            res = component.get_extra_css(context)
-            css_str = await res if inspect.isawaitable(res) else str(res)
-            if css_str:
-                context.collected_inline_css.append(css_str)
-
-        for child in component.get_children():
-            if child:
-                await self._collect_dependencies_recursive(child, context)
+        await DependencyCollector.collect(component, context)
 
     async def _render_component(
         self,
         context: "RenderContext",
     ) -> RenderResult:
         """
-        核心的私有渲染方法，执行完整的渲染流程。
-
-        执行步骤:
-        1.  **缓存检查**: 如果启用缓存，则根据组件模板名和渲染数据生成缓存键，
-            并尝试从文件系统中读取缓存图片。
-        2.  **组件准备**: 调用 `component.prepare()` 生命周期钩子，允许组件执行
-            异步数据加载。
-        3.  **依赖收集**: 调用 `_collect_dependencies_recursive` 遍历组件树，
-            收集所有需要的CSS文件、JS文件和内联CSS。
-        4.  **HTML渲染**: 调用 `ThemeManager` 将组件数据模型渲染为HTML字符串。
-            此步骤会处理独立模板和主题内模板两种情况。
-        5.  **截图**: 调用 `ScreenshotEngine` 将生成的HTML转换为图片字节。
-        6.  **缓存写入**: 如果缓存未命中且启用了缓存，将生成的图片写入文件系统。
+        执行完整的组件渲染流程。
+        包含缓存检查、组件生命周期调用、依赖收集、HTML生成、截图以及缓存写入。
         """
         return await self._apply_caching_layer(self._render_component_core, context)
 
@@ -329,9 +242,12 @@ class RendererService:
         cache_path = None
         component = context.component
 
-        if Config.get_config("UI", "CACHE") and context.use_cache:
+        hot_reload = Config.get_config("UI", "HOT_RELOAD", False)
+        if Config.get_config("UI", "CACHE") and context.use_cache and not hot_reload:
             try:
-                template_name = component.template_name
+                template_name = str(
+                    getattr(component, "template_path", None) or component.template_name
+                )
                 data_dict = component.get_render_data()
                 resolved_data_dict = {}
                 for key, value in data_dict.items():
@@ -363,6 +279,7 @@ class RendererService:
         if (
             Config.get_config("UI", "CACHE")
             and context.use_cache
+            and not hot_reload
             and cache_path
             and result.image_bytes
         ):
@@ -375,154 +292,79 @@ class RendererService:
 
         return result
 
+    def _select_strategy(self, component: Renderable) -> RenderStrategy:
+        """
+        根据组件特性选择合适的渲染策略。
+        """
+        if getattr(component, "_is_standalone_template", False):
+            return TemplateFileRenderStrategy()
+
+        template_path = getattr(component, "template_path", None)
+        if isinstance(template_path, Path) and template_path.is_absolute():
+            return TemplateFileRenderStrategy()
+
+        return ComponentRenderStrategy()
+
     async def _render_component_core(self, context: "RenderContext") -> RenderResult:
         """
-        纯粹的核心渲染逻辑，不包含任何缓存处理。
-        此方法负责从组件数据模型生成最终的图片字节和HTML。
+        不含缓存处理的核心渲染逻辑，负责调度具体的渲染策略。
         """
-        component = context.component
-
         try:
             if not self._initialized:
                 await self.initialize()
-            assert context.theme_manager is not None, "ThemeManager 未初始化"
-            assert context.screenshot_engine is not None, "ScreenshotEngine 未初始化"
-
-            if (
-                hasattr(component, "template_path")
-                and isinstance(
-                    template_path := getattr(component, "template_path"),
-                    Path,
-                )
-                and template_path.is_absolute()
-            ):
-                await component.prepare()
-
-                logger.debug(f"正在渲染独立模板: '{template_path}'", "RendererService")
-
-                template_dir = template_path.parent
-                temp_loader = FileSystemLoader(str(template_dir))
-                temp_env = Environment(
-                    loader=temp_loader,
-                    enable_async=True,
-                    autoescape=select_autoescape(["html", "xml"]),
+            if not self._initialized or not context.screenshot_engine:
+                raise RenderingError(
+                    "渲染服务未正确初始化(可能缺少资源文件)，无法渲染组件。"
                 )
 
-                temp_env.globals.update(context.theme_manager.jinja_env.globals)
-                temp_env.filters.update(context.theme_manager.jinja_env.filters)
-                temp_env.globals["asset"] = (
-                    context.theme_manager._create_standalone_asset_loader(template_dir)
-                )
-                temp_env.filters["md"] = context.theme_manager._markdown_filter
+            strategy = self._select_strategy(context.component)
+            return await strategy.render(context)
 
-                data_dict = component.get_render_data()
-                template = temp_env.get_template(template_path.name)
-
-                template_context = {
-                    "theme": context.theme_manager.jinja_env.globals.get("theme", {}),
-                    "data": data_dict,
-                }
-                for key, value in data_dict.items():
-                    if key in RESERVED_TEMPLATE_KEYS:
-                        logger.warning(
-                            f"模板数据键 '{key}' 与渲染器保留关键字冲突，"
-                            f"在模板 '{component.template_name}' 中请使用 "
-                            f"'data.{key}' 访问。"
-                        )
-                    else:
-                        template_context[key] = value
-                html_content = await template.render_async(**template_context)
-
-                component_render_options = data_dict.get("render_options", {})
-                if not isinstance(component_render_options, dict):
-                    component_render_options = {}
-
-                final_render_options = component_render_options.copy()
-                final_render_options.update(context.render_options)
-
-                image_bytes = await context.screenshot_engine.render(
-                    html=html_content,
-                    base_url_path=template_dir,
-                    **final_render_options,
-                )
-
-                return RenderResult(image_bytes=image_bytes, html_content=html_content)
-
-            else:
-                await component.prepare()
-                await self._collect_dependencies_recursive(component, context)
-
-                data_dict = component.get_render_data()
-                component_render_options = data_dict.get("render_options", {})
-                if not isinstance(component_render_options, dict):
-                    component_render_options = {}
-
-                manifest_options = {}
-                variant = getattr(component, "variant", None)
-                if manifest := await context.theme_manager.get_template_manifest(
-                    component.template_name, skin=variant
-                ):
-                    manifest_options = manifest.get("render_options", {})
-
-                final_render_options = component_render_options.copy()
-                final_render_options.update(manifest_options)
-                final_render_options.update(context.render_options)
-
-                if not context.theme_manager.current_theme:
-                    raise RenderingError("渲染失败：主题未被正确加载。")
-
-                html_content = await context.theme_manager._render_component_to_html(
-                    context,
-                    **final_render_options,
-                )
-
-                screenshot_options = final_render_options.copy()
-                screenshot_options.pop("extra_css", None)
-                screenshot_options.pop("frameless", None)
-
-                image_bytes = await context.screenshot_engine.render(
-                    html=html_content,
-                    base_url_path=THEMES_PATH.parent,
-                    **screenshot_options,
-                )
-
-                return RenderResult(image_bytes=image_bytes, html_content=html_content)
-
+        except RenderingError:
+            raise
         except Exception as e:
             logger.error(
-                f"渲染组件 '{component.__class__.__name__}' 时发生错误",
+                f"渲染组件 '{context.component.__class__.__name__}' 时发生错误",
                 "RendererService",
                 e=e,
             )
             raise RenderingError(
-                f"渲染组件 '{component.__class__.__name__}' 失败"
+                f"渲染组件 '{context.component.__class__.__name__}' 失败"
             ) from e
 
     async def render(
         self, component: Renderable, use_cache: bool = False, **render_options
     ) -> bytes:
         """
-        统一的、多态的渲染入口，直接返回图片字节。
+        将组件渲染为图片字节数据。
 
         参数:
-            component: 一个 `Renderable` 实例 (例如通过 `TableBuilder().build()` 创建)。
-            use_cache: (可选) 是否启用渲染缓存，默认为 False。
-            **render_options: 传递给底层截图引擎的额外参数，例如 `viewport`。
+            component: 需要渲染的 Renderable 组件实例
+            use_cache: 是否启用渲染缓存，默认为 False
+            **render_options: 传递给底层截图引擎的额外参数，如 `viewport` (字典), `device_scale_factor` 等
 
         返回:
-            bytes: 渲染后的PNG图片字节数据。
+            bytes: 渲染后的PNG图片二进制数据
 
         异常:
-            RenderingError: 当渲染流程中任何步骤失败时抛出。
-        """
+            RenderingError: 当渲染流程中任何步骤（初始化、资源缺失、截图失败）发生错误时抛出
+        """  # noqa: E501
         if not self._initialized:
             await self.initialize()
-        assert self._theme_manager is not None, "ThemeManager 未初始化"
-        assert self._screenshot_engine is not None, "ScreenshotEngine 未初始化"
+        if (
+            not self._initialized
+            or not self._theme_manager
+            or not self._screenshot_engine
+            or not self._template_engine
+        ):
+            raise RenderingError(
+                "渲染服务未正确初始化(可能缺少资源文件)，无法生成图片。"
+            )
 
         context = RenderContext(
             renderer=self,
             theme_manager=self._theme_manager,
+            template_engine=self._template_engine,
             screenshot_engine=self._screenshot_engine,
             component=component,
             use_cache=use_cache,
@@ -557,20 +399,43 @@ class RendererService:
         """
         if not self._initialized:
             await self.initialize()
-        assert self._theme_manager is not None, "ThemeManager 未初始化"
-        assert self._screenshot_engine is not None, "ScreenshotEngine 未初始化"
+        if (
+            not self._initialized
+            or not self._theme_manager
+            or not self._template_engine
+            or not self._screenshot_engine
+        ):
+            raise RenderingError("渲染服务未正确初始化(可能缺少资源文件)。")
 
         context = RenderContext(
             renderer=self,
             theme_manager=self._theme_manager,
+            template_engine=self._template_engine,
             screenshot_engine=self._screenshot_engine,
             component=component,
             use_cache=False,
             render_options={"frameless": frameless},
         )
-        await self._collect_dependencies_recursive(component, context)
-        return await self._theme_manager._render_component_to_html(
-            context, frameless=frameless
+        await component.prepare()
+        await DependencyCollector.collect(component, context)
+
+        resolved_template_name = await self._theme_manager.resolve_component_template(
+            component, context
+        )
+        theme_css_template = self._template_engine.env.get_template("theme.css.jinja")
+        theme_css_content = await theme_css_template.render_async(
+            theme=self._theme_manager.current_theme_context
+        )
+
+        return await self._template_engine.render_component_to_html(
+            component,
+            resolved_template_name,
+            self._theme_manager.current_theme_context,
+            theme_css_content,
+            context.collected_inline_css,
+            list(context.collected_scripts),
+            list(context.collected_asset_styles),
+            frameless=frameless,
         )
 
     async def reload_theme(self) -> str:
@@ -583,12 +448,24 @@ class RendererService:
         """
         if not self._initialized:
             await self.initialize()
-        assert self._theme_manager is not None, "ThemeManager 未初始化"
+        if not self._initialized or not self._theme_manager:
+            raise RenderingError(
+                "渲染服务未正确初始化(可能缺少资源文件)，无法重新加载主题。"
+            )
 
-        self._theme_manager._manifest_cache.clear()
-        logger.debug("已清除UI清单缓存 (manifest cache)。")
+        if self._theme_manager.manifest_registry:
+            self._theme_manager.manifest_registry.clear_cache()
+            logger.debug("已清除UI清单缓存 (manifest cache)。")
         current_theme_name = Config.get_config("UI", "THEME", "default")
         await self._theme_manager.load_theme(current_theme_name)
+
+        if self._theme_manager.current_theme and self._template_engine:
+            self._template_engine.update_theme_loaders(
+                self._theme_manager.current_theme.assets_dir.parent
+            )
+        if self._template_engine and self._template_engine.env.cache:
+            self._template_engine.env.cache.clear()
+
         logger.info(f"主题 '{current_theme_name}' 已成功重载。")
         return current_theme_name
 
@@ -616,6 +493,14 @@ class RendererService:
             )
 
         await self._theme_manager.load_theme(theme_name)
+
+        if self._theme_manager.current_theme and self._template_engine:
+            self._template_engine.update_theme_loaders(
+                self._theme_manager.current_theme.assets_dir.parent
+            )
+        if self._template_engine and self._template_engine.env.cache:
+            self._template_engine.env.cache.clear()
+
         Config.set_config("UI", "THEME", theme_name, auto_save=True)
         logger.info(f"UI主题已切换为: {theme_name}")
         return theme_name

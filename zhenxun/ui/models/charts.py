@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Literal
+from typing_extensions import Self
 import uuid
 
 from pydantic import BaseModel, Field
@@ -94,7 +95,10 @@ class BaseChartData(RenderableComponent, ABC):
 class EChartsData(BaseChartData):
     """统一的 ECharts 图表数据模型"""
 
-    template_path: str = Field(..., exclude=True, description="图表组件的模板路径")
+    class Config:
+        populate_by_name = True
+
+    template_path: str = Field(..., exclude=True, description="图表组件的模板路径")  # type: ignore
     """图表组件的模板路径"""
     title_model: EChartsTitle | None = Field(
         None, alias="title", description="标题组件"
@@ -160,3 +164,142 @@ class EChartsData(BaseChartData):
     @property
     def template_name(self) -> str:
         return self.template_path
+
+    def set_title(
+        self, text: str, left: Literal["left", "center", "right"] = "center"
+    ) -> Self:
+        self.title_model = EChartsTitle(text=text, left=left)
+        return self
+
+    def set_grid(
+        self,
+        left: str | None = None,
+        right: str | None = None,
+        top: str | None = None,
+        bottom: str | None = None,
+        containLabel: bool = True,
+    ) -> Self:
+        self.grid_model = EChartsGrid(
+            left=left, right=right, top=top, bottom=bottom, containLabel=containLabel
+        )
+        return self
+
+    def set_tooltip(self, trigger: Literal["item", "axis", "none"]) -> Self:
+        self.tooltip_model = EChartsTooltip(trigger=trigger)
+        return self
+
+    def set_x_axis(
+        self,
+        type: Literal["category", "value", "time", "log"],
+        data: list[Any] | None = None,
+        show: bool = True,
+    ) -> Self:
+        self.x_axis_model = EChartsAxis(type=type, data=data, show=show)
+        return self
+
+    def set_y_axis(
+        self,
+        type: Literal["category", "value", "time", "log"],
+        data: list[Any] | None = None,
+        show: bool = True,
+    ) -> Self:
+        self.y_axis_model = EChartsAxis(type=type, data=data, show=show)
+        return self
+
+    def add_series(
+        self, type: str, data: list[Any], name: str | None = None, **kwargs: Any
+    ) -> Self:
+        series = EChartsSeries(type=type, data=data, name=name, **kwargs)
+        self.series_models.append(series)
+        return self
+
+    def set_legend(
+        self,
+        data: list[str],
+        orient: Literal["horizontal", "vertical"] = "horizontal",
+        left: str = "auto",
+    ) -> Self:
+        self.legend_model = {"data": data, "orient": orient, "left": left}
+        return self
+
+    def set_option(self, key: str, value: Any) -> Self:
+        self.raw_options[key] = value
+        return self
+
+    def set_background_image(self, image_name: str) -> Self:
+        self.background_image = image_name
+        return self
+
+    @classmethod
+    def bar_chart(
+        cls,
+        title: str,
+        items: list[tuple[str, int | float]],
+        direction: Literal["horizontal", "vertical"] = "horizontal",
+        background_image: str | None = None,
+    ) -> "EChartsData":
+        """便捷创建一个柱状图"""
+        categories = [item[0] for item in items]
+        values = [item[1] for item in items]
+
+        if direction == "horizontal":
+            x_axis = EChartsAxis(type="value")
+            y_axis = EChartsAxis(type="category", data=categories)
+        else:
+            x_axis = EChartsAxis(type="category", data=categories)
+            y_axis = EChartsAxis(type="value")
+
+        return cls(
+            template_path="components/charts/bar_chart",
+            title=EChartsTitle(text=title),
+            grid=None,
+            xAxis=x_axis,
+            yAxis=y_axis,
+            tooltip=EChartsTooltip(trigger="item"),
+            series=[EChartsSeries(type="bar", data=values)],
+            background_image=background_image,
+        )
+
+    @classmethod
+    def pie_chart(
+        cls, title: str, items: list[tuple[str, int | float]]
+    ) -> "EChartsData":
+        """便捷创建一个饼图"""
+        data = [{"name": name, "value": value} for name, value in items]
+        legend_data = [item[0] for item in items]
+        return cls(
+            template_path="components/charts/pie_chart",
+            title=EChartsTitle(text=title),
+            grid=None,
+            tooltip=EChartsTooltip(trigger="item"),
+            xAxis=None,
+            yAxis=None,
+            legend={"data": legend_data, "orient": "horizontal", "left": "auto"},
+            series=[EChartsSeries(type="pie", data=data, name=title)],
+            background_image=None,
+        )
+
+    @classmethod
+    def line_chart(
+        cls, title: str, categories: list[str], series: list[dict[str, Any]]
+    ) -> "EChartsData":
+        """便捷创建一个折线图"""
+        series_models = [
+            EChartsSeries(
+                type="line",
+                name=s.get("name", ""),
+                data=s.get("data", []),
+                smooth=s.get("smooth", False),
+            )
+            for s in series
+        ]
+        return cls(
+            template_path="components/charts/line_chart",
+            title=EChartsTitle(text=title),
+            grid=None,
+            xAxis=EChartsAxis(type="category", data=categories),
+            yAxis=EChartsAxis(type="value"),
+            tooltip=EChartsTooltip(trigger="axis"),
+            series=series_models,
+            background_image=None,
+        )

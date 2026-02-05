@@ -105,11 +105,10 @@ class SignManage:
         else:
             title = "好感度全局排行"
             tip = f"你的排名在全局第 {index} 位哦!"
-        from zhenxun.ui.builders import TableBuilder
 
-        builder = TableBuilder(title, tip)
-        builder.set_headers(column_name).add_rows(data_list)
-        return await ui.render(builder.build())
+        table = ui.table(title, tip)
+        table.set_headers(column_name).add_rows(data_list)
+        return await ui.render(table)
 
     @classmethod
     async def sign(

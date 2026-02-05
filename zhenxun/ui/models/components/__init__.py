@@ -1,18 +1,11 @@
-"""
-组件模型模块
-包含各种UI组件的数据模型
-"""
-
-from .alert import Alert
-from .badge import Badge
-from .divider import Divider, Rectangle
-from .kpi_card import KpiCard
-from .progress_bar import ProgressBar
-from .timeline import Timeline, TimelineItem
-from .user_info_block import UserInfoBlock
+from .data import KpiCard, Timeline, TimelineItem
+from .display import Avatar, AvatarGroup, Divider, Rectangle, UserInfoBlock
+from .feedback import Alert, Badge, ProgressBar
 
 __all__ = [
     "Alert",
+    "Avatar",
+    "AvatarGroup",
     "Badge",
     "Divider",
     "KpiCard",

@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import aiofiles
+from anyio import Path as AsyncPath
 
 from zhenxun.services.log import logger
 
@@ -258,10 +259,10 @@ class BaseRepoManager(ABC):
                 repo_url = prepare_repo_url(repo_url)
 
             # 检查本地目录是否存在
-            if not local_path.exists():
+            if not await AsyncPath(local_path).exists():
                 # 如果不存在，则克隆仓库
                 logger.info(f"克隆仓库 {repo_url} 到 {local_path}", LOG_COMMAND)
-                success, stdout, stderr = await run_git_command(
+                success, _stdout, stderr = await run_git_command(
                     f"clone -b {branch} {repo_url} {local_path}"
                 )
                 if not success:
@@ -396,7 +397,7 @@ class BaseRepoManager(ABC):
             result.new_version = new_version.strip()
 
             # 如果版本相同，则无需更新
-            if old_version.strip() == new_version.strip():
+            if old_version.strip() == new_version.strip() and not force:
                 logger.info(
                     f"仓库 {repo_url} 已是最新版本: {new_version.strip()}", LOG_COMMAND
                 )

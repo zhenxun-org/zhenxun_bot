@@ -21,12 +21,12 @@ from nonebot_plugin_alconna import (
 from nonebot_plugin_session import EventSession
 from pydantic import BaseModel, ValidationError
 
+from zhenxun import ui
 from zhenxun.configs.config import Config
 from zhenxun.configs.utils import PluginExtraData, RegisterConfig
 from zhenxun.services import group_settings_service, renderer_service
 from zhenxun.services.log import logger
 from zhenxun.services.tags import tag_manager
-from zhenxun.ui import builders as ui
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.platform import PlatformUtils
@@ -254,15 +254,15 @@ async def handle_list(arp: Arparma, bot: Bot, event: Event):
 
                 rows.append(row_data)
 
-            builder = ui.TableBuilder(
+            table = ui.table(
                 title=f"插件 '{plugin_name_str}' 全群配置",
                 tip=f"共查询 {len(rows)} 个群组",
             )
-            builder.set_headers(headers).add_rows(rows)
+            table.set_headers(headers).add_rows(rows)
 
             viewport_width = 300 + len(config_keys) * 280
             img = await renderer_service.render(
-                builder.build(), viewport={"width": viewport_width, "height": 10}
+                table, viewport={"width": viewport_width, "height": 10}
             )
             await MessageUtils.build_message(img).finish()
 
@@ -277,20 +277,20 @@ async def handle_list(arp: Arparma, bot: Bot, event: Event):
                     f"插件 '{plugin_name_str}' 没有可配置的全局项。"
                 ).finish()
 
-            builder = ui.TableBuilder(
+            table = ui.table(
                 title=f"插件 '{plugin_name_str}' 全局可配置项",
                 tip=(
                     f"位于 config.yaml, 使用 pconf set <key>=<value> "
                     f"-p {plugin_name_str} --global 进行设置"
                 ),
             )
-            builder.set_headers(["配置项", "当前值", "类型", "描述"])
+            table.set_headers(["配置项", "当前值", "类型", "描述"])
 
             for key, config_model in config_group.configs.items():
                 type_name = getattr(
                     config_model.type, "__name__", str(config_model.type)
                 )
-                builder.add_row(
+                table.add_row(
                     [
                         key,
                         truncate_text(str(config_model.value), 20),
@@ -299,7 +299,7 @@ async def handle_list(arp: Arparma, bot: Bot, event: Event):
                     ]
                 )
 
-            img = await renderer_service.render(builder.build())
+            img = await renderer_service.render(table)
             await MessageUtils.build_message(img).finish()
         else:
             model = await get_plugin_config_model(plugin_name_str)
@@ -309,11 +309,11 @@ async def handle_list(arp: Arparma, bot: Bot, event: Event):
                     f"插件 '{plugin_name_str}' 不支持分群配置。"
                 ).finish()
 
-            builder = ui.TableBuilder(
+            table = ui.table(
                 title=f"插件 '{plugin_name_str}' 可配置项",
                 tip=f"使用 pconf set <key>=<value> -p {plugin_name_str} 进行设置",
             )
-            builder.set_headers(["配置项", "类型", "描述", "默认值"])
+            table.set_headers(["配置项", "类型", "描述", "默认值"])
 
             for field in model_fields_list:
                 type_name = getattr(field.annotation, "__name__", str(field.annotation))
@@ -323,9 +323,9 @@ async def handle_list(arp: Arparma, bot: Bot, event: Event):
                     if field.field_info.default is not None
                     else "无"
                 )
-                builder.add_row([field.name, type_name, description, default_value])
+                table.add_row([field.name, type_name, description, default_value])
 
-            img = await renderer_service.render(builder.build())
+            img = await renderer_service.render(table)
             await MessageUtils.build_message(img).finish()
 
     else:

@@ -1,3 +1,5 @@
+from collections.abc import Callable
+import random
 import re
 from typing import overload
 
@@ -5,6 +7,7 @@ from nonebot.adapters import Bot
 from nonebot_plugin_uninfo import Session, SupportScope, Uninfo, get_interface
 
 from zhenxun.configs.config import BotConfig
+from zhenxun.configs.path_config import THEMES_PATH
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.services.cache.runtime_cache import (
     BanMemoryCache,
@@ -94,6 +97,31 @@ class CommonUtils:
             return [item.strip(",") for item in data.split("<") if item]
         elif isinstance(data, list):
             return "".join(cls.format(item) for item in data)
+
+    @staticmethod
+    def get_random_asset_factory(sub_path: str) -> Callable[[], str | None]:
+        """
+        创建一个从指定 assets 子目录随机选取资源的工厂函数。
+        用于 Pydantic 模型的 default_factory。
+
+        参数:
+            sub_path: 相对于 themes/default/assets/ 的子路径，例如 "ui/zhenxun/down"
+        """
+
+        def _factory() -> str | None:
+            target_dir = THEMES_PATH / "default" / "assets" / sub_path
+            if not target_dir.exists():
+                return None
+
+            images = [
+                f.name
+                for f in target_dir.iterdir()
+                if f.is_file()
+                and f.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]
+            ]
+            return f"{sub_path}/{random.choice(images)}" if images else None
+
+        return _factory
 
 
 class SqlUtils:

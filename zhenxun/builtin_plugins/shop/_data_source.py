@@ -146,11 +146,10 @@ async def gold_rank(session: Uninfo, group_id: str | None, num: int) -> bytes | 
     else:
         title = "金币全局排行"
         tip = f"你的排名在全局第 {index} 位哦!"
-    from zhenxun.ui.builders import TableBuilder
 
-    builder = TableBuilder(title, tip)
-    builder.set_headers(column_name).add_rows(data_list)
-    return await ui.render(builder.build())
+    table = ui.table(title, tip)
+    table.set_headers(column_name).add_rows(data_list)
+    return await ui.render(table)
 
 
 class ShopManage:
@@ -551,11 +550,10 @@ class ShopManage:
             return None
 
         column_name = ["-", "使用ID", "名称", "数量", "简介"]
-        from zhenxun.ui.builders import TableBuilder
 
-        builder = TableBuilder(f"{name}的道具仓库", "通过 使用道具[ID/名称] 令道具生效")
-        builder.set_headers(column_name).add_rows(table_rows)
-        return await ui.render(builder.build())
+        table = ui.table(f"{name}的道具仓库", "通过 使用道具[ID/名称] 令道具生效")
+        table.set_headers(column_name).add_rows(table_rows)
+        return await ui.render(table)
 
     @classmethod
     async def my_cost(cls, user_id: str, platform: str | None = None) -> int:

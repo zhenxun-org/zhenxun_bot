@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from typing import cast
 
 from nonebot.plugin import PluginMetadata
 from nonebot_plugin_alconna import (
@@ -21,7 +22,6 @@ from zhenxun.models.chat_history import ChatHistory
 from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.services import avatar_service
 from zhenxun.services.log import logger
-from zhenxun.ui.builders import TableBuilder
 from zhenxun.ui.models import ImageCell, TextCell
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
@@ -121,9 +121,12 @@ async def _(
     if not show_quit_member:
         fetch_count = count.result * 2
 
-    if rank_data := await ChatHistory.get_group_msg_rank(
+    raw_rank_data = await ChatHistory.get_group_msg_rank(
         group_id, fetch_count, "DES" if arparma.find("des") else "DESC", date_scope
-    ):
+    )
+
+    if raw_rank_data:
+        rank_data = cast(list[tuple[str, int]], raw_rank_data)
         rows_data = []
         platform = "qq"
 
@@ -174,10 +177,10 @@ async def _(
                 f"{date_scope[1].replace(microsecond=0)}"
             )
 
-        builder = TableBuilder(f"消息排行({count.result})", date_str)
-        builder.set_headers(column_name).add_rows(rows_data)
+        table = ui.table(f"消息排行({count.result})", date_str)
+        table.set_headers(column_name).add_rows(rows_data)
 
-        image_bytes = await ui.render(builder.build())
+        image_bytes = await ui.render(table)
 
         logger.info(
             f"查看消息排行 数量={count.result}", arparma.header_result, session=session

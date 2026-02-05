@@ -3,7 +3,7 @@ from pathlib import Path
 import random
 
 from zhenxun import ui
-from zhenxun.ui.builders import charts as chart_builders
+from zhenxun.ui.models.charts import EChartsData
 
 from .models import Barh
 
@@ -21,11 +21,14 @@ class ChartUtils:
             if BACKGROUND_PATH.exists()
             else None
         )
-        items = list(zip(data.category_data, data.data))
-        builder = chart_builders.bar_chart(
-            title=data.title, items=items, direction="horizontal"
-        )
-        if background_image_name:
-            builder.set_background_image(background_image_name)
 
-        return await ui.render(builder.build())
+        items = list(zip(data.category_data, data.data))
+
+        chart_data = EChartsData.bar_chart(
+            title=data.title,
+            items=items,  # type: ignore
+            direction="horizontal",
+            background_image=background_image_name,
+        )
+
+        return await ui.render(chart_data)

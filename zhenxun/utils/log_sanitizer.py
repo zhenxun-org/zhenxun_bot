@@ -46,6 +46,7 @@ def _sanitize_ui_html(html_string: str) -> str:
     """
     专门用于净化UI渲染调试HTML的函数。
     它会查找所有内联的base64数据（如字体、图片）并将其截断。
+    同时会折叠冗长的样式标签，避免主题 CSS 在日志中撑爆。
     """
     if not isinstance(html_string, str):
         return html_string
@@ -57,7 +58,30 @@ def _sanitize_ui_html(html_string: str) -> str:
         original_len = len(match.group(0)) - len(prefix)
         return f"{prefix}[...base64_omitted_len={original_len}...]"
 
-    return pattern.sub(replacer, html_string)
+    html_string = pattern.sub(replacer, html_string)
+
+    pattern_style = re.compile(
+        r"(<style[^>]*>)(.*?)(</style>)", re.DOTALL | re.IGNORECASE
+    )
+
+    def replacer_style(match):
+        start_tag, content, end_tag = match.group(1), match.group(2), match.group(3)
+        keywords = [
+            "Base Styles - Assembled by Jinja2",
+            "Utility Classes",
+            "@layer reset, base, components, utilities;",
+        ]
+
+        if len(content) > 600 or any(keyword in content for keyword in keywords):
+            excerpt = (
+                f"\n    /* [theme.css.jinja content hidden for brevity - "
+                f"{len(content)} chars] */\n"
+            )
+            return f"{start_tag}{excerpt}{end_tag}"
+
+        return match.group(0)
+
+    return pattern_style.sub(replacer_style, html_string)
 
 
 def _sanitize_nonebot_message(message: Message) -> Message:

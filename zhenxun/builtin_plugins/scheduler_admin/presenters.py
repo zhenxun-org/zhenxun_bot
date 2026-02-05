@@ -3,7 +3,6 @@ from typing import Any
 from zhenxun import ui
 from zhenxun.models.scheduled_job import ScheduledJob
 from zhenxun.services import scheduler_manager
-from zhenxun.ui.builders import TableBuilder
 from zhenxun.ui.models import StatusBadgeCell, TextCell
 from zhenxun.utils.pydantic_compat import model_json_schema
 
@@ -159,14 +158,14 @@ async def format_schedule_list_as_image(
     if not data_list:
         return "没有找到任何相关的定时任务。"
 
-    builder = TableBuilder(
+    table = ui.table(
         title, f"第 {current_page}/{total_pages} 页，共 {total_items} 条任务"
     )
-    builder.set_headers(
+    table.set_headers(
         ["ID", "插件", "Bot", "目标", "下次运行", "规则", "参数", "状态"]
     ).add_rows(data_list)
     return await ui.render(
-        builder.build(),
+        table,
         viewport={"width": 1400, "height": 10},
         device_scale_factor=2,
     )

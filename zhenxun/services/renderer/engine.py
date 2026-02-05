@@ -2,10 +2,10 @@ from pathlib import Path
 
 from nonebot_plugin_htmlrender import html_to_pic
 
-from .protocols import ScreenshotEngine
+from .types import BaseScreenshotEngine
 
 
-class PlaywrightEngine(ScreenshotEngine):
+class PlaywrightEngine(BaseScreenshotEngine):
     """使用 nonebot-plugin-htmlrender 实现的截图引擎。"""
 
     async def render(self, html: str, base_url_path: Path, **render_options) -> bytes:
@@ -26,9 +26,26 @@ class PlaywrightEngine(ScreenshotEngine):
         )
 
 
-def get_screenshot_engine() -> ScreenshotEngine:
+class EngineManager:
     """
-    截图引擎工厂函数。
-    目前只返回 PlaywrightEngine, 未来可以根据配置返回不同的引擎。
+    引擎管理器，负责加载和提供具体的截图引擎实例。
+    未来可在此处根据 Config 读取不同的驱动配置。
     """
-    return PlaywrightEngine()
+
+    def __init__(self):
+        self._engine_class: type[BaseScreenshotEngine] = PlaywrightEngine
+        self._instance: BaseScreenshotEngine | None = None
+
+    async def get_engine(self) -> BaseScreenshotEngine:
+        if not self._instance:
+            self._instance = self._engine_class()
+            await self._instance.initialize()
+        return self._instance
+
+    async def close(self):
+        if self._instance:
+            await self._instance.close()
+            self._instance = None
+
+
+engine_manager = EngineManager()

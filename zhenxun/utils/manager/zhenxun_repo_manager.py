@@ -436,6 +436,14 @@ class ZhenxunRepoManagerClass:
             branch: 分支名称
             force: 是否强制更新
         """
+        critical_dir = self.config.RESOURCE_PATH / "themes" / "default"
+        if not critical_dir.exists() or not any(critical_dir.iterdir()):
+            logger.warning(
+                f"检测到关键资源目录 {critical_dir} 缺失或为空，将开启强制修复模式。",
+                LOG_COMMAND,
+            )
+            force = True
+
         if await check_git():
             await self.resources_git_update(source, branch, force)
             logger.debug("使用git更新资源文件!", LOG_COMMAND)

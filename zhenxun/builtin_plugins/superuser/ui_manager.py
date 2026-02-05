@@ -56,6 +56,15 @@ __plugin_meta__ = PluginMetadata(
                 default_value=False,
                 type=bool,
             ),
+            RegisterConfig(
+                module="UI",
+                key="HOT_RELOAD",
+                value=False,
+                help="是否开启UI热重载模式 (修改HTML/CSS后立即生效，"
+                "性能较低，仅建议开发时开启)",
+                default_value=False,
+                type=bool,
+            ),
         ],
     ).to_dict(),
 )

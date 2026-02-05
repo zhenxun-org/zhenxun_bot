@@ -17,11 +17,7 @@ from zhenxun.services import (
     generate,
 )
 from zhenxun.services.log import logger
-from zhenxun.ui.builders import (
-    NotebookBuilder,
-    PluginMenuBuilder,
-)
-from zhenxun.ui.models import PluginMenuCategory
+from zhenxun.ui.models import PluginMenuCategory, PluginMenuData
 from zhenxun.utils.common_utils import format_usage_for_markdown
 from zhenxun.utils.enum import BlockType, PluginType
 from zhenxun.utils.platform import PlatformUtils
@@ -109,18 +105,23 @@ async def create_help_img(
     bot_avatar_path = await avatar_service.get_avatar_path(platform, bot_id)
     bot_avatar_url = bot_avatar_path.as_uri() if bot_avatar_path else ""
 
-    builder = PluginMenuBuilder(
-        bot_name=BotConfig.self_nickname,
-        bot_avatar_url=bot_avatar_url,
-        is_detail=is_detail,
-    )
-
+    categories_objects = []
     for category in categories_for_model:
-        builder.add_category(
+        categories_objects.append(
             PluginMenuCategory(name=category["name"], items=category["items"])
         )
 
-    return await ui.render(builder.build())
+    # 直接实例化 Data Model
+    menu_data = PluginMenuData(
+        bot_name=BotConfig.self_nickname,
+        bot_avatar_url=bot_avatar_url,
+        is_detail=is_detail,
+        plugin_count=plugin_count,
+        active_count=active_count,
+        categories=categories_objects
+    )
+
+    return await ui.render(menu_data)
 
 
 async def get_user_allow_help(user_id: str) -> list[PluginType]:
@@ -299,9 +300,9 @@ async def get_llm_help(question: str, user_id: str) -> str | bytes:
         threshold = Config.get_config("help", "LLM_HELPER_REPLY_AS_IMAGE_THRESHOLD", 50)
 
         if len(reply_text) > threshold:
-            builder = NotebookBuilder()
-            builder.text(reply_text)
-            return await ui.render(builder.build())
+            notebook = ui.notebook()
+            notebook.text(reply_text)
+            return await ui.render(notebook)
 
         return reply_text
 

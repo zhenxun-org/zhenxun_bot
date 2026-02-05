@@ -1,9 +1,12 @@
 from datetime import datetime
+from pathlib import Path
 import uuid
 
 import nonebot
 from nonebot.adapters import Bot
 from nonebot.drivers import Driver
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 from tortoise import Tortoise
 from tortoise.exceptions import IntegrityError, OperationalError
 import ujson as json
@@ -85,8 +88,54 @@ from bag_users t1
 
 @PriorityLifecycle.on_startup(priority=5)
 async def _():
-    if not ZhenxunRepoManager.check_resources_exists():
-        await ZhenxunRepoManager.resources_update()
+    try:
+        should_update = False
+        resource_path = ZhenxunRepoManager.config.RESOURCE_PATH
+        default_theme_path = resource_path / "themes" / "default"
+        version_file = resource_path / "__version__"
+
+        if (
+            not ZhenxunRepoManager.check_resources_exists()
+            or not default_theme_path.exists()
+            or not version_file.exists()
+        ):
+            should_update = True
+            logger.info(
+                "检测到资源文件(字体/主题/版本信息)缺失，准备进行初始化下载...",
+                "资源检查",
+            )
+        else:
+            spec_file = Path("resources.spec")
+            req_ver_str = ">=0.0.0"
+            if spec_file.exists():
+                try:
+                    for line in spec_file.read_text("utf-8").splitlines():
+                        if line.strip().startswith("require_resources_version:"):
+                            req_ver_str = line.split(":", 1)[1].strip().strip("'\"")
+                            break
+                except Exception:
+                    pass
+
+            local_ver_str = "0.0.0"
+            try:
+                content = version_file.read_text("utf-8").strip()
+                local_ver_str = (
+                    content.split(":", 1)[1].strip() if ":" in content else content
+                )
+            except Exception:
+                pass
+
+            if not SpecifierSet(req_ver_str).contains(Version(local_ver_str)):
+                should_update = True
+                logger.info(
+                    f"资源版本({local_ver_str})不满足要求({req_ver_str})，准备强制更新...",
+                    "资源检查",
+                )
+
+        if should_update:
+            await ZhenxunRepoManager.resources_update()
+    except Exception as e:
+        logger.error(f"资源检查或更新失败: {e}", "资源检查")
     """签到与用户的数据迁移"""
     if goods_list := await GoodsInfo.filter(uuid__isnull=True).all():
         for goods in goods_list:

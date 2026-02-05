@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 import asyncio
 from collections.abc import Callable
-import os
+from dataclasses import dataclass, field
+import inspect
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+import random
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from jinja2 import (
     ChoiceLoader,
@@ -16,26 +19,20 @@ from jinja2 import (
 )
 import markdown
 from markupsafe import Markup
-from pydantic import BaseModel
 import ujson as json
 
+from zhenxun.configs.config import Config
 from zhenxun.configs.path_config import THEMES_PATH
 from zhenxun.services.log import logger
-from zhenxun.services.renderer.protocols import Renderable
-from zhenxun.services.renderer.registry import asset_registry
-from zhenxun.utils.pydantic_compat import model_dump
+from zhenxun.services.renderer.types import Renderable, TemplateManifest, Theme
+from zhenxun.utils.pydantic_compat import model_validate
 
 if TYPE_CHECKING:
-    from .service import RenderContext
-
-from .config import RESERVED_TEMPLATE_KEYS
+    from .types import RenderContext
 
 
 def deep_merge_dict(base: dict, new: dict) -> dict:
-    """
-    递归地将 new 字典合并到 base 字典中。
-    new 字典中的值会覆盖 base 字典中的值。
-    """
+    """递归合并字典"""
     result = base.copy()
     for key, value in new.items():
         if isinstance(value, dict) and key in result and isinstance(result[key], dict):
@@ -45,234 +42,321 @@ def deep_merge_dict(base: dict, new: dict) -> dict:
     return result
 
 
-class RelativePathEnvironment(Environment):
-    """
-    一个自定义的 Jinja2 环境，重写了 join_path 方法以支持模板间的相对路径引用。
-    """
+class ManifestRegistry:
+    """负责加载、缓存和合并组件的 manifest.json 文件。"""
 
-    def join_path(self, template: str, parent: str) -> str:
-        """
-        如果模板路径以 './' 或 '../' 开头，则视为相对于父模板的路径进行解析。
-        否则，使用默认的解析行为。
-        """
-        if template.startswith("./") or template.startswith("../"):
-            path = os.path.normpath(os.path.join(os.path.dirname(parent), template))
-            return path.replace(os.path.sep, "/")
-        return super().join_path(template, parent)
+    def __init__(self, jinja_env: Environment):
+        self.jinja_env = jinja_env
+        self._manifest_cache: dict[str, TemplateManifest] = {}
+        self._lock = asyncio.Lock()
+
+    def clear_cache(self):
+        self._manifest_cache.clear()
+
+    async def get_manifest(
+        self, component_path: str, skin: str | None = None
+    ) -> TemplateManifest | None:
+        hot_reload = Config.get_config("UI", "HOT_RELOAD", False)
+        cache_key = f"{component_path}:{skin or 'base'}"
+        if not hot_reload and cache_key in self._manifest_cache:
+            return self._manifest_cache[cache_key]
+        async with self._lock:
+            if not hot_reload and cache_key in self._manifest_cache:
+                return self._manifest_cache[cache_key]
+            manifest_dict = await self._load_and_merge(component_path, skin)
+            if manifest_dict:
+                try:
+                    manifest_obj = model_validate(TemplateManifest, manifest_dict)
+                    if not hot_reload:
+                        self._manifest_cache[cache_key] = manifest_obj
+                    return manifest_obj
+                except Exception as e:
+                    logger.error(f"清单文件校验失败 [{cache_key}]: {e}")
+                    return None
+            return None
+
+    async def _load_and_merge(
+        self, component_path: str, skin: str | None
+    ) -> dict[str, Any] | None:
+        base_manifest = await self._load_single(component_path)
+        if skin:
+            skin_path = f"{component_path}/skins/{skin}"
+            skin_manifest = await self._load_single(skin_path)
+            if skin_manifest:
+                if base_manifest:
+                    return deep_merge_dict(base_manifest, skin_manifest)
+                return skin_manifest
+        return base_manifest
+
+    async def _load_single(self, path_str: str) -> dict[str, Any] | None:
+        normalized_path = path_str.replace("\\", "/")
+        manifest_path = f"{normalized_path}/manifest.json"
+        if not self.jinja_env.loader:
+            return None
+        try:
+            source, _, _ = self.jinja_env.loader.get_source(
+                self.jinja_env, manifest_path
+            )
+            return json.loads(source)
+        except (TemplateNotFound, json.JSONDecodeError):
+            return None
 
 
-class Theme(BaseModel):
-    name: str
-    palette: dict[str, Any]
-    style_css: str = ""
-    assets_dir: Path
-    default_assets_dir: Path
+class AssetRegistry:
+    """一个独立的、用于存储由插件动态注册的资源的单例服务。"""
+
+    _markdown_styles: ClassVar[dict[str, Path]] = {}
+
+    def register_markdown_style(self, name: str, path: Path):
+        if name in self._markdown_styles:
+            logger.warning(f"Markdown 样式 '{name}' 已被注册，将被覆盖。")
+        self._markdown_styles[name] = path
+
+    def resolve_markdown_style(self, name: str) -> Path | None:
+        return self._markdown_styles.get(name)
 
 
-class ResourceResolver:
-    """
-    一个独立的、用于解析组件和主题资源的类。
-    封装了所有复杂的路径查找和回退逻辑。
+asset_registry = AssetRegistry()
 
-    资源解析遵循以下回退顺序，以支持强大的主题覆盖和组件化:
 
-    1.  **相对路径 (`./`)**: 对于在模板中使用 `asset('./style.css')` 的情况，
-        这是组件内部的资源。
-        a.  **皮肤资源**: 首先在当前组件的皮肤目录中查找
-            (`.../skins/{variant_name}/assets/`)。
-            这允许皮肤完全覆盖其组件的默认资源。
-        b.  **当前主题组件资源**: 接着在当前激活主题的组件根目录中查找
-            (`.../{theme_name}/.../assets/`)。
-        c.  **默认主题组件资源**: 如果仍未找到，最后回退到 `default` 主题中
-            对应的组件目录
-            (`.../default/.../assets/`) 查找。这是核心的回退逻辑。
+@dataclass
+class AssetRequest:
+    asset_path: str
+    template_name: str
+    theme_manager: "ThemeManager"
+    is_dir: bool = False
 
-    2.  **全局路径**: 对于使用 `asset('js/script.js')` 的情况，这是主题的全局资源。
-        a.  **当前主题全局资源**: 在当前激活主题的根 `assets` 目录中查找
-            (`themes/{theme_name}/assets/`)。
-        b.  **默认主题全局资源**: 如果找不到，则回退到 `default` 主题的根 `assets` 目录
-            (`themes/default/assets/`)。
-    """
 
-    def __init__(self, theme_manager: "ThemeManager"):
-        self.theme_manager = theme_manager
+@dataclass
+class ComponentDependency:
+    """组件静态依赖缓存容器"""
 
-    def _find_component_root(self, start_path: Path) -> Path:
-        """从给定路径向上查找，找到包含 manifest.json 的组件根目录。"""
-        current_path = start_path.parent
-        themes_root_parts = len(THEMES_PATH.parts)
-        for _ in range(len(current_path.parts) - themes_root_parts):
-            if (current_path / "manifest.json").exists():
-                return current_path
-            if current_path.parent == current_path:
-                break
-            current_path = current_path.parent
-        return start_path.parent
+    inline_css: list[str] = field(default_factory=list)
+    scripts: list[str] = field(default_factory=list)
+    asset_styles: list[str] = field(default_factory=list)
 
-    def _search_paths_for_relative_asset(
-        self, asset_path: str, parent_template_name: str
-    ) -> list[tuple[str, Path]]:
-        """为相对路径的资源生成所有可能的查找路径元组 (描述, 路径)。"""
-        if not self.theme_manager.current_theme:
-            return []
 
-        paths_to_check: list[tuple[str, Path]] = []
-        current_theme_name = self.theme_manager.current_theme.name
-        current_theme_root = self.theme_manager.current_theme.assets_dir.parent
-        default_theme_root = self.theme_manager.current_theme.default_assets_dir.parent
+class IAssetResolver(ABC):
+    @abstractmethod
+    def resolve(self, request: AssetRequest) -> Path | None:
+        pass
 
-        if not self.theme_manager.jinja_env.loader:
-            return []
 
-        source_info = self.theme_manager.jinja_env.loader.get_source(
-            self.theme_manager.jinja_env, parent_template_name
-        )
+class NamespaceResolver(IAssetResolver):
+    def resolve(self, request: AssetRequest) -> Path | None:
+        if (
+            not request.asset_path.startswith("@")
+            or "/" not in request.asset_path
+            or not request.theme_manager.jinja_env
+        ):
+            return None
+        try:
+            namespace, rel_path = request.asset_path.split("/", 1)
+            loader = request.theme_manager.jinja_env.loader
+            if (
+                isinstance(loader, ChoiceLoader)
+                and loader.loaders
+                and isinstance(loader.loaders[0], PrefixLoader)
+            ):
+                prefix_loader = loader.loaders[0]
+                if namespace in prefix_loader.mapping:
+                    loader_for_ns = prefix_loader.mapping[namespace]
+                    if isinstance(loader_for_ns, FileSystemLoader):
+                        base_path = Path(loader_for_ns.searchpath[0])
+                        file_path = (base_path / rel_path).resolve()
+                        if (request.is_dir and file_path.is_dir()) or (
+                            not request.is_dir and file_path.is_file()
+                        ):
+                            logger.debug(
+                                f"解析资源 '{request.asset_path}' -> "
+                                f"找到 命名空间 '{namespace}' 资源: '{file_path}'"
+                            )
+                            return file_path
+                        return None
+        except Exception:
+            pass
+        return None
+
+
+class ComponentContextResolver(IAssetResolver):
+    def resolve(self, request: AssetRequest) -> Path | None:
+        if not (
+            request.asset_path.startswith("./") or request.asset_path.startswith("../")
+        ):
+            return None
+        if (
+            not request.theme_manager.current_theme
+            or not request.theme_manager.jinja_env
+            or not request.theme_manager.jinja_env.loader
+        ):
+            return None
+        try:
+            source_info = request.theme_manager.jinja_env.loader.get_source(
+                request.theme_manager.jinja_env, request.template_name
+            )
+        except TemplateNotFound:
+            return None
         if not source_info[1]:
-            return []
+            return None
 
         parent_template_abs_path = Path(source_info[1])
-
-        component_logical_root = Path(parent_template_name).parent
-
-        if (
-            "/skins/" in parent_template_abs_path.as_posix()
-            or "\\skins\\" in parent_template_abs_path.as_posix()
-        ):
-            skin_dir = parent_template_abs_path.parent
-            paths_to_check.append(
-                (
-                    f"'{current_theme_name}' 主题皮肤资源",
-                    skin_dir / "assets" / asset_path,
-                )
-            )
-
-        paths_to_check.append(
-            (
-                f"'{current_theme_name}' 主题组件资源",
-                current_theme_root / component_logical_root / "assets" / asset_path,
-            )
+        component_logical_root = Path(request.template_name).parent
+        current_theme_root = request.theme_manager.current_theme.assets_dir.parent
+        default_theme_root = (
+            request.theme_manager.current_theme.default_assets_dir.parent
+        )
+        asset_rel_clean = (
+            request.asset_path[2:]
+            if request.asset_path.startswith("./")
+            else request.asset_path
         )
 
-        if current_theme_name != "default":
-            paths_to_check.append(
-                (
-                    "'default' 主题组件资源 (回退)",
-                    default_theme_root / component_logical_root / "assets" / asset_path,
+        if "/skins/" in parent_template_abs_path.as_posix():
+            skin_asset = parent_template_abs_path.parent / "assets" / asset_rel_clean
+            if (request.is_dir and skin_asset.is_dir()) or (
+                not request.is_dir and skin_asset.is_file()
+            ):
+                theme_name = request.theme_manager.current_theme.name
+                logger.debug(
+                    f"解析资源 '{request.asset_path}' -> "
+                    f"找到 '{theme_name}' 主题皮肤资源: '{skin_asset}'"
                 )
+                return skin_asset
+        theme_comp_asset = (
+            current_theme_root / component_logical_root / "assets" / asset_rel_clean
+        )
+        if (request.is_dir and theme_comp_asset.is_dir()) or (
+            not request.is_dir and theme_comp_asset.is_file()
+        ):
+            theme_name = request.theme_manager.current_theme.name
+            logger.debug(
+                f"解析资源 '{request.asset_path}' -> "
+                f"找到 '{theme_name}' 主题组件资源: '{theme_comp_asset}'"
             )
-        return paths_to_check
+            return theme_comp_asset
+        if request.theme_manager.current_theme.name != "default":
+            default_comp_asset = (
+                default_theme_root / component_logical_root / "assets" / asset_rel_clean
+            )
+            if (request.is_dir and default_comp_asset.is_dir()) or (
+                not request.is_dir and default_comp_asset.is_file()
+            ):
+                logger.debug(
+                    f"解析资源 '{request.asset_path}' -> "
+                    f"找到 'default' 主题组件资源 (回退): '{default_comp_asset}'"
+                )
+                return default_comp_asset
+        return None
+
+
+class ThemeGlobalResolver(IAssetResolver):
+    def resolve(self, request: AssetRequest) -> Path | None:
+        if (
+            request.asset_path.startswith(("@", "./", "../"))
+            or not request.theme_manager.current_theme
+        ):
+            return None
+        theme_asset = (
+            request.theme_manager.current_theme.assets_dir / request.asset_path
+        )
+        if (request.is_dir and theme_asset.is_dir()) or (
+            not request.is_dir and theme_asset.is_file()
+        ):
+            theme_name = request.theme_manager.current_theme.name
+            logger.debug(
+                f"解析资源 '{request.asset_path}' -> "
+                f"找到 '{theme_name}' 主题全局资源: '{theme_asset}'"
+            )
+            return theme_asset
+        if request.theme_manager.current_theme.name != "default":
+            default_asset = (
+                request.theme_manager.current_theme.default_assets_dir
+                / request.asset_path
+            )
+            if (request.is_dir and default_asset.is_dir()) or (
+                not request.is_dir and default_asset.is_file()
+            ):
+                logger.debug(
+                    f"解析资源 '{request.asset_path}' -> "
+                    f"找到 'default' 主题全局资源 (回退): '{default_asset}'"
+                )
+                return default_asset
+        return None
+
+
+class AssetResolutionService:
+    def __init__(self, theme_manager: "ThemeManager"):
+        self.theme_manager = theme_manager
+        self.resolvers: list[IAssetResolver] = [
+            NamespaceResolver(),
+            ComponentContextResolver(),
+            ThemeGlobalResolver(),
+        ]
+
+    def register_resolver(self, resolver: IAssetResolver, index: int = -1):
+        self.resolvers.insert(index, resolver)
+
+    def resolve_directory_path(
+        self, asset_path: str, current_template_name: str
+    ) -> Path | None:
+        request = AssetRequest(
+            asset_path=asset_path,
+            template_name=current_template_name,
+            theme_manager=self.theme_manager,
+            is_dir=True,
+        )
+        for resolver in self.resolvers:
+            if result_path := resolver.resolve(request):
+                return result_path
+        return None
 
     def resolve_asset_uri(self, asset_path: str, current_template_name: str) -> str:
-        """解析资源路径，实现完整的回退逻辑，并返回可用的URI。"""
-        if (
-            not self.theme_manager.current_theme
-            or not self.theme_manager.jinja_env.loader
-        ):
-            return ""
-
-        if asset_path.startswith("@"):
-            try:
-                if "/" not in asset_path:
-                    raise TemplateNotFound(f"无效的命名空间路径: {asset_path}")
-
-                namespace, rel_path = asset_path.split("/", 1)
-
-                loader = self.theme_manager.jinja_env.loader
-                if (
-                    isinstance(loader, ChoiceLoader)
-                    and loader.loaders
-                    and isinstance(loader.loaders[0], PrefixLoader)
-                ):
-                    prefix_loader = loader.loaders[0]
-                    if namespace in prefix_loader.mapping:
-                        loader_for_namespace = prefix_loader.mapping[namespace]
-                        if isinstance(loader_for_namespace, FileSystemLoader):
-                            base_path = Path(loader_for_namespace.searchpath[0])
-                            file_abs_path = (base_path / rel_path).resolve()
-
-                            if file_abs_path.is_file():
-                                logger.debug(
-                                    f"Resolved namespaced asset"
-                                    f" '{asset_path}' -> '{file_abs_path}'"
-                                )
-                                return file_abs_path.as_uri()
-                            else:
-                                raise TemplateNotFound(asset_path)
-                        else:
-                            raise TemplateNotFound(
-                                f"Unsupported loader type for namespace '{namespace}'."
-                            )
-                    else:
-                        raise TemplateNotFound(f"Namespace '{namespace}' not found.")
-                else:
-                    raise TemplateNotFound(
-                        f"无法解析命名空间资源 '{asset_path}'，加载器结构不符合预期。"
-                    )
-
-            except TemplateNotFound:
-                logger.warning(f"资源文件在命名空间中未找到: '{asset_path}'")
-                return ""
-
-        search_paths: list[tuple[str, Path]] = []
-        if asset_path.startswith("./") or asset_path.startswith("../"):
-            relative_part = (
-                asset_path[2:] if asset_path.startswith("./") else asset_path
-            )
-            search_paths.extend(
-                self._search_paths_for_relative_asset(
-                    relative_part, current_template_name
-                )
-            )
-        else:
-            search_paths.append(
-                (
-                    f"'{self.theme_manager.current_theme.name}' 主题全局资源",
-                    self.theme_manager.current_theme.assets_dir / asset_path,
-                )
-            )
-            if self.theme_manager.current_theme.name != "default":
-                search_paths.append(
-                    (
-                        "'default' 主题全局资源 (回退)",
-                        self.theme_manager.current_theme.default_assets_dir
-                        / asset_path,
-                    )
-                )
-
-        for source_desc, path in search_paths:
-            if path.exists():
-                logger.debug(f"解析资源 '{asset_path}' -> 找到 {source_desc}: '{path}'")
-                return path.absolute().as_uri()
-
+        hot_reload = Config.get_config("UI", "HOT_RELOAD", False)
+        cache_key = (asset_path, current_template_name)
+        if not hot_reload and cache_key in self.theme_manager._asset_resolution_cache:
+            return self.theme_manager._asset_resolution_cache[cache_key]
+        request = AssetRequest(
+            asset_path=asset_path,
+            template_name=current_template_name,
+            theme_manager=self.theme_manager,
+        )
+        for resolver in self.resolvers:
+            if result_path := resolver.resolve(request):
+                uri = result_path.absolute().as_uri()
+                if not hot_reload:
+                    self.theme_manager._asset_resolution_cache[cache_key] = uri
+                return uri
         logger.warning(
-            f"资源文件未找到: '{asset_path}' (在模板 '{current_template_name}' 中引用)"
+            f"资源文件未找到: '{asset_path}' (在 '{current_template_name}' 中)"
         )
         return ""
 
 
 class ThemeManager:
-    def __init__(self, env: Environment):
+    def __init__(self):
         """
         主题管理器，负责UI主题的加载、解析和模板渲染。
 
         主要职责:
         - 加载和管理UI主题，包括 `palette.json` (调色板) 和 `theme.css.jinja`(主题样式)
-        - 配置和持有核心的 Jinja2 环境实例。
-        - 向 Jinja2 环境注入全局函数，如 `asset()` 和 `render()`，供模板使用。
-        - 实现`asset()`函数的资源解析逻辑，支持皮肤、组件、主题和默认主题之间的资源回退
-        - 封装将 `Renderable` 组件渲染为最终HTML的复杂逻辑。
         """
-        self.jinja_env = env
         self.current_theme: Theme | None = None
+        self.jinja_env: Environment | None = None
+        self.manifest_registry: ManifestRegistry | None = None
+        self.asset_service = AssetResolutionService(self)
+        self.current_theme_context: dict[str, Any] = {}
+        self.current_default_palette: dict[str, Any] = {}
 
-        self.jinja_env.globals["render"] = self._global_render_component
-        self.jinja_env.globals["asset"] = self._create_asset_loader()
-        self.jinja_env.globals["resolve_template"] = self._resolve_component_template
+        self._asset_resolution_cache: dict[tuple[str, str], str] = {}
+        self._global_template_cache: dict[str, str] = {}
+        self._component_dependency_cache: dict[
+            tuple[type, str, str | None], ComponentDependency
+        ] = {}
 
-        self.jinja_env.filters["md"] = self._markdown_filter
-
-        self._manifest_cache: dict[str, Any] = {}
-        self._manifest_cache_lock = asyncio.Lock()
+    def bind_template_engine(self, env: Environment):
+        """绑定模板引擎环境，用于Manifest加载和asset解析"""
+        self.jinja_env = env
+        self.manifest_registry = ManifestRegistry(self.jinja_env)
 
     def list_available_themes(self) -> list[str]:
         """扫描主题目录并返回所有可用的主题名称。"""
@@ -280,31 +364,75 @@ class ThemeManager:
             return []
         return [d.name for d in THEMES_PATH.iterdir() if d.is_dir()]
 
-    def _create_asset_loader(self) -> Callable[..., str]:
+    def create_asset_loader(self) -> Callable[..., str]:
         """
         创建一个闭包函数 (Jinja2中的 `asset()` 函数)，使用
-        ResourceResolver 进行路径解析。
+        AssetResolutionService 进行路径解析。
         """
-        resolver = ResourceResolver(self)
 
         @pass_context
         def asset_loader(ctx, asset_path: str) -> str:
             if not ctx.name:
                 logger.warning("Jinja2 上下文缺少模板名称，无法进行资源解析。")
-                return resolver.resolve_asset_uri(asset_path, "unknown_template")
+                return self.asset_service.resolve_asset_uri(
+                    asset_path, "unknown_template"
+                )
             parent_template_name = ctx.name
-            return resolver.resolve_asset_uri(asset_path, parent_template_name)
+            return self.asset_service.resolve_asset_uri(
+                asset_path, parent_template_name
+            )
 
         return asset_loader
+
+    def create_random_asset_loader(self) -> Callable[..., str]:
+        """
+        创建一个闭包函数 (Jinja2中的 `random_asset()` 函数)。
+        用于从指定目录随机获取一个资源文件的 URI。
+        """
+
+        @pass_context
+        def random_loader(ctx, asset_path: str, key: str | None = None) -> str:
+            if not ctx.name:
+                return ""
+            return self.get_random_asset_uri(asset_path, ctx.name, key)
+
+        return random_loader
+
+    def get_random_asset_uri(
+        self, path_pattern: str, current_template_name: str, key: str | None = None
+    ) -> str:
+        """解析目录并返回随机文件URI"""
+        if not Config.get_config("UI", "ENABLE_RANDOM_DECORATION", True):
+            return ""
+
+        dir_path = self.asset_service.resolve_directory_path(
+            path_pattern, current_template_name
+        )
+        if not dir_path or not dir_path.is_dir():
+            return ""
+
+        valid_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
+        images = [
+            f
+            for f in dir_path.iterdir()
+            if f.is_file() and f.suffix.lower() in valid_exts
+        ]
+
+        if not images:
+            return ""
+
+        return random.choice(images).absolute().as_uri()
 
     def _create_standalone_asset_loader(
         self, local_base_path: Path
     ) -> Callable[[str], str]:
         """为独立模板创建一个专用的 asset loader。"""
-        resolver = ResourceResolver(self)
 
         def asset_loader(asset_path: str) -> str:
-            return resolver.resolve_asset_uri(asset_path, str(local_base_path))
+            full_path = local_base_path / asset_path
+            if full_path.exists():
+                return full_path.absolute().as_uri()
+            return ""
 
         return asset_loader
 
@@ -313,6 +441,9 @@ class ThemeManager:
         一个全局的Jinja2函数，用于在模板内部渲染子组件
         它封装了查找模板、设置上下文和渲染的逻辑。
         """
+        if not self.jinja_env:
+            return ""
+
         if not component:
             return ""
         try:
@@ -323,7 +454,7 @@ class ThemeManager:
                     self.theme_manager = self
 
             mock_context = MockContext()
-            template_path = await self._resolve_component_template(
+            template_path = await self.resolve_component_template(
                 component,
                 mock_context,  # type: ignore
             )
@@ -371,45 +502,44 @@ class ThemeManager:
             theme_name = "default"
             theme_dir = THEMES_PATH / "default"
 
+        self._asset_resolution_cache.clear()
+        self._global_template_cache.clear()
+        self._component_dependency_cache.clear()
+        if self.manifest_registry:
+            self.manifest_registry.clear_cache()
+
         default_palette_path = THEMES_PATH / "default" / "palette.json"
         default_palette = (
             json.loads(default_palette_path.read_text("utf-8"))
             if default_palette_path.exists()
             else {}
         )
-        if self.jinja_env.loader and isinstance(self.jinja_env.loader, ChoiceLoader):
-            current_loaders = list(self.jinja_env.loader.loaders)
-            if len(current_loaders) > 1 and isinstance(
-                current_loaders[0], PrefixLoader
-            ):
-                prefix_loader = current_loaders[0]
-                new_theme_loader = FileSystemLoader(
-                    [str(theme_dir), str(THEMES_PATH / "default")]
-                )
-                self.jinja_env.loader.loaders = [prefix_loader, new_theme_loader]
 
         palette_path = theme_dir / "palette.json"
-        palette = (
+        target_palette = (
             json.loads(palette_path.read_text("utf-8")) if palette_path.exists() else {}
         )
 
+        final_palette = deep_merge_dict(default_palette, target_palette)
+
         self.current_theme = Theme(
             name=theme_name,
-            palette=palette,
+            palette=final_palette,
+            style_css="",
             assets_dir=theme_dir / "assets",
             default_assets_dir=THEMES_PATH / "default" / "assets",
         )
         theme_context_dict = {
             "name": theme_name,
-            "palette": palette,
+            "palette": final_palette,
             "assets_dir": theme_dir / "assets",
             "default_assets_dir": THEMES_PATH / "default" / "assets",
         }
-        self.jinja_env.globals["theme"] = theme_context_dict
-        self.jinja_env.globals["default_theme_palette"] = default_palette
+        self.current_theme_context = theme_context_dict
+        self.current_default_palette = default_palette
         logger.info(f"主题管理器已加载主题: {theme_name}")
 
-    async def _resolve_component_template(
+    async def resolve_component_template(
         self, component: Renderable, context: "RenderContext"
     ) -> str:
         """
@@ -425,17 +555,41 @@ class ThemeManager:
         入口文件名默认为 `main.html`，但可以被组件目录下的 `manifest.json` 文件中的
         `entrypoint` 字段覆盖。
         """
-        component_path_base = str(component.template_name)
+        from zhenxun.ui.registry import registry as component_registry
+
+        instance_path = getattr(component, "template_path", None)
+
+        registry_path = component_registry.get_template_for_class(type(component))
+
+        class_path = getattr(component, "template_name", "")
+
+        raw_path = instance_path or registry_path or class_path
+
+        if not raw_path:
+            raise ValueError(f"组件 {type(component).__name__} 未绑定任何模板路径。")
+
+        hot_reload = Config.get_config("UI", "HOT_RELOAD", False)
+
+        component_path_base = str(raw_path).replace("\\", "/")
 
         variant = getattr(component, "variant", None)
         cache_key = f"{component_path_base}::{variant or 'default'}"
-        if cached_path := context.resolved_template_paths.get(cache_key):
+
+        if not hot_reload and (
+            cached_path := self._global_template_cache.get(cache_key)
+        ):
+            return cached_path
+
+        if not hot_reload and (
+            cached_path := context.resolved_template_paths.get(cache_key)
+        ):
             logger.trace(f"模板路径缓存命中: '{cache_key}' -> '{cached_path}'")
             return cached_path
 
         if Path(component_path_base).suffix:
             try:
-                self.jinja_env.get_template(component_path_base)
+                if self.jinja_env:
+                    self.jinja_env.get_template(component_path_base)
                 logger.debug(f"解析到直接模板路径: '{component_path_base}'")
                 return component_path_base
             except TemplateNotFound as e:
@@ -444,7 +598,7 @@ class ThemeManager:
 
         base_manifest = await self.get_template_manifest(component_path_base)
 
-        skin_to_use = variant or (base_manifest.get("skin") if base_manifest else None)
+        skin_to_use = variant or (base_manifest.skin if base_manifest else None)
 
         final_manifest = await self.get_template_manifest(
             component_path_base, skin=skin_to_use
@@ -452,8 +606,8 @@ class ThemeManager:
         logger.debug(f"final_manifest: {final_manifest}")
 
         entrypoint_filename = (
-            final_manifest.get("entrypoint", "main.html")
-            if final_manifest
+            final_manifest.entrypoint
+            if final_manifest and final_manifest.entrypoint
             else "main.html"
         )
 
@@ -471,9 +625,12 @@ class ThemeManager:
 
         for path in potential_paths:
             try:
-                self.jinja_env.get_template(path)
+                if self.jinja_env:
+                    self.jinja_env.get_template(path)
                 logger.debug(f"解析到模板路径: '{path}'")
-                context.resolved_template_paths[cache_key] = path
+                if not hot_reload:
+                    context.resolved_template_paths[cache_key] = path
+                    self._global_template_cache[cache_key] = path
                 return path
             except TemplateNotFound:
                 continue
@@ -485,95 +642,28 @@ class ThemeManager:
         logger.error(err_msg)
         raise TemplateNotFound(err_msg)
 
-    async def _load_single_manifest(self, path_str: str) -> dict[str, Any] | None:
-        """从指定路径加载单个 manifest.json 文件。"""
-        normalized_path = path_str.replace("\\", "/")
-        manifest_path_str = f"{normalized_path}/manifest.json"
-
-        if not self.jinja_env.loader:
-            return None
-
-        try:
-            source, filepath, _ = self.jinja_env.loader.get_source(
-                self.jinja_env, manifest_path_str
-            )
-            logger.debug(f"找到清单文件: '{manifest_path_str}' (从 '{filepath}' 加载)")
-            return json.loads(source)
-        except TemplateNotFound:
-            logger.trace(f"未找到清单文件: '{manifest_path_str}'")
-            return None
-        except json.JSONDecodeError:
-            logger.warning(f"清单文件 '{manifest_path_str}' 解析失败")
-            return None
-
-    async def _load_and_merge_manifests(
-        self, component_path: Path | str, skin: str | None = None
-    ) -> dict[str, Any] | None:
-        """加载基础和皮肤清单并进行合并。"""
-        logger.debug(f"开始加载清单: component_path='{component_path}', skin='{skin}'")
-
-        base_manifest = await self._load_single_manifest(str(component_path))
-
-        if skin:
-            skin_path = Path(component_path) / "skins" / skin
-            skin_manifest = await self._load_single_manifest(str(skin_path))
-
-            if skin_manifest:
-                if base_manifest:
-                    merged = deep_merge_dict(base_manifest, skin_manifest)
-                    logger.debug(
-                        f"已合并基础清单和皮肤清单: '{component_path}' + skin '{skin}'"
-                    )
-                    return merged
-                else:
-                    logger.debug(f"只找到皮肤清单: '{skin_path}'")
-                    return skin_manifest
-
-        if base_manifest:
-            logger.debug(f"只找到基础清单: '{component_path}'")
-        else:
-            logger.debug(f"未找到任何清单: '{component_path}'")
-
-        return base_manifest
-
     async def get_template_manifest(
         self, component_path: str, skin: str | None = None
-    ) -> dict[str, Any] | None:
+    ) -> Any | None:
         """
         查找并解析组件的 manifest.json 文件。
-        支持皮肤清单的继承与合并,并带有缓存。
 
-        Args:
+        参数:
             component_path: 组件路径
             skin: 皮肤名称(可选)
 
-        Returns:
+        返回:
             合并后的清单字典,如果不存在则返回 None
         """
-        cache_key = f"{component_path}:{skin or 'base'}"
-
-        if cache_key in self._manifest_cache:
-            logger.debug(f"清单缓存命中: '{cache_key}'")
-            return self._manifest_cache[cache_key]
-
-        async with self._manifest_cache_lock:
-            if cache_key in self._manifest_cache:
-                logger.debug(f"清单缓存命中(锁内): '{cache_key}'")
-                return self._manifest_cache[cache_key]
-
-            manifest = await self._load_and_merge_manifests(component_path, skin)
-
-            self._manifest_cache[cache_key] = manifest
-            logger.debug(f"清单已缓存: '{cache_key}'")
-
-            return manifest
+        if not self.manifest_registry:
+            return None
+        return await self.manifest_registry.get_manifest(component_path, skin)
 
     async def resolve_markdown_style_path(
         self, style_name: str, context: "RenderContext"
     ) -> Path | None:
         """
         按照 注册 -> 主题约定 -> 默认约定 的顺序解析 Markdown 样式路径。
-        [新逻辑] 使用传入的上下文进行缓存。
         """
         if cached_path := context.resolved_style_paths.get(style_name):
             logger.trace(f"Markdown样式路径缓存命中: '{style_name}'")
@@ -619,64 +709,107 @@ class ThemeManager:
 
         return resolved_path
 
-    async def _render_component_to_html(
-        self,
-        context: "RenderContext",
-        **kwargs,
-    ) -> str:
-        """将 Renderable 组件渲染成 HTML 字符串，并处理异步数据。"""
-        component = context.component
-        assert self.current_theme is not None, "主题加载失败"
 
-        data_dict = component.get_render_data()
+class DependencyCollector:
+    """
+    负责递归遍历组件树，收集 CSS/JS 依赖。
+    """
 
-        theme_context_dict = model_dump(self.current_theme)
+    @classmethod
+    async def collect(cls, component: Renderable, context: "RenderContext"):
+        hot_reload = Config.get_config("UI", "HOT_RELOAD", False)
+        component_id = id(component)
+        if component_id in context.processed_components:
+            return
+        context.processed_components.add(component_id)
 
-        theme_css_template = self.jinja_env.get_template("theme.css.jinja")
-        theme_css_content = await theme_css_template.render_async(
-            theme=theme_context_dict
+        component_path_base = str(
+            getattr(component, "template_path", None) or component.template_name
         )
+        variant = getattr(component, "variant", None)
+        cache_key = (type(component), component_path_base, variant)
 
-        resolved_template_name = await self._resolve_component_template(
-            component, context
-        )
-        logger.debug(
-            f"正在渲染组件 '{component.template_name}' "
-            f"(主题: {self.current_theme.name})，解析模板: '{resolved_template_name}'",
-            "渲染服务",
-        )
-        template = self.jinja_env.get_template(resolved_template_name)
+        cached_dep = None
+        if not hot_reload:
+            cached_dep = context.theme_manager._component_dependency_cache.get(
+                cache_key
+            )
 
-        unpacked_data = {}
-        for key, value in data_dict.items():
-            if key in RESERVED_TEMPLATE_KEYS:
-                logger.warning(
-                    f"模板数据键 '{key}' 与渲染器保留关键字冲突，"
-                    f"在模板 '{component.template_name}' 中请使用 'data.{key}' 访问。"
+        if cached_dep:
+            context.collected_inline_css.extend(cached_dep.inline_css)
+            context.collected_scripts.update(cached_dep.scripts)
+            context.collected_asset_styles.update(cached_dep.asset_styles)
+        else:
+            new_dep = ComponentDependency()
+            cached_css_results: list[str] = []
+            manifest = await context.theme_manager.get_template_manifest(
+                component_path_base, skin=variant
+            )
+            style_paths_to_load = []
+
+            if manifest and manifest.styles:
+                styles = (
+                    manifest.styles
+                    if isinstance(manifest.styles, list)
+                    else [manifest.styles]
+                )
+                resolution_base_path = (
+                    Path(component_path_base) / "skins" / variant
+                    if variant
+                    and await context.theme_manager.get_template_manifest(
+                        component_path_base, skin=variant
+                    )
+                    else Path(component_path_base)
+                )
+                style_paths_to_load.extend(
+                    str(resolution_base_path / style).replace("\\", "/")
+                    for style in styles
                 )
             else:
-                unpacked_data[key] = value
+                base_template_path = (
+                    await context.theme_manager.resolve_component_template(
+                        component, context
+                    )
+                )
+                style_paths_to_load.append(
+                    str(Path(base_template_path).with_name("style.css")).replace(
+                        "\\", "/"
+                    )
+                )
+                if variant:
+                    style_paths_to_load.append(
+                        f"{component_path_base}/skins/{variant}/style.css"
+                    )
 
-        template_context = {
-            "data": component,
-            "theme": theme_context_dict,
-            "frameless": kwargs.get("frameless", False),
-        }
-        template_context.update(unpacked_data)
-        template_context.update(kwargs)
+            for css_template_path in style_paths_to_load:
+                try:
+                    css_template = context.template_engine.env.get_template(
+                        css_template_path
+                    )
+                    css_content = await css_template.render_async(
+                        theme=context.theme_manager.current_theme_context
+                    )
+                    cached_css_results.append(css_content)
+                except Exception:
+                    pass
 
-        html_fragment = await template.render_async(**template_context)
+            new_dep.inline_css = cached_css_results
+            new_dep.scripts = component.get_required_scripts()
+            new_dep.asset_styles = component.get_required_styles()
 
-        if not kwargs.get("frameless", False):
-            base_template = self.jinja_env.get_template("partials/_base.html")
-            page_context = {
-                "data": component,
-                "theme_css": theme_css_content,
-                "collected_inline_css": context.collected_inline_css,
-                "required_scripts": list(context.collected_scripts),
-                "collected_asset_styles": list(context.collected_asset_styles),
-                "body_content": html_fragment,
-            }
-            return await base_template.render_async(**page_context)
-        else:
-            return html_fragment
+            if not hot_reload:
+                context.theme_manager._component_dependency_cache[cache_key] = new_dep
+
+            context.collected_inline_css.extend(cached_css_results)
+            context.collected_scripts.update(new_dep.scripts)
+            context.collected_asset_styles.update(new_dep.asset_styles)
+
+        if hasattr(component, "get_extra_css"):
+            res = component.get_extra_css(context)
+            css_str = await res if inspect.isawaitable(res) else str(res)
+            if css_str:
+                context.collected_inline_css.append(css_str)
+
+        for child in component.get_children():
+            if child:
+                await cls.collect(child, context)
