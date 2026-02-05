@@ -1,7 +1,7 @@
 import base64
 import contextlib
 import sys
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from aiocache import cached
 from alibabacloud_devops20210625 import models as devops_20210625_models
@@ -20,6 +20,7 @@ else:
 
 from .const import (
     ALIYUN_ENDPOINT,
+    ALIYUN_EXTERNAL_PLUGIN_GROUPS,
     ALIYUN_ORG_ID,
     ALIYUN_REGION,
     ALIYUN_REPO_MAPPING,
@@ -317,6 +318,9 @@ class AliyunFileInfo:
     repository_id: str
     """仓库ID"""
 
+    # 动态仓库ID缓存: {repo_name: repository_id}
+    _dynamic_repo_cache: ClassVar[dict[str, str]] = {}
+
     @classmethod
     async def get_client(cls) -> devops20210625Client:
         """获取阿里云客户端"""
@@ -330,6 +334,179 @@ class AliyunFileInfo:
         )
 
         return devops20210625Client(config)
+
+    @classmethod
+    @cached(ttl=CACHED_API_TTL)
+    async def list_group_repositories(cls, group_path: str) -> list[dict]:
+        """列出分组下的所有仓库
+
+        参数:
+            group_path: 分组路径，如 "zhenxun_plugins"
+
+        返回:
+            list[dict]: 仓库信息列表，每个元素包含 id, name, path 等
+        """
+        try:
+            client = await cls.get_client()
+            result = []
+            page = 1
+            per_page = 100
+
+            while True:
+                request = devops_20210625_models.ListRepositoriesRequest(
+                    organization_id=ALIYUN_ORG_ID,
+                    access_token=base64.b64decode(
+                        RDC_access_token_encrypted.encode()
+                    ).decode(),
+                    page=page,
+                    per_page=per_page,
+                )
+
+                runtime = util_models.RuntimeOptions()
+                headers = {}
+
+                response = await client.list_repositories_with_options_async(
+                    request, headers, runtime
+                )
+
+                if response and response.body:
+                    if not response.body.success:
+                        raise ValueError(
+                            f"阿里云请求失败: {response.body.error_code} - "
+                            f"{response.body.error_message}"
+                        )
+
+                    repos = response.body.result or []
+                    if not repos:
+                        break
+
+                    for repo in repos:
+                        repo_dict = repo.to_map()
+                        # 尝试多种可能的字段名
+                        path_with_ns = (
+                            repo_dict.get("pathWithNamespace")
+                            or repo_dict.get("path_with_namespace")
+                            or repo_dict.get("path")
+                            or ""
+                        )
+                        # pathWithNamespace 格式: {org_id}/{group_path}/{repo_name}
+                        # 只保留属于该分组的仓库
+                        if f"/{group_path}/" in path_with_ns:
+                            result.append(repo_dict)
+                            # 同时更新缓存
+                            repo_name = repo_dict.get("name", "")
+                            # 注意：阿里云API返回的ID字段是 "Id" (大写I)
+                            repo_id = str(
+                                repo_dict.get("Id") or repo_dict.get("id") or ""
+                            )
+                            if repo_name and repo_id:
+                                cls._dynamic_repo_cache[repo_name] = repo_id
+
+                    # 如果返回的数量小于请求的数量，说明已经没有更多数据
+                    if len(repos) < per_page:
+                        break
+                    page += 1
+                else:
+                    break
+
+            return result
+        except Exception as e:
+            raise ValueError(f"获取仓库列表失败: {e}")
+
+    @classmethod
+    async def get_repository_id(cls, repo_name: str) -> str | None:
+        """通过仓库名称获取仓库ID
+
+        优先从静态映射中查找，然后从缓存中查找，最后从API动态查询
+
+        参数:
+            repo_name: 仓库名称
+
+        返回:
+            str | None: 仓库ID，未找到返回 None
+        """
+        # 1. 先从静态映射中查找
+        if repo_id := ALIYUN_REPO_MAPPING.get(repo_name):
+            return repo_id
+
+        # 2. 从动态缓存中查找
+        if repo_id := cls._dynamic_repo_cache.get(repo_name):
+            return repo_id
+
+        # 3. 从外部插件分组中动态查询
+        for group_path in ALIYUN_EXTERNAL_PLUGIN_GROUPS:
+            try:
+                repos = await cls.list_group_repositories(group_path)
+                for repo in repos:
+                    if repo.get("name") == repo_name:
+                        # 注意：阿里云API返回的ID字段是 "Id" (大写I)
+                        repo_id = str(repo.get("Id") or repo.get("id") or "")
+                        if repo_id:
+                            cls._dynamic_repo_cache[repo_name] = repo_id
+                            return repo_id
+            except Exception:
+                continue
+
+        return None
+
+    @classmethod
+    async def debug_list_all_repositories(cls) -> list[dict]:
+        """调试方法：列出组织下的所有仓库信息
+
+        返回:
+            list[dict]: 所有仓库信息列表
+        """
+        try:
+            client = await cls.get_client()
+            result = []
+
+            request = devops_20210625_models.ListRepositoriesRequest(
+                organization_id=ALIYUN_ORG_ID,
+                access_token=base64.b64decode(
+                    RDC_access_token_encrypted.encode()
+                ).decode(),
+                page=1,
+                per_page=100,
+            )
+
+            runtime = util_models.RuntimeOptions()
+            headers = {}
+
+            response = await client.list_repositories_with_options_async(
+                request, headers, runtime
+            )
+
+            if response and response.body and response.body.result:
+                for repo in response.body.result:
+                    repo_dict = repo.to_map()
+                    result.append(repo_dict)
+                    # 同时填充缓存
+                    repo_name = repo_dict.get("name", "")
+                    repo_id = str(repo_dict.get("Id") or repo_dict.get("id") or "")
+                    if repo_name and repo_id:
+                        cls._dynamic_repo_cache[repo_name] = repo_id
+
+            return result
+        except Exception as e:
+            raise ValueError(f"列出仓库失败: {e}")
+
+    @classmethod
+    async def _get_repository_id_or_raise(cls, repo: str) -> str:
+        """获取仓库ID，如果未找到则抛出异常
+
+        参数:
+            repo: 仓库名称
+
+        返回:
+            str: 仓库ID
+
+        异常:
+            ValueError: 未找到仓库
+        """
+        repository_id = await cls.get_repository_id(repo)
+        if not repository_id:
+            raise ValueError(f"未找到仓库 {repo} 对应的阿里云仓库ID")
+        return repository_id
 
     @classmethod
     async def get_file_content(
@@ -346,9 +523,7 @@ class AliyunFileInfo:
             str: 文件内容
         """
         try:
-            repository_id = ALIYUN_REPO_MAPPING.get(repo)
-            if not repository_id:
-                raise ValueError(f"未找到仓库 {repo} 对应的阿里云仓库ID")
+            repository_id = await cls._get_repository_id_or_raise(repo)
 
             client = await cls.get_client()
 
@@ -406,9 +581,7 @@ class AliyunFileInfo:
             list[AliyunTree]: 仓库树信息列表
         """
         try:
-            repository_id = ALIYUN_REPO_MAPPING.get(repo)
-            if not repository_id:
-                raise ValueError(f"未找到仓库 {repo} 对应的阿里云仓库ID")
+            repository_id = await cls._get_repository_id_or_raise(repo)
 
             client = await cls.get_client()
 
@@ -452,9 +625,7 @@ class AliyunFileInfo:
             commit: 最新提交信息
         """
         try:
-            repository_id = ALIYUN_REPO_MAPPING.get(repo)
-            if not repository_id:
-                raise ValueError(f"未找到仓库 {repo} 对应的阿里云仓库ID")
+            repository_id = await cls._get_repository_id_or_raise(repo)
 
             client = await cls.get_client()
 
@@ -498,9 +669,8 @@ class AliyunFileInfo:
     @classmethod
     async def parse_repo_info(cls, repo: str) -> list[str]:
         """解析仓库信息获取仓库树"""
-        repository_id = ALIYUN_REPO_MAPPING.get(repo)
-        if not repository_id:
-            raise ValueError(f"未找到仓库 {repo} 对应的阿里云仓库ID")
+        # 验证仓库存在
+        await cls._get_repository_id_or_raise(repo)
 
         tree_list = await cls.get_repository_tree(
             repo=repo,

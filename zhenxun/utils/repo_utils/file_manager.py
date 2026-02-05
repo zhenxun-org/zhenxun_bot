@@ -23,7 +23,7 @@ from .exceptions import (
     RepoManagerError,
 )
 from .models import FileDownloadResult, RepoFileInfo, RepoType
-from .utils import prepare_aliyun_url, sparse_checkout_clone
+from .utils import get_aliyun_group_for_repo, prepare_aliyun_url, sparse_checkout_clone
 
 
 class RepoFileManager:
@@ -469,6 +469,35 @@ class RepoFileManager:
             if all(f.path != file.path for f in file_list if f != file)
         ]
 
+    def _clean_requirements_content(self, content: str) -> str:
+        """
+        清理 requirements.txt 内容，移除包含非ASCII字符的注释行
+
+        这是为了防止 Windows 上 pip 使用 GBK 编码读取 UTF-8 文件时出错
+
+        参数:
+            content: requirements.txt 文件内容
+
+        返回:
+            str: 清理后的内容
+        """
+        lines = content.splitlines()
+        cleaned_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # 跳过空行
+            if not stripped:
+                continue
+            # 如果是注释行且包含非ASCII字符，跳过
+            if stripped.startswith("#"):
+                try:
+                    stripped.encode("ascii")
+                except UnicodeEncodeError:
+                    # 包含非ASCII字符的注释行，跳过
+                    continue
+            cleaned_lines.append(line)
+        return "\n".join(cleaned_lines) + "\n" if cleaned_lines else ""
+
     async def download_files(
         self,
         repo_url: str,
@@ -576,6 +605,10 @@ class RepoFileManager:
                 local_path = file_path_mapping[repo_file_path]
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 if isinstance(content, str):
+                    # 对 requirements 文件特殊处理：移除包含非ASCII字符的注释行
+                    # 防止 Windows GBK 编码问题
+                    if repo_file_path.endswith(("requirements.txt", "requirement.txt")):
+                        content = self._clean_requirements_content(content)
                     content_bytes = content.encode("utf-8")
                 else:
                     content_bytes = content
@@ -604,8 +637,16 @@ class RepoFileManager:
         result: FileDownloadResult,
     ) -> FileDownloadResult:
         try:
+            # 获取仓库所属的分组名（外部插件仓库可能在不同分组下）
+            repo_name = (
+                repo_url.split("/tree/")[0].split("/")[-1].replace(".git", "").strip()
+            )
+            group_name = await get_aliyun_group_for_repo(repo_name)
+
+            aliyun_repo_url = prepare_aliyun_url(repo_url, group_name)
+
             await sparse_checkout_clone(
-                repo_url=prepare_aliyun_url(repo_url),
+                repo_url=aliyun_repo_url,
                 branch=branch,
                 sparse_path=sparse_path,
                 target_dir=target_dir,
@@ -618,7 +659,7 @@ class RepoFileManager:
                             total_size += f.stat().st_size
             result.success = True
             result.file_size = total_size
-            logger.info(f"sparse-checkout 克隆成功: {target_dir}")
+            logger.info(f"sparse-checkout 克隆成功: {target_dir}:{aliyun_repo_url}")
             return result
         except GitUnavailableError as e:
             logger.error(f"Git不可用: {e}")

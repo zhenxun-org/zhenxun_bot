@@ -219,8 +219,12 @@ class AsyncHttpx:
     ) -> Response:
         """
         执行单次HTTP请求的私有方法，内置了默认的重试逻辑。
+        accept_status_codes: 若提供，这些状态码不视为错误，不调用 raise_for_status。
         """
         client_kwargs, request_kwargs = cls._split_kwargs(kwargs)
+        accept_status_codes: Sequence[int] | None = request_kwargs.pop(
+            "accept_status_codes", None
+        )
 
         async with cls._get_active_client_context(
             client=client, **client_kwargs
@@ -228,7 +232,11 @@ class AsyncHttpx:
             response = await cls()._execute_request_inner(
                 active_client, method, url, **request_kwargs
             )
-            response.raise_for_status()
+            if (
+                accept_status_codes is None
+                or response.status_code not in accept_status_codes
+            ):
+                response.raise_for_status()
             return response
 
     @classmethod
@@ -292,6 +300,7 @@ class AsyncHttpx:
         *,
         follow_redirects: bool = True,
         check_status_code: int | None = None,
+        accept_status_codes: Sequence[int] | None = None,
         client: AsyncClient | None = None,
         **kwargs,
     ) -> Response:
@@ -301,6 +310,8 @@ class AsyncHttpx:
             url: 单个请求 URL 或一个 URL 列表。
             follow_redirects: 是否跟随重定向。
             check_status_code: (可选) 若提供，将检查响应状态码是否匹配，否则抛出异常。
+            accept_status_codes: (可选) 这些状态码不视为错误，
+                                如 (302,) 用于接受重定向响应。
             client: (可选) 指定一个活动的HTTP客户端实例。若提供，则忽略
                     `**kwargs`中的客户端配置。
             **kwargs: 其他所有传递给 httpx.get 的参数 (如 `params`, `headers`,
@@ -316,6 +327,8 @@ class AsyncHttpx:
 
         async def worker(current_url: str, **worker_kwargs) -> Response:
             logger.info(f"开始获取 {current_url}..", "AsyncHttpx:get")
+            if accept_status_codes is not None:
+                worker_kwargs["accept_status_codes"] = accept_status_codes
             response = await cls._single_request(
                 "GET", current_url, follow_redirects=follow_redirects, **worker_kwargs
             )
@@ -342,11 +355,20 @@ class AsyncHttpx:
 
     @classmethod
     async def post(
-        cls, url: str | list[str], *, client: AsyncClient | None = None, **kwargs
+        cls,
+        url: str | list[str],
+        *,
+        accept_status_codes: Sequence[int] | None = None,
+        client: AsyncClient | None = None,
+        **kwargs,
     ) -> Response:
-        """发送 POST 请求，并返回第一个成功的响应。"""
+        """发送 POST 请求，并返回第一个成功的响应。
+        accept_status_codes: (可选) 这些状态码不视为错误，如 (302,) 用于接受重定向响应。
+        """
 
         async def worker(current_url: str, **worker_kwargs) -> Response:
+            if accept_status_codes is not None:
+                worker_kwargs["accept_status_codes"] = accept_status_codes
             return await cls._single_request("POST", current_url, **worker_kwargs)
 
         return await cls._execute_with_fallbacks(url, worker, client=client, **kwargs)

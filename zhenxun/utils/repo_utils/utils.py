@@ -227,11 +227,12 @@ async def sparse_checkout_clone(
             shutil.move(str(source_path), str(target_path))
 
 
-def prepare_aliyun_url(repo_url: str) -> str:
+def prepare_aliyun_url(repo_url: str, group_name: str | None = None) -> str:
     """解析阿里云CodeUp的仓库URL
 
     参数:
         repo_url: 仓库URL
+        group_name: 分组名称，如果为None则使用默认组织名称
 
     返回:
         str: 解析后的仓库URL
@@ -239,10 +240,12 @@ def prepare_aliyun_url(repo_url: str) -> str:
     config = RepoConfig.get_instance()
 
     repo_name = repo_url.split("/tree/")[0].split("/")[-1].replace(".git", "")
+    # 使用指定的分组名或默认组织名称
+    group = group_name or config.aliyun_codeup.organization_name
     # 构建仓库URL
     # 阿里云CodeUp的仓库URL格式通常为：
-    # https://codeup.aliyun.com/{organization_id}/{organization_name}/{repo_name}.git
-    url = f"https://codeup.aliyun.com/{config.aliyun_codeup.organization_id}/{config.aliyun_codeup.organization_name}/{repo_name}.git"
+    # https://codeup.aliyun.com/{organization_id}/{group_name}/{repo_name}.git
+    url = f"https://codeup.aliyun.com/{config.aliyun_codeup.organization_id}/{group}/{repo_name}.git"
 
     # 添加访问令牌 - 使用base64解码后的令牌
     if config.aliyun_codeup.rdc_access_token_encrypted:
@@ -258,3 +261,35 @@ def prepare_aliyun_url(repo_url: str) -> str:
             logger.error(f"解码RDC令牌失败: {e}")
 
     return url
+
+
+async def get_aliyun_group_for_repo(repo_name: str) -> str | None:
+    """获取仓库所属的阿里云分组名
+
+    参数:
+        repo_name: 仓库名称
+
+    返回:
+        str | None: 分组名称，如果在核心映射中则返回None（使用默认组织名）
+    """
+    from zhenxun.utils.github_utils.const import (
+        ALIYUN_EXTERNAL_PLUGIN_GROUPS,
+        ALIYUN_REPO_MAPPING,
+    )
+    from zhenxun.utils.github_utils.models import AliyunFileInfo
+
+    # 如果在核心映射中，使用默认组织名
+    if repo_name in ALIYUN_REPO_MAPPING:
+        return None
+
+    # 尝试从外部插件分组中查找
+    for group_path in ALIYUN_EXTERNAL_PLUGIN_GROUPS:
+        try:
+            repos = await AliyunFileInfo.list_group_repositories(group_path)
+            for repo in repos:
+                if repo.get("name") == repo_name:
+                    return group_path
+        except Exception:
+            continue
+
+    return None

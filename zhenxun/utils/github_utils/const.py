@@ -74,3 +74,6 @@ ALIYUN_REPO_MAPPING = {
     "zhenxun_bot": "4957428",
 }
 """阿里云仓库ID映射"""
+
+ALIYUN_EXTERNAL_PLUGIN_GROUPS: list[str] = ["zhenxun_plugins"]
+"""阿里云外部插件分组列表，用于动态查询第三方插件仓库"""

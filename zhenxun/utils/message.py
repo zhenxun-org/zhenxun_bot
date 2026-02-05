@@ -1,6 +1,8 @@
 import base64
 from io import BytesIO
 from pathlib import Path
+import random
+from typing import ClassVar
 
 import nonebot
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
@@ -48,6 +50,43 @@ class Config(BaseModel):
 
 
 class MessageUtils:
+    # 可爱风格的失败提示消息列表
+    FAILURE_MESSAGES: ClassVar[list[str]] = [
+        "出了点小问题，待会再试试吧~ (´・ω・`)",
+        "哎呀，失败了呢 QAQ",
+        "好像哪里不对劲... (・∀・；)",
+        "emm...出错了 (；′⌒`)",
+        "失败了，但问题不大！╮(╯▽╰)╭",
+        "搞砸了...下次一定行 (๑•̀ㅂ•́)و✧",
+        "这次没成功，再来一次？",
+        "出错啦，让我缓缓... (´-ω-`)",
+        "翻车了，容我想想 ( ˘•ω•˘ )",
+        "不太顺利呢，稍后再试吧 (´;ω;`)",
+        "失败了...不过没关系啦 (・ω<)☆",
+        "呃，出了点状况 Σ(っ°Д°;)っ",
+        "没搞定，但别灰心~",
+        "坏掉了...等等再试试看 (>_<)",
+        "这次不太行，下次加油！(ง •_•)ง",
+    ]
+
+    @classmethod
+    def get_failure_message(cls) -> str:
+        """获取随机失败提示消息
+
+        返回:
+            str: 随机的可爱失败提示消息
+        """
+        return random.choice(cls.FAILURE_MESSAGES)
+
+    @classmethod
+    def build_failure_message(cls) -> UniMessage:
+        """构造随机失败提示消息
+
+        返回:
+            UniMessage: 构造完成的失败提示消息
+        """
+        return cls.build_message(cls.get_failure_message())
+
     @classmethod
     def __build_message(
         cls, msg_list: list[MESSAGE_TYPE], format_args: dict | None = None
