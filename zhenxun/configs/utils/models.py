@@ -261,6 +261,8 @@ class PluginExtraData(BaseModel):
     """常用sql"""
     is_show: bool = True
     """是否显示在菜单中"""
+    ignore_statistics: bool = False
+    """是否不统计调用次数"""
     smart_tools: list[AICallableTag] | None = None
     """智能模式函数工具集"""
     introduction: str | None = None

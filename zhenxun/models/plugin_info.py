@@ -3,6 +3,7 @@ from typing_extensions import Self
 from tortoise import fields
 
 from zhenxun.models.plugin_limit import PluginLimit  # noqa: F401
+from zhenxun.services.cache.runtime_cache import PluginInfoMemoryCache
 from zhenxun.services.db_context import Model
 from zhenxun.utils.enum import BlockType, CacheType, PluginType
 
@@ -52,6 +53,10 @@ class PluginInfo(Model):
     """父插件"""
     is_show = fields.BooleanField(default=True, description="是否显示在帮助中")
     """是否显示在帮助中"""
+    ignore_statistics = fields.BooleanField(
+        default=False, description="是否不统计调用次数"
+    )
+    """是否不统计调用次数"""
     impression = fields.FloatField(default=0, description="插件好感度限制")
     """插件好感度限制"""
 
@@ -63,6 +68,28 @@ class PluginInfo(Model):
     """缓存类型"""
     cache_key_field = "module"
     """缓存键字段"""
+
+    @classmethod
+    async def create(cls, *args, **kwargs):
+        result = await super().create(*args, **kwargs)
+        await PluginInfoMemoryCache.upsert_from_model(result)
+        return result
+
+    @classmethod
+    async def update_or_create(cls, *args, **kwargs):
+        result = await super().update_or_create(*args, **kwargs)
+        await PluginInfoMemoryCache.upsert_from_model(result[0])
+        return result
+
+    async def save(self, *args, **kwargs):
+        await super().save(*args, **kwargs)
+        await PluginInfoMemoryCache.upsert_from_model(self)
+
+    async def delete(self, *args, **kwargs):
+        module = self.module
+        module_path = self.module_path
+        await super().delete(*args, **kwargs)
+        await PluginInfoMemoryCache.remove(module, module_path)
 
     @classmethod
     async def get_plugin(
@@ -110,4 +137,6 @@ class PluginInfo(Model):
             "ALTER TABLE plugin_info ADD COLUMN ignore_prompt boolean DEFAULT false;",
             "ALTER TABLE plugin_info ADD COLUMN impression float DEFAULT 0;",
             "CREATE INDEX idx_plugin_info_module ON plugin_info(module);",
+            "ALTER TABLE plugin_info ADD COLUMN ignore_statistics"
+            " boolean DEFAULT false;",
         ]

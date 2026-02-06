@@ -6,7 +6,7 @@ from nonebot.matcher import Matcher
 from nonebot.message import run_postprocessor
 from nonebot.plugin import PluginMetadata
 from nonebot_plugin_apscheduler import scheduler
-from nonebot_plugin_session import EventSession
+from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun.configs.utils import PluginExtraData
 from zhenxun.models.plugin_info import PluginInfo
@@ -15,6 +15,7 @@ from zhenxun.services.cache.runtime_cache import PluginInfoMemoryCache
 from zhenxun.services.log import logger
 from zhenxun.services.message_load import should_pause_tasks
 from zhenxun.utils.enum import PluginType
+from zhenxun.utils.utils import get_entity_ids
 
 __plugin_meta__ = PluginMetadata(
     name="功能调用统计",
@@ -33,25 +34,28 @@ async def _(
     matcher: Matcher,
     exception: Exception | None,
     bot: Bot,
-    session: EventSession,
+    session: Uninfo,
     event: Event,
 ):
     if matcher.type == "notice" and not isinstance(event, PokeNotifyEvent):
         """过滤除poke外的notice"""
         return
-    if session.id1 and matcher.plugin:
+    if matcher.plugin:
+        entity = get_entity_ids(session)
         plugin = PluginInfoMemoryCache.get_by_module_path(matcher.plugin.module_name)
         if not plugin:
             plugin = await PluginInfo.get_plugin(module_path=matcher.plugin.module_name)
             if plugin:
                 PluginInfoMemoryCache.set_plugin(plugin)
+        if plugin and plugin.ignore_statistics:
+            return
         plugin_type = plugin.plugin_type if plugin else None
         if plugin_type == PluginType.NORMAL:
             logger.debug(f"提交调用记录: {matcher.plugin_name}...", session=session)
             TEMP_LIST.append(
                 Statistics(
-                    user_id=session.id1,
-                    group_id=session.id3 or session.id2,
+                    user_id=entity.user_id,
+                    group_id=entity.group_id,
                     plugin_name=matcher.plugin_name,
                     create_time=datetime.now(),
                     bot_id=bot.self_id,

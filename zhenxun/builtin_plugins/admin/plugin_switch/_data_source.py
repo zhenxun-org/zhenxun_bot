@@ -4,7 +4,10 @@ from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.task_info import TaskInfo
 from zhenxun.services.cache import CacheRoot
-from zhenxun.services.cache.runtime_cache import TaskInfoMemoryCache
+from zhenxun.services.cache.runtime_cache import (
+    PluginInfoMemoryCache,
+    TaskInfoMemoryCache,
+)
 from zhenxun.utils.common_utils import CommonUtils
 from zhenxun.utils.enum import BlockType, CacheType, PluginType
 from zhenxun.utils.exception import GroupInfoNotFound
@@ -181,6 +184,7 @@ class PluginManager:
             await PluginInfo.filter(plugin_type=PluginType.NORMAL).update(
                 default_status=status
             )
+            await PluginInfoMemoryCache.refresh()
             return f"成功将所有功能进群默认状态修改为: {'开启' if status else '关闭'}"
         if group_id:
             if group := await GroupConsole.get_group_db(group_id=group_id):
@@ -203,6 +207,7 @@ class PluginManager:
             status=status, block_type=None if status else BlockType.ALL
         )
         await CacheRoot.invalidate_cache(CacheType.PLUGINS)
+        await PluginInfoMemoryCache.refresh()
         return f"成功将所有功能全局状态修改为: {'开启' if status else '关闭'}"
 
     @classmethod

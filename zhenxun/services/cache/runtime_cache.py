@@ -688,10 +688,36 @@ class PluginInfoMemoryCache:
             cls._by_module[plugin.module] = plugin
         if getattr(plugin, "module_path", None):
             cls._by_module_path[plugin.module_path] = plugin
+        cls._loaded = True
+        cls._last_refresh = time.time()
 
     @classmethod
     def remove_by_module(cls, module: str) -> None:
         cls._by_module.pop(module, None)
+
+    @classmethod
+    async def upsert_from_model(cls, plugin) -> None:
+        if not plugin:
+            return
+        async with cls._lock:
+            if getattr(plugin, "module", None):
+                cls._by_module[plugin.module] = plugin
+            if getattr(plugin, "module_path", None):
+                cls._by_module_path[plugin.module_path] = plugin
+            cls._loaded = True
+            cls._last_refresh = time.time()
+
+    @classmethod
+    async def remove(
+        cls, module: str | None = None, module_path: str | None = None
+    ) -> None:
+        if not module and not module_path:
+            return
+        async with cls._lock:
+            if module:
+                cls._by_module.pop(module, None)
+            if module_path:
+                cls._by_module_path.pop(module_path, None)
 
     @classmethod
     async def _refresh_loop(cls, interval: int) -> None:

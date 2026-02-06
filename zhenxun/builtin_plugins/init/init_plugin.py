@@ -80,6 +80,7 @@ async def _handle_setting(
             ignore_prompt=extra_data.ignore_prompt,
             parent=(plugin.parent_plugin.module_name if plugin.parent_plugin else None),
             impression=setting.impression,
+            ignore_statistics=extra_data.ignore_statistics,
         )
     )
     if extra_data.limits:
