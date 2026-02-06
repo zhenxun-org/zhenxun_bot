@@ -87,7 +87,11 @@ async def _(param: PluginIr) -> Result:
         require("plugin_store")
         from zhenxun.builtin_plugins.plugin_store import StoreManager
 
-        result = await StoreManager.remove_plugin(param.id)  # type: ignore
+        plugin_info = await PluginInfo.get_plugin(id=param.id)
+        if not plugin_info:
+            return Result.fail("插件不存在")
+
+        result = await StoreManager.remove_plugin(plugin_info.module)  # type: ignore
         return Result.ok(info=result)
     except Exception as e:
         return Result.fail(f"移除插件失败: {type(e)}: {e}")

@@ -57,6 +57,8 @@ class PluginInfo(BaseModel):
     基本插件信息
     """
 
+    id: int
+    """插件id"""
     module: str
     """模块"""
     plugin_name: str

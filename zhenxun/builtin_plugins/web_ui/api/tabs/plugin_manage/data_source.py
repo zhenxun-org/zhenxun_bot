@@ -41,6 +41,7 @@ class ApiDataSource:
         plugins = await query.all()
         for plugin in plugins:
             plugin_info = PluginInfo(
+                id=plugin.id,
                 module=plugin.module,
                 plugin_name=plugin.name,
                 default_status=plugin.default_status,
@@ -269,6 +270,7 @@ class ApiDataSource:
                 cls.__build_plugin_config(module, cfg, config) for cfg in config.configs
             )
         return PluginDetail(
+            id=db_plugin.id,
             module=module,
             plugin_name=db_plugin.name,
             default_status=db_plugin.default_status,
