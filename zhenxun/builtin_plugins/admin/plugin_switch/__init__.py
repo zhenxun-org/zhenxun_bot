@@ -120,7 +120,7 @@ async def _(
 ):
     if not all.result and not plugin_name.available:
         await MessageUtils.build_message("请输入功能/被动名称").finish(reply_to=True)
-    name = plugin_name.result
+    name = plugin_name.result.strip()
     if session.group:
         group_id = session.group.id
         """修改当前群组的数据"""
@@ -234,7 +234,7 @@ async def _(
 ):
     if not all.result and not plugin_name.available:
         await MessageUtils.build_message("请输入功能/被动名称").finish(reply_to=True)
-    name = plugin_name.result
+    name = plugin_name.result.strip()
     if session.group:
         group_id = session.group.id
         """修改当前群组的数据"""
@@ -321,13 +321,29 @@ async def _(
                     session=session,
                 )
         else:
+            parsed_block_type = (
+                block_type.result.lower()
+                if block_type.available and block_type.result
+                else ""
+            )
+            # 兼容中文快捷命令：`关闭功能名 p/g/a`
+            if not parsed_block_type and " " in name:
+                split_name = name.rsplit(maxsplit=1)
+                if len(split_name) == 2 and split_name[1].lower() in {
+                    "a",
+                    "all",
+                    "g",
+                    "group",
+                    "p",
+                    "private",
+                }:
+                    name = split_name[0].strip()
+                    parsed_block_type = split_name[1].lower()
             _type = BlockType.ALL
-            if block_type.result in ["p", "private"]:
-                if block_type.available:
-                    _type = BlockType.PRIVATE
-            elif block_type.result in ["g", "group"]:
-                if block_type.available:
-                    _type = BlockType.GROUP
+            if parsed_block_type in {"p", "private"}:
+                _type = BlockType.PRIVATE
+            elif parsed_block_type in {"g", "group"}:
+                _type = BlockType.GROUP
             result = await PluginManager.superuser_block(name, _type, group_id)
             logger.info(
                 f"超级用户关闭功能 {name}, 禁用类型: {_type}",

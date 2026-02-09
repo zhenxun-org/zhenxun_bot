@@ -57,6 +57,8 @@ class StorePluginInfo(BaseModel):
     """是否为文件夹插件"""
     github_url: str | None = None
     """github链接"""
+    ali_url: str | None = None
+    """ali链接"""
 
     @property
     def plugin_type_name(self):

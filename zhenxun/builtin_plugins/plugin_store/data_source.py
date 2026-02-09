@@ -272,6 +272,9 @@ class StoreManager:
             repo_type = RepoType.ALIYUN
         elif source == "git":
             repo_type = RepoType.GITHUB
+        else:
+            if plugin_info.ali_url:
+                repo_type = RepoType.ALIYUN
         module_path = plugin_info.module_path
         is_dir = plugin_info.is_dir
         github_url = plugin_info.github_url

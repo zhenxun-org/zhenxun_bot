@@ -112,7 +112,7 @@ async def _(
         try:
             result += await UpdateManager.update_webui(
                 source_str,  # type: ignore
-                "test",
+                "dist",
                 True,
             )
         except Exception as e:

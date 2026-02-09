@@ -21,7 +21,7 @@ async def favicon():
 async def init_public(app: FastAPI):
     try:
         if not ZhenxunRepoManager.check_webui_exists():
-            await ZhenxunRepoManager.webui_update(branch="test")
+            await ZhenxunRepoManager.webui_update(branch="dist")
         folders = [
             x.name for x in ZhenxunRepoManager.config.WEBUI_PATH.iterdir() if x.is_dir()
         ]

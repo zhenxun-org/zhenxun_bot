@@ -4,7 +4,10 @@ from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.task_info import TaskInfo
 from zhenxun.services.cache import CacheRoot
-from zhenxun.services.cache.runtime_cache import TaskInfoMemoryCache
+from zhenxun.services.cache.runtime_cache import (
+    PluginInfoMemoryCache,
+    TaskInfoMemoryCache,
+)
 from zhenxun.utils.common_utils import CommonUtils
 from zhenxun.utils.enum import BlockType, CacheType, PluginType
 from zhenxun.utils.exception import GroupInfoNotFound
@@ -139,6 +142,22 @@ async def build_task(group_id: str | None) -> BuildImage:
 
 
 class PluginManager:
+    @staticmethod
+    async def _get_plugin_by_name_or_module(plugin_name: str) -> PluginInfo | None:
+        plugin_name = plugin_name.strip()
+        if not plugin_name:
+            return None
+        if plugin_name.isdigit():
+            return await PluginInfo.get_or_none(id=int(plugin_name))
+        plugin = await PluginInfo.get_or_none(
+            name=plugin_name, load_status=True, plugin_type__not=PluginType.PARENT
+        )
+        if plugin:
+            return plugin
+        return await PluginInfo.get_or_none(
+            module=plugin_name, load_status=True, plugin_type__not=PluginType.PARENT
+        )
+
     @classmethod
     async def set_default_status(cls, plugin_name: str, status: bool) -> str:
         """设置插件进群默认状态
@@ -150,12 +169,7 @@ class PluginManager:
         返回:
             str: 返回信息
         """
-        if plugin_name.isdigit():
-            plugin = await PluginInfo.get_or_none(id=int(plugin_name))
-        else:
-            plugin = await PluginInfo.get_or_none(
-                name=plugin_name, load_status=True, plugin_type__not=PluginType.PARENT
-            )
+        plugin = await cls._get_plugin_by_name_or_module(plugin_name)
         if plugin:
             plugin.default_status = status
             await plugin.save(update_fields=["default_status"])
@@ -181,6 +195,7 @@ class PluginManager:
             await PluginInfo.filter(plugin_type=PluginType.NORMAL).update(
                 default_status=status
             )
+            await PluginInfoMemoryCache.refresh()
             return f"成功将所有功能进群默认状态修改为: {'开启' if status else '关闭'}"
         if group_id:
             if group := await GroupConsole.get_group_db(group_id=group_id):
@@ -203,6 +218,7 @@ class PluginManager:
             status=status, block_type=None if status else BlockType.ALL
         )
         await CacheRoot.invalidate_cache(CacheType.PLUGINS)
+        await PluginInfoMemoryCache.refresh()
         return f"成功将所有功能全局状态修改为: {'开启' if status else '关闭'}"
 
     @classmethod
@@ -473,12 +489,7 @@ class PluginManager:
             str: 返回信息
         """
 
-        if plugin_name.isdigit():
-            plugin = await PluginInfo.get_or_none(id=int(plugin_name))
-        else:
-            plugin = await PluginInfo.get_or_none(
-                name=plugin_name, load_status=True, plugin_type__not=PluginType.PARENT
-            )
+        plugin = await cls._get_plugin_by_name_or_module(plugin_name)
         if plugin:
             status_str = "开启" if status else "关闭"
             if status:
@@ -530,12 +541,7 @@ class PluginManager:
         返回:
             str: 返回信息
         """
-        if plugin_name.isdigit():
-            plugin = await PluginInfo.get_or_none(id=int(plugin_name))
-        else:
-            plugin = await PluginInfo.get_or_none(
-                name=plugin_name, load_status=True, plugin_type__not=PluginType.PARENT
-            )
+        plugin = await cls._get_plugin_by_name_or_module(plugin_name)
         if plugin:
             if group_id:
                 if not await GroupConsole.is_superuser_block_plugin(
@@ -571,12 +577,7 @@ class PluginManager:
         返回:
             str: 返回信息
         """
-        if plugin_name.isdigit():
-            plugin = await PluginInfo.get_or_none(id=int(plugin_name))
-        else:
-            plugin = await PluginInfo.get_or_none(
-                name=plugin_name, load_status=True, plugin_type__not=PluginType.PARENT
-            )
+        plugin = await cls._get_plugin_by_name_or_module(plugin_name)
         if plugin:
             if group_id:
                 if await GroupConsole.is_superuser_block_plugin(
