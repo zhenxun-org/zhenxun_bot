@@ -12,6 +12,7 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.services.cache.runtime_cache import is_cache_ready
 from zhenxun.services.log import logger
 from zhenxun.services.message_load import is_overloaded
+from zhenxun.services.runtime_bootstrap import register_runtime_bootstrap
 from zhenxun.utils.utils import get_entity_ids
 
 from .auth.config import LOGGER_COMMAND
@@ -33,6 +34,7 @@ _AUTH_WORKERS: list[asyncio.Task] = []
 _LAST_DROP_LOG = 0.0
 
 driver = get_driver()
+register_runtime_bootstrap(driver)
 
 
 @driver.on_bot_connect

@@ -4,6 +4,7 @@ from typing_extensions import Self
 
 from tortoise import fields
 
+from zhenxun.services.cache import CacheException, CacheRegistry, CacheRoot
 from zhenxun.services.cache.runtime_cache import BanMemoryCache
 from zhenxun.services.data_access import DataAccess
 from zhenxun.services.db_context import Model
@@ -42,6 +43,22 @@ class BanConsole(Model):
     """缓存键字段"""
     enable_lock: ClassVar[list[DbLockType]] = [DbLockType.CREATE, DbLockType.UPSERT]
     """开启锁"""
+    _cache_checked: ClassVar[bool] = False
+
+    @classmethod
+    def _ensure_cache_registered(cls):
+        """兜底注册 BAN 缓存，避免启动时序导致的未注册问题。"""
+        if cls._cache_checked:
+            return
+        try:
+            CacheRoot.get_model(CacheType.BAN)
+        except CacheException:
+            CacheRegistry.register(
+                CacheType.BAN,
+                cls,
+                key_format="{user_id}_{group_id}",
+            )
+        cls._cache_checked = True
 
     @classmethod
     async def create(cls, *args, **kwargs) -> Self:
@@ -69,6 +86,7 @@ class BanConsole(Model):
         返回:
             Self | None: Self
         """
+        cls._ensure_cache_registered()
         if not user_id and not group_id:
             raise UserAndGroupIsNone()
         dao = DataAccess(cls)
@@ -153,18 +171,21 @@ class BanConsole(Model):
             f"封禁用户/群组，等级:{ban_level}，时长: {duration}",
             target=f"{group_id}:{user_id}",
         )
-        target = await cls._get_data(user_id, group_id)
-        if target:
-            await cls.unban(user_id, group_id)
-        await cls.create(
+        if not user_id and not group_id:
+            raise UserAndGroupIsNone()
+        cls._ensure_cache_registered()
+        target, _ = await cls.update_or_create(
             user_id=user_id,
             group_id=group_id,
-            ban_level=ban_level,
-            ban_time=int(time.time()),
-            ban_reason=reason,
-            duration=duration,
-            operator=operator or 0,
+            defaults={
+                "ban_level": ban_level,
+                "ban_time": int(time.time()),
+                "ban_reason": reason,
+                "duration": duration,
+                "operator": operator or 0,
+            },
         )
+        await BanMemoryCache.upsert_from_model(target)
 
     @classmethod
     async def unban(cls, user_id: str | None, group_id: str | None = None) -> bool:
