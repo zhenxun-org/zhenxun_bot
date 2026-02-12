@@ -1,4 +1,4 @@
-playwright>=1.41.1,<2.0.0
+playwright==1.57.0
 nonebot-adapter-onebot>=2.3.1
 nonebot-plugin-apscheduler>=0.5,<0.6
 tortoise-orm>=0.20.0,<0.21.0

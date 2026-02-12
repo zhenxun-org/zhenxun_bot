@@ -26,52 +26,13 @@ Config.add_plugin_config(
     "才不会给你发消息.",
     help="对被ban用户发送的消息",
 )
-Config.add_plugin_config(
-    "hook",
-    "BAN_CACHE_TTL",
-    2,
-    help="ban cache ttl seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "BAN_CACHE_TTL_POSITIVE",
-    30,
-    help="ban cache ttl seconds for banned users",
-)
-Config.add_plugin_config(
-    "hook",
-    "BAN_CACHE_TTL_NEGATIVE",
-    5,
-    help="ban cache ttl seconds for non-banned users",
-)
-
-
-def _coerce_ttl(value, default):
-    try:
-        value_int = int(value)
-    except (TypeError, ValueError):
-        return default
-    return value_int if value_int >= 0 else default
-
-
-_ban_cache_ttl_value = Config.get_config("hook", "BAN_CACHE_TTL", 2)
-try:
-    _ban_cache_ttl_value = int(_ban_cache_ttl_value)
-except (TypeError, ValueError):
-    _ban_cache_ttl_value = 2
-
-_ban_cache_ttl_positive = _coerce_ttl(
-    Config.get_config("hook", "BAN_CACHE_TTL_POSITIVE", _ban_cache_ttl_value),
-    _ban_cache_ttl_value,
-)
-_ban_cache_ttl_negative = _coerce_ttl(
-    Config.get_config("hook", "BAN_CACHE_TTL_NEGATIVE", _ban_cache_ttl_value),
-    _ban_cache_ttl_value,
-)
+BAN_CACHE_TTL = 2
+BAN_CACHE_TTL_POSITIVE = 30
+BAN_CACHE_TTL_NEGATIVE = 5
 
 BAN_CACHE = (
     CacheDict("AUTH_BAN_CACHE", expire=0)
-    if max(_ban_cache_ttl_positive, _ban_cache_ttl_negative) > 0
+    if max(BAN_CACHE_TTL_POSITIVE, BAN_CACHE_TTL_NEGATIVE) > 0
     else None
 )
 
@@ -92,7 +53,7 @@ def _ban_cache_get(key: str) -> int | None:
 def _ban_cache_set(key: str, value: int) -> None:
     if not BAN_CACHE:
         return
-    ttl = _ban_cache_ttl_positive if value else _ban_cache_ttl_negative
+    ttl = BAN_CACHE_TTL_POSITIVE if value else BAN_CACHE_TTL_NEGATIVE
     if ttl <= 0:
         return
     BAN_CACHE.set(key, value, expire=ttl)

@@ -8,7 +8,6 @@ import time
 from typing import TYPE_CHECKING, Any, ClassVar
 import uuid
 
-from zhenxun.configs.config import Config
 from zhenxun.services.cache.config import CacheMode
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import LimitCheckType, LimitWatchType, PluginLimitType
@@ -19,108 +18,23 @@ if TYPE_CHECKING:
 
 LOG_COMMAND = "RuntimeCache"
 
-Config.add_plugin_config(
-    "hook",
-    "PLUGININFO_MEM_REFRESH_INTERVAL",
-    1800,
-    help="plugin info memory cache refresh seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "BAN_MEM_REFRESH_INTERVAL",
-    900,
-    help="ban memory cache full refresh seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "BAN_MEM_CLEAN_INTERVAL",
-    900,
-    help="ban memory cache cleanup seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "BAN_MEM_CLEANUP_DB",
-    True,
-    help="delete expired ban records from database",
-)
-Config.add_plugin_config(
-    "hook",
-    "BAN_MEM_NEGATIVE_TTL",
-    5,
-    help="ban memory negative cache ttl seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "BOT_MEM_REFRESH_INTERVAL",
-    900,
-    help="bot memory cache refresh seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "BOT_MEM_NEGATIVE_TTL",
-    60,
-    help="bot memory negative cache ttl seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "GROUP_MEM_REFRESH_INTERVAL",
-    900,
-    help="group memory cache refresh seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "GROUP_MEM_NEGATIVE_TTL",
-    60,
-    help="group memory negative cache ttl seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "LEVEL_MEM_REFRESH_INTERVAL",
-    900,
-    help="level memory cache refresh seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "LEVEL_MEM_NEGATIVE_TTL",
-    60,
-    help="level memory negative cache ttl seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "TASK_MEM_REFRESH_INTERVAL",
-    900,
-    help="task info memory cache refresh seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "TASK_MEM_NEGATIVE_TTL",
-    60,
-    help="task info negative cache ttl seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "LIMIT_MEM_REFRESH_INTERVAL",
-    900,
-    help="plugin limit memory cache refresh seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "LIMIT_MEM_NEGATIVE_TTL",
-    30,
-    help="plugin limit negative cache ttl seconds",
-)
-Config.add_plugin_config(
-    "hook",
-    "RUNTIME_CACHE_SYNC_ENABLED",
-    True,
-    help="enable redis pubsub runtime cache sync",
-)
-Config.add_plugin_config(
-    "hook",
-    "RUNTIME_CACHE_SYNC_CHANNEL",
-    "ZHENXUN_RUNTIME_CACHE_SYNC",
-    help="redis pubsub channel for runtime cache sync",
-)
+PLUGININFO_MEM_REFRESH_INTERVAL = 300
+BAN_MEM_REFRESH_INTERVAL = 60
+BAN_MEM_CLEAN_INTERVAL = 60
+BAN_MEM_CLEANUP_DB = True
+BAN_MEM_NEGATIVE_TTL = 5
+BOT_MEM_REFRESH_INTERVAL = 60
+BOT_MEM_NEGATIVE_TTL = 60
+GROUP_MEM_REFRESH_INTERVAL = 60
+GROUP_MEM_NEGATIVE_TTL = 60
+LEVEL_MEM_REFRESH_INTERVAL = 120
+LEVEL_MEM_NEGATIVE_TTL = 60
+TASK_MEM_REFRESH_INTERVAL = 900
+TASK_MEM_NEGATIVE_TTL = 60
+LIMIT_MEM_REFRESH_INTERVAL = 60
+LIMIT_MEM_NEGATIVE_TTL = 30
+RUNTIME_CACHE_SYNC_ENABLED = True
+RUNTIME_CACHE_SYNC_CHANNEL = "ZHENXUN_RUNTIME_CACHE_SYNC"
 
 
 def _coerce_int(value, default: int) -> int:
@@ -496,7 +410,7 @@ class RuntimeCacheSync:
 
     @classmethod
     def _sync_enabled(cls) -> bool:
-        enabled = bool(Config.get_config("hook", "RUNTIME_CACHE_SYNC_ENABLED", True))
+        enabled = RUNTIME_CACHE_SYNC_ENABLED
         return enabled and _redis_enabled()
 
     @classmethod
@@ -518,11 +432,7 @@ class RuntimeCacheSync:
             return
         port = _coerce_int(_env_get("REDIS_PORT"), 6379)
         password = _env_get("REDIS_PASSWORD")
-        cls._channel = str(
-            Config.get_config(
-                "hook", "RUNTIME_CACHE_SYNC_CHANNEL", "ZHENXUN_RUNTIME_CACHE_SYNC"
-            )
-        )
+        cls._channel = RUNTIME_CACHE_SYNC_CHANNEL
         try:
             cls._redis = redis_async.Redis(
                 host=host,
@@ -730,10 +640,7 @@ class PluginInfoMemoryCache:
 
     @classmethod
     def start_refresh_task(cls) -> None:
-        interval = _coerce_int(
-            Config.get_config("hook", "PLUGININFO_MEM_REFRESH_INTERVAL", 300),
-            300,
-        )
+        interval = PLUGININFO_MEM_REFRESH_INTERVAL
         if interval <= 0:
             return
         if cls._refresh_task and not cls._refresh_task.done():
@@ -763,7 +670,7 @@ class BotMemoryCache:
 
     @classmethod
     def _negative_ttl(cls) -> int:
-        return _coerce_int(Config.get_config("hook", "BOT_MEM_NEGATIVE_TTL", 60), 60)
+        return BOT_MEM_NEGATIVE_TTL
 
     @classmethod
     def _is_negative(cls, bot_id: str) -> bool:
@@ -887,9 +794,7 @@ class BotMemoryCache:
 
     @classmethod
     def start_tasks(cls) -> None:
-        interval = _coerce_int(
-            Config.get_config("hook", "BOT_MEM_REFRESH_INTERVAL", 60), 60
-        )
+        interval = BOT_MEM_REFRESH_INTERVAL
         if interval <= 0:
             return
         if cls._refresh_task and not cls._refresh_task.done():
@@ -929,7 +834,7 @@ class GroupMemoryCache:
 
     @classmethod
     def _negative_ttl(cls) -> int:
-        return _coerce_int(Config.get_config("hook", "GROUP_MEM_NEGATIVE_TTL", 60), 60)
+        return GROUP_MEM_NEGATIVE_TTL
 
     @classmethod
     def _is_negative(cls, key: tuple[str, str]) -> bool:
@@ -1061,9 +966,7 @@ class GroupMemoryCache:
 
     @classmethod
     def start_tasks(cls) -> None:
-        interval = _coerce_int(
-            Config.get_config("hook", "GROUP_MEM_REFRESH_INTERVAL", 60), 60
-        )
+        interval = GROUP_MEM_REFRESH_INTERVAL
         if interval <= 0:
             return
         if cls._refresh_task and not cls._refresh_task.done():
@@ -1103,7 +1006,7 @@ class LevelUserMemoryCache:
 
     @classmethod
     def _negative_ttl(cls) -> int:
-        return _coerce_int(Config.get_config("hook", "LEVEL_MEM_NEGATIVE_TTL", 60), 60)
+        return LEVEL_MEM_NEGATIVE_TTL
 
     @classmethod
     def _is_negative(cls, key: tuple[str, str]) -> bool:
@@ -1153,9 +1056,7 @@ class LevelUserMemoryCache:
 
     @classmethod
     async def ensure_fresh(cls) -> None:
-        interval = _coerce_int(
-            Config.get_config("hook", "LEVEL_MEM_REFRESH_INTERVAL", 120), 120
-        )
+        interval = LEVEL_MEM_REFRESH_INTERVAL
         if not cls._loaded:
             await cls.refresh()
             return
@@ -1284,9 +1185,7 @@ class LevelUserMemoryCache:
 
     @classmethod
     def start_tasks(cls) -> None:
-        interval = _coerce_int(
-            Config.get_config("hook", "LEVEL_MEM_REFRESH_INTERVAL", 120), 120
-        )
+        interval = LEVEL_MEM_REFRESH_INTERVAL
         if interval <= 0:
             return
         if cls._refresh_task and not cls._refresh_task.done():
@@ -1316,7 +1215,7 @@ class TaskInfoMemoryCache:
 
     @classmethod
     def _negative_ttl(cls) -> int:
-        return _coerce_int(Config.get_config("hook", "TASK_MEM_NEGATIVE_TTL", 60), 60)
+        return TASK_MEM_NEGATIVE_TTL
 
     @classmethod
     def _is_negative(cls, module: str) -> bool:
@@ -1423,9 +1322,7 @@ class TaskInfoMemoryCache:
 
     @classmethod
     def start_tasks(cls) -> None:
-        interval = _coerce_int(
-            Config.get_config("hook", "TASK_MEM_REFRESH_INTERVAL", 300), 300
-        )
+        interval = TASK_MEM_REFRESH_INTERVAL
         if interval <= 0:
             return
         if cls._refresh_task and not cls._refresh_task.done():
@@ -1456,7 +1353,7 @@ class PluginLimitMemoryCache:
 
     @classmethod
     def _negative_ttl(cls) -> int:
-        return _coerce_int(Config.get_config("hook", "LIMIT_MEM_NEGATIVE_TTL", 30), 30)
+        return LIMIT_MEM_NEGATIVE_TTL
 
     @classmethod
     def _is_negative(cls, module: str) -> bool:
@@ -1598,9 +1495,7 @@ class PluginLimitMemoryCache:
 
     @classmethod
     def start_tasks(cls) -> None:
-        interval = _coerce_int(
-            Config.get_config("hook", "LIMIT_MEM_REFRESH_INTERVAL", 60), 60
-        )
+        interval = LIMIT_MEM_REFRESH_INTERVAL
         if interval <= 0:
             return
         if cls._refresh_task and not cls._refresh_task.done():
@@ -1634,7 +1529,7 @@ class BanMemoryCache:
 
     @classmethod
     def _neg_ttl(cls) -> int:
-        return _coerce_int(Config.get_config("hook", "BAN_MEM_NEGATIVE_TTL", 5), 5)
+        return BAN_MEM_NEGATIVE_TTL
 
     @classmethod
     def _neg_key(
@@ -1894,13 +1789,9 @@ class BanMemoryCache:
 
     @classmethod
     def start_tasks(cls) -> None:
-        refresh_interval = _coerce_int(
-            Config.get_config("hook", "BAN_MEM_REFRESH_INTERVAL", 60), 60
-        )
-        clean_interval = _coerce_int(
-            Config.get_config("hook", "BAN_MEM_CLEAN_INTERVAL", 60), 60
-        )
-        cleanup_db = bool(Config.get_config("hook", "BAN_MEM_CLEANUP_DB", True))
+        refresh_interval = BAN_MEM_REFRESH_INTERVAL
+        clean_interval = BAN_MEM_CLEAN_INTERVAL
+        cleanup_db = BAN_MEM_CLEANUP_DB
 
         if refresh_interval > 0 and (not cls._refresh_task or cls._refresh_task.done()):
             cls._refresh_task = asyncio.create_task(cls._refresh_loop(refresh_interval))

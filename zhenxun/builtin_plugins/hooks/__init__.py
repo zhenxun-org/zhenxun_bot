@@ -58,14 +58,5 @@ Config.add_plugin_config(
     type=bool,
 )
 
-Config.add_plugin_config(
-    "hook",
-    "AUTH_HOOKS_CONCURRENCY_LIMIT",
-    5,
-    help="同步进入权限钩子最大并发数",
-    default_value=5,
-    type=int,
-)
-
 
 nonebot.load_plugins(str(Path(__file__).parent.resolve()))

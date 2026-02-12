@@ -13,7 +13,7 @@ priority = "primary"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-playwright = "^1.41.1"
+playwright = "1.57.0"
 nonebot-adapter-onebot = ">=2.3.1"
 nonebot-plugin-apscheduler = "^0.5"
 tortoise-orm = "^0.20.0"

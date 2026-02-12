@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import time
 
 from nonebot import get_driver
@@ -6,6 +7,7 @@ from nonebot.adapters import Bot, Event
 from nonebot.exception import IgnoredException
 from nonebot.matcher import Matcher
 from nonebot.message import event_preprocessor, run_postprocessor, run_preprocessor
+from nonebot.typing import T_State
 from nonebot_plugin_alconna import UniMsg
 from nonebot_plugin_uninfo import Uninfo
 
@@ -19,8 +21,11 @@ from .auth.config import LOGGER_COMMAND
 from .auth_checker import (
     LimitManager,
     _get_event_cache,
+    _get_route_context,
     auth,
     route_precheck,
+    start_auth_runtime_tasks,
+    stop_auth_runtime_tasks,
 )
 
 _SKIP_AUTH_PLUGINS = {"chat_history", "chat_message"}
@@ -74,6 +79,26 @@ async def _start_auth_queue():
     worker_count = max(1, min(6, _AUTH_QUEUE_MAXSIZE // 50))
     for idx in range(worker_count):
         _AUTH_WORKERS.append(asyncio.create_task(_auth_worker(idx)))
+    await start_auth_runtime_tasks()
+
+
+@driver.on_shutdown
+async def _stop_auth_queue():
+    global _AUTH_QUEUE_STARTED
+    _AUTH_QUEUE_STARTED = False
+    workers = _AUTH_WORKERS.copy()
+    _AUTH_WORKERS.clear()
+    for task in workers:
+        task.cancel()
+    if workers:
+        await asyncio.gather(*workers, return_exceptions=True)
+
+    while not _AUTH_QUEUE.empty():
+        with contextlib.suppress(Exception):
+            _AUTH_QUEUE.get_nowait()
+            _AUTH_QUEUE.task_done()
+
+    await stop_auth_runtime_tasks()
 
 
 def _skip_auth_for_plugin(matcher: Matcher) -> bool:
@@ -100,15 +125,53 @@ async def _drop_message_before_cache_ready(event: Event):
 
 @run_preprocessor
 async def _auth_preprocessor(
-    matcher: Matcher, event: Event, bot: Bot, session: Uninfo, message: UniMsg
+    matcher: Matcher,
+    event: Event,
+    bot: Bot,
+    session: Uninfo,
+    message: UniMsg,
+    state: T_State,
 ):
     if event.get_type() == "message" and not is_cache_ready():
         raise IgnoredException("cache not ready ignore")
     start_time = time.time()
-    entity = get_entity_ids(session)
-    _get_event_cache(event, session, entity)
+    entity = state.get("_zx_entity")
+    if entity is None:
+        entity = get_entity_ids(session)
+        state["_zx_entity"] = entity
 
-    if await route_precheck(matcher, event, session, message):
+    event_cache = state.get("_zx_event_cache")
+    if event_cache is None:
+        event_cache = _get_event_cache(event, session, entity)
+        state["_zx_event_cache"] = event_cache
+
+    text = state.get("_zx_plain_text")
+    if text is None:
+        text = message.extract_plain_text()
+        state["_zx_plain_text"] = text
+        if event_cache is not None:
+            event_cache["plain_text"] = text
+
+    route_modules = state.get("_zx_route_modules")
+    if route_modules is None:
+        route_modules = await _get_route_context(text, event_cache)
+        state["_zx_route_modules"] = route_modules
+
+    is_superuser = state.get("_zx_is_superuser")
+    if is_superuser is None:
+        is_superuser = session.user.id in bot.config.superusers
+        state["_zx_is_superuser"] = is_superuser
+
+    if await route_precheck(
+        matcher,
+        event,
+        session,
+        message,
+        entity=entity,
+        event_cache=event_cache,
+        text=text,
+        route_modules=route_modules,
+    ):
         return
     if _skip_auth_for_plugin(matcher):
         return
@@ -121,6 +184,11 @@ async def _auth_preprocessor(
             session,
             message,
             skip_ban=False,
+            entity=entity,
+            event_cache=event_cache,
+            text=text,
+            route_modules=route_modules,
+            is_superuser=is_superuser,
         )
     except IgnoredException:
         raise

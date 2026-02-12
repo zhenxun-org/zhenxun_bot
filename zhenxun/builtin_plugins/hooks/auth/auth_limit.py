@@ -6,7 +6,6 @@ import nonebot
 from nonebot_plugin_uninfo import Uninfo
 from pydantic import BaseModel
 
-from zhenxun.configs.config import Config
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.plugin_limit import PluginLimit
 from zhenxun.services.cache.runtime_cache import (
@@ -27,13 +26,7 @@ from .exception import SkipPluginException
 
 driver = nonebot.get_driver()
 
-Config.add_plugin_config(
-    "hook",
-    "AUTH_LIMIT_NOTICE_CD",
-    2,
-    help="auth limit notice cooldown seconds",
-)
-_LIMIT_NOTICE_CD = int(Config.get_config("hook", "AUTH_LIMIT_NOTICE_CD", 2) or 2)
+_LIMIT_NOTICE_CD = 2
 _LIMIT_NOTICE_LIMITER = FreqLimiter(_LIMIT_NOTICE_CD)
 _LIMIT_NOTICE_TASKS: set[asyncio.Task] = set()
 
