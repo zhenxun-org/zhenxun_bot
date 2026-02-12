@@ -1,6 +1,6 @@
 import asyncio
-import contextlib
 from concurrent.futures import ThreadPoolExecutor
+import contextlib
 import os
 
 import anyio.to_thread
@@ -25,7 +25,9 @@ def _get_executor_workers() -> int:
 
 
 def _get_anyio_tokens(executor_workers: int) -> int:
-    return _clamp(executor_workers * 2, DEFAULT_ANYIO_MIN_TOKENS, DEFAULT_ANYIO_MAX_TOKENS)
+    return _clamp(
+        executor_workers * 2, DEFAULT_ANYIO_MIN_TOKENS, DEFAULT_ANYIO_MAX_TOKENS
+    )
 
 
 def register_runtime_bootstrap(driver: Driver) -> None:
