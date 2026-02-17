@@ -1,11 +1,35 @@
+import contextlib
+import os
+
 import nonebot
+
+htmlrender_browser_channel = None
+
+if os.name == "nt":
+    import winreg
+
+    paths = {
+        "chrome": r"SOFTWARE\Clients\StartMenuInternet\Google Chrome\DefaultIcon",
+        "msedge": r"SOFTWARE\Clients\StartMenuInternet\Microsoft Edge\DefaultIcon",
+    }
+    for name, path in paths.items():
+        with contextlib.suppress(FileNotFoundError):
+            winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
+            htmlrender_browser_channel = name
+            break
+
+    if htmlrender_browser_channel:
+        nonebot.logger.info(
+            f"Using {htmlrender_browser_channel} as htmlrender browser channel."
+        )
+
 
 # from nonebot.adapters.discord import Adapter as DiscordAdapter
 # from nonebot.adapters.dodo import Adapter as DoDoAdapter
 # from nonebot.adapters.kaiheila import Adapter as KaiheilaAdapter
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
-nonebot.init()
+nonebot.init(htmlrender_browser_channel=htmlrender_browser_channel)
 
 
 driver = nonebot.get_driver()
