@@ -1,11 +1,12 @@
 import contextlib
-import os
+import platform
 
 import nonebot
 
 htmlrender_browser_channel = None
+system = platform.system()
 
-if os.name == "nt":
+if system == "Windows":
     import winreg
 
     paths = {
@@ -18,10 +19,22 @@ if os.name == "nt":
             htmlrender_browser_channel = name
             break
 
-    if htmlrender_browser_channel:
-        nonebot.logger.info(
-            f"Using {htmlrender_browser_channel} as htmlrender browser channel."
-        )
+elif system == "Darwin":  # macOS
+    from pathlib import Path
+
+    mac_paths = {
+        "chrome": "/Applications/Google Chrome.app",
+        "msedge": "/Applications/Microsoft Edge.app",
+    }
+    for name, path in mac_paths.items():
+        if Path(path).exists():
+            htmlrender_browser_channel = name
+            break
+
+if htmlrender_browser_channel:
+    nonebot.logger.info(
+        f"使用 {htmlrender_browser_channel} 作为 htmlrender 驱动启动..."
+    )
 
 
 # from nonebot.adapters.discord import Adapter as DiscordAdapter
