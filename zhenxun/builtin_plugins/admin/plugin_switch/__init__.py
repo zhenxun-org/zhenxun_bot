@@ -120,7 +120,7 @@ async def _(
 ):
     if not all.result and not plugin_name.available:
         await MessageUtils.build_message("请输入功能/被动名称").finish(reply_to=True)
-    name = plugin_name.result.strip()
+    name = plugin_name.result.strip() if plugin_name.available else ""
     if session.group:
         group_id = session.group.id
         """修改当前群组的数据"""
