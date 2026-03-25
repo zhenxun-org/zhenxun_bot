@@ -174,11 +174,9 @@ async def _handle_switch_command(
             await MessageUtils.build_message(
                 "被动技能不支持指定禁用范围，请直接使用 开启/关闭"
             ).finish(reply_to=True)
-            return
 
     if not all_plugins_flag.result and not plugin_names.available:
         await MessageUtils.build_message("请输入功能/被动名称").finish(reply_to=True)
-        return
 
     targets = await get_target_groups(
         bot,
@@ -206,7 +204,6 @@ async def _handle_switch_command(
                     )
                 )
             await MessageUtils.build_message("\n".join(messages)).finish(reply_to=True)
-            return
         if is_superuser and not session.group:
             result = await PluginManager.set_all_plugin_status(
                 status=status,
@@ -217,9 +214,7 @@ async def _handle_switch_command(
                 use_su_field=use_su_field_final,
             )
             await MessageUtils.build_message(result).finish(reply_to=True)
-            return
         await MessageUtils.build_message("请输入目标群组").finish(reply_to=True)
-        return
 
     names = plugin_names.result if plugin_names.available else ()
     if isinstance(names, str):
@@ -227,12 +222,11 @@ async def _handle_switch_command(
 
     if (
         not targets
-        and not (is_superuser and not session.group)
+        and (not is_superuser or session.group)
         and not default_status.result
         and block_type_val is None
     ):
         await MessageUtils.build_message("请选择一个目标群组").finish(reply_to=True)
-        return
 
     messages = []
     for name in names:
@@ -258,7 +252,7 @@ async def _handle_switch_command(
 
         if not targets:
             if is_superuser and not session.group:
-                target_block_type = BlockType.ALL if not status else None
+                target_block_type = None if status else BlockType.ALL
                 result = await PluginManager.superuser_set_status(
                     name_str, status, target_block_type, None, is_task=task.result
                 )
