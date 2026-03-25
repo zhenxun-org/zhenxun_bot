@@ -241,12 +241,14 @@ def user_info_block(
     avatar_url: str,
     subtitle: str | None = None,
     tags: list[str] | None = None,
+    extra: RenderableComponent | None = None,
 ) -> UserInfoBlock:
     return UserInfoBlock(
         name=name,
         avatar_url=avatar_url,
         subtitle=subtitle,
         tags=tags or [],
+        extra=extra,
     )
 
 

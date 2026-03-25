@@ -3,7 +3,6 @@ from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun import ui
 from zhenxun.configs.config import BotConfig, Config
-from zhenxun.configs.path_config import IMAGE_PATH
 from zhenxun.configs.utils import PluginExtraData
 from zhenxun.models.bot_console import BotConsole
 from zhenxun.models.group_console import GroupConsole
@@ -23,10 +22,7 @@ from zhenxun.utils.common_utils import format_usage_for_markdown
 from zhenxun.utils.enum import BlockType, PluginType
 from zhenxun.utils.platform import PlatformUtils
 
-from ._utils import classify_plugin
-
-random_bk_path = IMAGE_PATH / "background" / "help" / "simple_help"
-background = IMAGE_PATH / "background" / "0.png"
+from .utils import classify_plugin
 
 driver = nonebot.get_driver()
 _HELP_MENU_IMAGE_CACHE = RenderResultMemoryCache(
@@ -43,7 +39,7 @@ def _create_plugin_menu_item(
     is_detail: bool,
 ) -> dict:
     """为插件菜单构造一个插件菜单项数据字典"""
-    status = True
+    status_type = 0
     has_superuser_help = False
     nb_plugin = nonebot.get_plugin_by_module_name(plugin.module_path)
     if nb_plugin and nb_plugin.metadata and nb_plugin.metadata.extra:
@@ -51,17 +47,21 @@ def _create_plugin_menu_item(
         if extra_data.superuser_help:
             has_superuser_help = True
 
+    module_tag = f"<{plugin.module},"
+
     if not plugin.status:
         if plugin.block_type == BlockType.ALL:
-            status = False
+            status_type = 3
         elif group and plugin.block_type == BlockType.GROUP:
-            status = False
+            status_type = 3
         elif not group and plugin.block_type == BlockType.PRIVATE:
-            status = False
-    elif group and f"{plugin.module}," in group.block_plugin:
-        status = False
-    elif bot and f"{plugin.module}," in bot.block_plugins:
-        status = False
+            status_type = 3
+    elif group and module_tag in (group.superuser_block_plugin or ""):
+        status_type = 2
+    elif bot and module_tag in (bot.block_plugins or ""):
+        status_type = 2
+    elif group and module_tag in (group.block_plugin or ""):
+        status_type = 1
 
     commands = []
     if is_detail and nb_plugin and nb_plugin.metadata and nb_plugin.metadata.extra:
@@ -71,7 +71,7 @@ def _create_plugin_menu_item(
     return {
         "id": str(plugin.id),
         "name": plugin.name,
-        "status": status,
+        "status": status_type,
         "has_superuser_help": has_superuser_help,
         "commands": commands,
     }
@@ -98,13 +98,13 @@ async def create_help_img(
         main_category_name = "主要功能" if menu_key in ["normal", "功能"] else menu_key
         categories_for_model.append({"name": main_category_name, "items": max_data})
         plugin_count += len(max_data)
-        active_count += sum(1 for item in max_data if item["status"])
+        active_count += sum(1 for item in max_data if item["status"] == 0)
 
     for menu, value in sorted_categories.items():
         category_name = "主要功能" if menu in ["normal", "功能"] else menu
         categories_for_model.append({"name": category_name, "items": value})
         plugin_count += len(value)
-        active_count += sum(1 for item in value if item["status"])
+        active_count += sum(1 for item in value if item["status"] == 0)
 
     platform = PlatformUtils.get_platform(session)
     bot_id = BotConfig.get_qbot_uid(session.self_id) or session.self_id
@@ -117,7 +117,6 @@ async def create_help_img(
             PluginMenuCategory(name=category["name"], items=category["items"])
         )
 
-    # 直接实例化 Data Model
     menu_data = PluginMenuData(
         bot_name=BotConfig.self_nickname,
         bot_avatar_url=bot_avatar_url,
@@ -169,29 +168,9 @@ async def get_user_allow_help(user_id: str) -> list[PluginType]:
     return type_list
 
 
-def min_leading_spaces(str_list: list[str]) -> int:
-    min_spaces = 9999
-
-    for s in str_list:
-        leading_spaces = len(s) - len(s.lstrip(" "))
-
-        if leading_spaces < min_spaces:
-            min_spaces = leading_spaces
-
-    return min_spaces if min_spaces != 9999 else 0
-
-
-def split_text(text: str):
-    split_text = text.split("\n")
-    min_spaces = min_leading_spaces(split_text)
-    if min_spaces > 0:
-        split_text = [s[min_spaces:] for s in split_text]
-    return [s.replace(" ", "&nbsp;") for s in split_text]
-
-
 async def get_plugin_help(
     user_id: str, name: str, is_superuser: bool, variant: str | None = None
-) -> str | bytes:
+) -> bytes | None:
     """获取功能的帮助信息
 
     参数:
@@ -215,10 +194,6 @@ async def get_plugin_help(
 
             call_count = await Statistics.filter(plugin_name=plugin.module).count()
             usage = _plugin.metadata.usage
-            if is_superuser:
-                if not extra_data.superuser_help:
-                    return "该功能没有超级用户帮助信息"
-                usage = extra_data.superuser_help
 
             metadata_items = [
                 {"label": "作者", "value": extra_data.author or "未知"},
@@ -226,15 +201,40 @@ async def get_plugin_help(
                 {"label": "调用次数", "value": call_count},
             ]
 
-            processed_description = format_usage_for_markdown(
-                _plugin.metadata.description.strip()
+            sections = []
+            sections.append(
+                {
+                    "title": "功能简介",
+                    "content": [
+                        format_usage_for_markdown(_plugin.metadata.description.strip())
+                    ],
+                    "is_admin": False,
+                }
             )
-            processed_usage = format_usage_for_markdown(usage.strip())
 
-            sections = [
-                {"title": "简介", "content": [processed_description]},
-                {"title": "使用方法", "content": [processed_usage]},
-            ]
+            if usage and usage.strip():
+                sections.append(
+                    {
+                        "title": "管理员指令",
+                        "content": [format_usage_for_markdown(usage.strip())],
+                        "is_admin": False,
+                    }
+                )
+
+            if (
+                is_superuser
+                and extra_data.superuser_help
+                and extra_data.superuser_help.strip()
+            ):
+                sections.append(
+                    {
+                        "title": "超级用户指令",
+                        "content": [
+                            format_usage_for_markdown(extra_data.superuser_help.strip())
+                        ],
+                        "is_admin": True,
+                    }
+                )
 
             page_data = {
                 "title": _plugin.metadata.name,
@@ -246,8 +246,8 @@ async def get_plugin_help(
             if variant:
                 component.variant = variant
             return await ui.render(component, use_cache=True, device_scale_factor=2)
-        return "糟糕! 该功能没有帮助喔..."
-    return "没有查找到这个功能噢..."
+        return None
+    return None
 
 
 async def get_llm_help(question: str, user_id: str) -> str | bytes:
