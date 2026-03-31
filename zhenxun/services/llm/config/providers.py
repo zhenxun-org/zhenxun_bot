@@ -170,6 +170,7 @@ def get_default_providers() -> list[dict[str, Any]]:
             "api_key": "YOUR_ARK_API_KEY",
             "api_base": "https://api.deepseek.com",
             "api_type": "openai",
+            "extra_headers": {},
             "models": [
                 {
                     "model_name": "deepseek-chat",
@@ -296,6 +297,8 @@ def register_llm_configs():
         help=(
             "配置多个 AI 服务提供商及其模型信息。\n"
             "注意：可以在特定模型配置下添加 'api_type' 以覆盖提供商的全局设置。\n"
+            "可选：在 provider 下添加 'extra_headers' 传递额外请求头，"
+            "用于 AI 网关鉴权（例如 cf-aig-authorization）。\n"
             "支持的 api_type 包括:\n"
             "- 'openai': 标准 OpenAI 格式 (DeepSeek, SiliconFlow, Moonshot 等)\n"
             "- 'gemini': Google Gemini API\n"

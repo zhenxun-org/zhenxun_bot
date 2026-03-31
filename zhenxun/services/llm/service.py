@@ -46,6 +46,24 @@ from .types.capabilities import ModelCapabilities, ModelModality
 T = TypeVar("T", bound=BaseModel)
 
 
+def _sanitize_request_headers(headers: dict[str, Any]) -> dict[str, str]:
+    sanitized: dict[str, str] = {}
+    sensitive_parts = ("authorization", "token", "api-key", "api_key", "secret")
+    for key, value in headers.items():
+        key_text = str(key)
+        value_text = str(value)
+        lowered = key_text.lower()
+        if any(part in lowered for part in sensitive_parts):
+            if " " in value_text:
+                prefix = value_text.split(" ", 1)[0]
+                sanitized[key_text] = f"{prefix} ***"
+            else:
+                sanitized[key_text] = "***"
+        else:
+            sanitized[key_text] = value_text
+    return sanitized
+
+
 class LLMContext(BaseModel):
     """LLM 执行上下文，用于在中间件管道中传递请求状态"""
 
@@ -583,7 +601,7 @@ class NetworkRequestMiddleware(BaseLLMMiddleware):
         )
         logger.debug(f"🔑 API密钥: {masked_key}")
         logger.debug(f"📡 请求URL: {request_data.url}")
-        logger.debug(f"📋 请求头: {dict(request_data.headers)}")
+        logger.debug(f"📋 请求头: {_sanitize_request_headers(request_data.headers)}")
 
         if self.model.api_type == "smart":
             effective_type = self.model._get_effective_api_type()

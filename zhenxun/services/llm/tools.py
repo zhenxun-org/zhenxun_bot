@@ -299,8 +299,20 @@ class FunctionExecutable(ToolExecutable):
         if self._params_model:
             try:
                 _fields = model_fields(self._params_model)
+                if isinstance(_fields, dict):
+                    field_names = set(_fields)
+                else:
+                    field_names = {
+                        name
+                        for field in _fields
+                        for name in (
+                            getattr(field, "name", None),
+                            getattr(field, "alias", None),
+                        )
+                        if name
+                    }
                 validation_input = {
-                    key: value for key, value in kwargs.items() if key in _fields
+                    key: value for key, value in kwargs.items() if key in field_names
                 }
 
                 validated_params = self._params_model(**validation_input)

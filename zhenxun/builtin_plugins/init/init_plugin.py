@@ -131,6 +131,8 @@ async def _():
                         "admin_level",
                         "plugin_type",
                         "is_show",
+                        "ignore_prompt",
+                        "ignore_statistics",
                     ]
                 )
             )

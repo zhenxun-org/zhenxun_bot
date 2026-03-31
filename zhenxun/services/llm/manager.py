@@ -328,6 +328,7 @@ async def get_model_instance(
         openai_compat=provider_config_found.openai_compat,
         temperature=provider_config_found.temperature,
         max_tokens=provider_config_found.max_tokens,
+        extra_headers=provider_config_found.extra_headers,
     )
 
     shared_http_client = await http_client_manager.get_client(config_for_http_client)

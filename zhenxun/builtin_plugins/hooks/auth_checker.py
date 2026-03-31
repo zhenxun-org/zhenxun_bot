@@ -136,6 +136,10 @@ _PREFILTER_STATS = {
 }
 _PREFILTER_LAST_LOG = 0.0
 _CACHE_SWEEP_TASK: asyncio.Task | None = None
+_BOT_WAKE_COMMAND_PATTERN = re.compile(r"^bot醒来(?:\s+\S+)?$", re.IGNORECASE)
+_BOT_WAKE_CANONICAL_PATTERN = re.compile(
+    r"^bot_manage\s+bot_switch\s+enable(?:\s+\S+)?$", re.IGNORECASE
+)
 
 
 class HookTraceRecorder:
@@ -232,6 +236,20 @@ def _normalize_command(command: str) -> str:
     # remove trailing template markers left by forms like "foo ?[arg]" / "foo ?*[tags]"
     text = re.sub(r"(?:\s+[?*]+|[?*]+)$", "", text).strip()
     return text
+
+
+def _is_bot_wake_command(module: str, text: str | None) -> bool:
+    if "bot_manage" not in (module or ""):
+        return False
+    if not text:
+        return False
+    normalized = re.sub(r"\s+", " ", text.strip())
+    if not normalized:
+        return False
+    return (
+        _BOT_WAKE_COMMAND_PATTERN.match(normalized) is not None
+        or _BOT_WAKE_CANONICAL_PATTERN.match(normalized) is not None
+    )
 
 
 def _split_command_variants(command: str) -> tuple[str, ...]:
@@ -348,6 +366,79 @@ def _matcher_module_name(matcher_cls: type[Matcher]) -> str:
     if not plugin:
         return ""
     return (getattr(plugin, "name", "") or "").strip()
+
+
+def _collect_ai_route_modules(event: Event, state: dict | None = None) -> set[str]:
+    if state is not None:
+        cached = state.get("_zx_ai_route_modules")
+        if isinstance(cached, set):
+            return cached
+
+    raw_value = getattr(event, "_ai_route_modules", None)
+    result: set[str] = set()
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip()
+        if normalized:
+            result.add(normalized)
+    elif isinstance(raw_value, set | frozenset | list | tuple):
+        for item in raw_value:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip()
+            if normalized:
+                result.add(normalized)
+
+    if state is not None and result:
+        state["_zx_ai_route_modules"] = result
+    return result
+
+
+def _collect_ai_route_heads(event: Event, state: dict | None = None) -> set[str]:
+    if state is not None:
+        cached = state.get("_zx_ai_route_heads")
+        if isinstance(cached, set):
+            return cached
+
+    raw_value = getattr(event, "_ai_route_heads", None)
+    result: set[str] = set()
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().casefold()
+        if normalized:
+            result.add(normalized)
+    elif isinstance(raw_value, set | frozenset | list | tuple):
+        for item in raw_value:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip().casefold()
+            if normalized:
+                result.add(normalized)
+
+    if state is not None and result:
+        state["_zx_ai_route_heads"] = result
+    return result
+
+
+def _matcher_matches_ai_route_heads(
+    matcher_cls: type[Matcher],
+    ai_route_heads: set[str],
+) -> bool:
+    if not ai_route_heads:
+        return False
+    matcher_commands = _extract_matcher_command_literals(matcher_cls)
+    if not matcher_commands:
+        return False
+    for command in matcher_commands:
+        normalized_command = command.strip().casefold()
+        if not normalized_command:
+            continue
+        for head in ai_route_heads:
+            if not head:
+                continue
+            if _command_matches(head, normalized_command) or _command_matches(
+                normalized_command, head
+            ):
+                return True
+    return False
 
 
 def _is_command_matcher_class(matcher_cls: type[Matcher]) -> bool:
@@ -601,6 +692,12 @@ async def _check_matcher_prefilter(
     module = _matcher_module_name(matcher_cls)
     if not module:
         return False, None
+
+    ai_route_modules = _collect_ai_route_modules(event, state)
+    ai_route_heads = _collect_ai_route_heads(event, state)
+    if ai_route_modules and module not in ai_route_modules:
+        if not _matcher_matches_ai_route_heads(matcher_cls, ai_route_heads):
+            return True, "route_miss"
 
     if not _ROUTE_INDEX_READY:
         await _ensure_route_index()
@@ -1425,12 +1522,21 @@ async def auth(
 
         # 并行执行所有 hook 检查，并记录执行时间
         hooks_start = time.time()
+        allow_sleep_bypass = _is_bot_wake_command(module, text)
 
         # 创建所有 hook 任务
         hook_tasks = []
         if event_cache is None:
             hook_tasks.append(
-                time_hook(auth_bot(plugin, bot.self_id), "auth_bot", hook_recorder)
+                time_hook(
+                    auth_bot(
+                        plugin,
+                        bot.self_id,
+                        allow_sleep_bypass=allow_sleep_bypass,
+                    ),
+                    "auth_bot",
+                    hook_recorder,
+                )
             )
         else:
             if bot_timeout:
@@ -1443,6 +1549,7 @@ async def auth(
                             bot.self_id,
                             bot_data=bot_data,
                             skip_fetch=True,
+                            allow_sleep_bypass=allow_sleep_bypass,
                         ),
                         "auth_bot",
                         hook_recorder,

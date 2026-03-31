@@ -41,16 +41,24 @@ class RepoFileManager:
 
     @overload
     async def get_github_file_content(
-        self, url: str, file_path: str, ignore_error: bool = False
+        self, url: str, file_path: str, branch: str = "main", ignore_error: bool = False
     ) -> str: ...
 
     @overload
     async def get_github_file_content(
-        self, url: str, file_path: list[str], ignore_error: bool = False
+        self,
+        url: str,
+        file_path: list[str],
+        branch: str = "main",
+        ignore_error: bool = False,
     ) -> list[tuple[str, str]]: ...
 
     async def get_github_file_content(
-        self, url: str, file_path: str | list[str], ignore_error: bool = False
+        self,
+        url: str,
+        file_path: str | list[str],
+        branch: str = "main",
+        ignore_error: bool = False,
     ) -> str | list[tuple[str, str]]:
         """
         获取GitHub仓库文件内容
@@ -69,6 +77,7 @@ class RepoFileManager:
             if is_str_input:
                 file_path = [file_path]
             repo_info = GithubUtils.parse_github_url(url)
+            repo_info.branch = branch
             if await repo_info.update_repo_commit():
                 logger.info(f"获取最新提交: {repo_info.branch}", LOG_COMMAND)
             else:
@@ -225,13 +234,13 @@ class RepoFileManager:
                 )
             except Exception:
                 return await self.get_github_file_content(
-                    repo_url, file_path, ignore_error
+                    repo_url, file_path, branch, ignore_error
                 )
 
         try:
             if repo_type == RepoType.GITHUB:
                 return await self.get_github_file_content(
-                    repo_url, file_path, ignore_error
+                    repo_url, file_path, branch, ignore_error
                 )
 
             elif repo_type == RepoType.ALIYUN:
@@ -319,6 +328,7 @@ class RepoFileManager:
         """
         try:
             repo_info = GithubUtils.parse_github_url(repo_url)
+            repo_info.branch = branch
             if await repo_info.update_repo_commit():
                 logger.info(f"获取最新提交: {repo_info.branch}", LOG_COMMAND)
             else:

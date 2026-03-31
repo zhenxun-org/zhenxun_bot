@@ -1,3 +1,4 @@
+import re
 import time
 
 from zhenxun.models.group_console import GroupConsole
@@ -7,6 +8,25 @@ from zhenxun.services.log import logger
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD, SwitchEnum
 from .exception import SkipPluginException
+
+_GROUP_WAKE_PATTERN = re.compile(r"^醒来$", re.IGNORECASE)
+_GROUP_WAKE_CANONICAL_PATTERN = re.compile(r"^group-status\s+wake$", re.IGNORECASE)
+
+
+def _is_group_wake_command(plugin: PluginInfo, text: str) -> bool:
+    if "plugin_switch" not in (plugin.module or ""):
+        return False
+    normalized = re.sub(r"\s+", " ", (text or "").strip())
+    if not normalized:
+        return False
+    if (
+        _GROUP_WAKE_PATTERN.match(normalized) is not None
+        or _GROUP_WAKE_CANONICAL_PATTERN.match(normalized) is not None
+    ):
+        return True
+    # 兼容 to_me 前缀场景：如“真寻 醒来”
+    tokens = normalized.split(" ")
+    return len(tokens) == 2 and tokens[-1] == SwitchEnum.ENABLE
 
 
 async def auth_group(
@@ -34,7 +54,7 @@ async def auth_group(
             raise SkipPluginException("群组信息不存在...")
         if group.level < 0:
             raise SkipPluginException("群组黑名单, 目标群组群权限权限-1...")
-        if text.strip() != SwitchEnum.ENABLE and not group.status:
+        if not _is_group_wake_command(plugin, text) and not group.status:
             raise SkipPluginException("群组休眠状态...")
         if plugin.level > group.level:
             raise SkipPluginException(

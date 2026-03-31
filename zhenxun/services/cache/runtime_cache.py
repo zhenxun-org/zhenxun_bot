@@ -587,6 +587,12 @@ class PluginInfoMemoryCache:
         return cls._by_module.get(module)
 
     @classmethod
+    async def get_all(cls) -> dict[str, "PluginInfo"]:
+        if not cls._loaded:
+            await cls.ensure_loaded()
+        return dict(cls._by_module)
+
+    @classmethod
     def get_by_module_path(cls, module_path: str) -> "PluginInfo | None":
         return cls._by_module_path.get(module_path)
 

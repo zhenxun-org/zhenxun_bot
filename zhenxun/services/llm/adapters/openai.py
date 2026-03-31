@@ -240,7 +240,7 @@ class OpenAIAdapter(OpenAICompatAdapter):
     ) -> "RequestData":
         """根据不同协议策略构建高级请求"""
         url = self.get_api_url(model, self.get_chat_endpoint(model))
-        headers = self.get_base_headers(api_key)
+        headers = self.get_base_headers(api_key, model)
         if model.api_type == "openrouter":
             headers.update(
                 {
@@ -463,7 +463,7 @@ class OpenAIImageAdapter(BaseAdapter):
     ) -> RequestData:
         _ = tools, tool_choice
         effective_config = config if config is not None else model._generation_config
-        headers = self.get_base_headers(api_key)
+        headers = self.get_base_headers(api_key, model)
 
         prompt = ""
         images_bytes_list: list[bytes] = []

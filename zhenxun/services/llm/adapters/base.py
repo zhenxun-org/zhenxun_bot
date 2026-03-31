@@ -202,7 +202,23 @@ class BaseAdapter(ABC):
             )
         return f"{model.api_base.rstrip('/')}{endpoint}"
 
-    def get_base_headers(self, api_key: str) -> dict[str, str]:
+    def _get_provider_extra_headers(self, model: "LLMModel | None") -> dict[str, str]:
+        if not model:
+            return {}
+        raw_headers = getattr(model.provider_config, "extra_headers", None)
+        if not isinstance(raw_headers, dict):
+            return {}
+        headers: dict[str, str] = {}
+        for key, value in raw_headers.items():
+            key_text = str(key).strip()
+            if not key_text or value is None:
+                continue
+            headers[key_text] = str(value)
+        return headers
+
+    def get_base_headers(
+        self, api_key: str, model: "LLMModel | None" = None
+    ) -> dict[str, str]:
         """获取基础请求头"""
         from zhenxun.utils.user_agent import get_user_agent
 
@@ -213,6 +229,7 @@ class BaseAdapter(ABC):
                 "Authorization": f"Bearer {api_key}",
             }
         )
+        headers.update(self._get_provider_extra_headers(model))
         return headers
 
     def validate_response(self, response_json: dict[str, Any]) -> None:
@@ -422,7 +439,7 @@ class OpenAICompatAdapter(BaseAdapter):
     ) -> RequestData:
         """准备简单文本生成请求 - OpenAI兼容API的通用实现"""
         url = self.get_api_url(model, self.get_chat_endpoint(model))
-        headers = self.get_base_headers(api_key)
+        headers = self.get_base_headers(api_key, model)
 
         messages = []
         if history:
@@ -449,7 +466,7 @@ class OpenAICompatAdapter(BaseAdapter):
     ) -> RequestData:
         """准备高级请求 - OpenAI兼容格式"""
         url = self.get_api_url(model, self.get_chat_endpoint(model))
-        headers = self.get_base_headers(api_key)
+        headers = self.get_base_headers(api_key, model)
         if model.api_type == "openrouter":
             headers.update(
                 {
@@ -523,7 +540,7 @@ class OpenAICompatAdapter(BaseAdapter):
     ) -> RequestData:
         """准备嵌入请求 - OpenAI兼容格式"""
         url = self.get_api_url(model, self.get_embedding_endpoint(model))
-        headers = self.get_base_headers(api_key)
+        headers = self.get_base_headers(api_key, model)
 
         body = {
             "model": model.model_name,

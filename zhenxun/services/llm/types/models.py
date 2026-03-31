@@ -609,6 +609,10 @@ class ProviderConfig(BaseModel):
     models: list[ModelDetail] = Field(..., description="支持的模型列表")
     timeout: int = Field(default=180, description="请求超时时间")
     proxy: str | None = Field(default=None, description="代理设置")
+    extra_headers: dict[str, str] | None = Field(
+        default=None,
+        description="额外请求头，用于网关鉴权等场景",
+    )
 
 
 class LLMToolFunction(BaseModel):
