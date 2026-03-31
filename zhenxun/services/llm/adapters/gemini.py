@@ -39,14 +39,16 @@ class GeminiAdapter(BaseAdapter):
     def supported_api_types(self) -> list[str]:
         return ["gemini"]
 
-    def get_base_headers(self, api_key: str) -> dict[str, str]:
+    def get_base_headers(
+        self, api_key: str, model: "LLMModel | None" = None
+    ) -> dict[str, str]:
         """获取基础请求头"""
         from zhenxun.utils.user_agent import get_user_agent
 
         headers = get_user_agent()
         headers.update({"Content-Type": "application/json"})
         headers["x-goog-api-key"] = api_key
-
+        headers.update(self._get_provider_extra_headers(model))
         return headers
 
     async def prepare_advanced_request(
@@ -109,7 +111,7 @@ class GeminiAdapter(BaseAdapter):
 
         endpoint = self._get_gemini_endpoint(model, effective_config)
         url = self.get_api_url(model, endpoint)
-        headers = self.get_base_headers(api_key)
+        headers = self.get_base_headers(api_key, model)
 
         converter = GeminiMessageConverter()
         system_instruction_parts: list[dict[str, Any]] | None = None
@@ -252,7 +254,7 @@ class GeminiAdapter(BaseAdapter):
 
         base_url = model.api_base.rstrip("/")
         url = f"{base_url}/v1beta/{api_model_name}:batchEmbedContents"
-        headers = self.get_base_headers(api_key)
+        headers = self.get_base_headers(api_key, model)
 
         requests_payload = []
         for text_content in texts:

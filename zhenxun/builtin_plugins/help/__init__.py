@@ -19,7 +19,7 @@ from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
 
-from ._data_source import create_help_img, get_llm_help, get_plugin_help
+from .data_source import create_help_img, get_llm_help, get_plugin_help
 
 __plugin_meta__ = PluginMetadata(
     name="帮助",
@@ -75,7 +75,6 @@ _matcher = on_alconna(
     Alconna(
         "功能",
         Args["name?", str],
-        Option("-s|--superuser", action=store_true, help_text="超级用户帮助"),
         Option("-d|--detail", action=store_true, help_text="详细帮助"),
     ),
     aliases={"help", "帮助", "菜单"},
@@ -98,15 +97,9 @@ async def _(
     bot: Bot,
     name: Match[str],
     session: Uninfo,
-    is_superuser: Query[bool] = AlconnaQuery("superuser.value", False),
     is_detail: Query[bool] = AlconnaQuery("detail.value", False),
 ):
-    _is_superuser = is_superuser.result if is_superuser.available else False
-
-    if _is_superuser and session.user.id not in bot.config.superusers:
-        await MessageUtils.build_message("权限不足，无法查看超级用户帮助").finish(
-            reply_to=True
-        )
+    _is_superuser = session.user.id in bot.config.superusers
 
     if name.available:
         help_style = Config.get_config("help", "HELP_STYLE")
@@ -116,11 +109,7 @@ async def _(
             session.user.id, name.result, _is_superuser, variant=variant
         )
 
-        is_plugin_found = not (
-            isinstance(traditional_help_result, str)
-            and "没有查找到这个功能噢..." in traditional_help_result
-        )
-        if is_plugin_found:
+        if traditional_help_result is not None:
             await MessageUtils.build_message(traditional_help_result).send(
                 reply_to=True
             )
@@ -130,7 +119,7 @@ async def _(
             llm_answer = await get_llm_help(name.result, session.user.id)
             await MessageUtils.build_message(llm_answer).send(reply_to=True)
         else:
-            await MessageUtils.build_message(traditional_help_result).send(
+            await MessageUtils.build_message("没有查找到这个功能噢...").send(
                 reply_to=True
             )
             logger.info(

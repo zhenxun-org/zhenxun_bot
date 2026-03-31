@@ -16,8 +16,8 @@ class PluginMenuItem(BaseModel):
     """插件的唯一ID"""
     name: str
     """插件名称"""
-    status: bool
-    """插件在当前群组的开关状态"""
+    status: int
+    """插件状态码: 0:开启, 1:群关, 2:系统关, 3:全局关"""
     has_superuser_help: bool
     """插件是否有超级用户专属帮助"""
     commands: list[str] = Field(default_factory=list, description="插件的主要命令列表")

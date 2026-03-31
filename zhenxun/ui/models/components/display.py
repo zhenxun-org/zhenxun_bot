@@ -96,6 +96,10 @@ class UserInfoBlock(RenderableComponent):
     """显示在名称下方的副标题 (如UID或角色)"""
     tags: list[str] = Field(default_factory=list, description="附加的标签列表")
     """附加的标签列表"""
+    extra: RenderableComponent | None = Field(
+        default=None, description="附加扩展插槽，支持传入任意UI组件(如徽章、按钮)"
+    )
+    """附加扩展插槽"""
 
     @property
     def template_name(self) -> str:

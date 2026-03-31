@@ -1,16 +1,26 @@
-from nonebot.adapters import Bot
+from nonebot.adapters import Bot, Event
+from nonebot.exception import FinishedException
+from nonebot.permission import SUPERUSER as SUPERUSER_PERM
 from nonebot.plugin import PluginMetadata
-from nonebot_plugin_alconna import AlconnaQuery, Arparma, Match, Query
+from nonebot_plugin_alconna import AlconnaMatch, AlconnaQuery, Arparma, Match, Query
 from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun.configs.config import Config
 from zhenxun.configs.utils import PluginExtraData, RegisterConfig
 from zhenxun.services.log import logger
+from zhenxun.services.tags import tag_manager
 from zhenxun.utils.enum import BlockType, PluginType
 from zhenxun.utils.message import MessageUtils
+from zhenxun.utils.platform import PlatformUtils
 
-from ._data_source import PluginManager, build_plugin, build_task
 from .command import _group_status_matcher, _status_matcher
+from .data_source import PluginManager
+from .ui import (
+    build_plugin,
+    build_task,
+    render_global_status,
+    render_group_active_status,
+)
 
 base_config = Config.get("plugin_switch")
 
@@ -18,64 +28,57 @@ base_config = Config.get("plugin_switch")
 __plugin_meta__ = PluginMetadata(
     name="功能开关",
     description="对群组内的功能限制，超级用户可以对群组以及全局的功能被动开关限制",
-    usage="""
-    普通管理员
-        格式:
-        开启/关闭[功能名称]         : 开关功能
-        开启/关闭群被动[被动名称]    : 群被动开关
-        开启/关闭所有插件           : 开启/关闭当前群组所有插件状态
-        开启/关闭所有群被动         : 开启/关闭当前群组所有群被动
-        群被动状态                 : 查看被动技能开关状态
-        醒来                      : 结束休眠
-        休息吧                    : 群组休眠, 不会再响应命令
+    usage="""### 基础开关控制
+- `开启/关闭 [功能名...]`：在当前群开启/关闭指定功能
+- `开启/关闭被动 [被动名...]`：在当前群开启/关闭指定被动
+- `开启/关闭所有功能`：在当前群开启/关闭所有功能
+- `开启/关闭所有被动`：在当前群开启/关闭所有被动
 
-        示例:
-        开启签到              : 开启签到
-        关闭签到              : 关闭签到
-        开启群被动早晚安       : 关闭被动任务早晚安
+**操作示例：**
+- `关闭 签到 抽卡 色图`：在当前群批量关闭指定功能
 
-    """.strip(),
+### 机器人状态控制
+- `醒来`：让机器人在当前群恢复工作
+- `休息吧`：让机器人在当前群进入休眠状态
+""",
     extra=PluginExtraData(
         author="HibiKier",
-        version="0.1",
+        version="1.0",
         plugin_type=PluginType.SUPER_AND_ADMIN,
-        superuser_help="""
-        格式:
-        插件列表
-        开启/关闭[功能名称] ?[-t ["private", "p", "group", "g"](关闭类型)] ?[-g 群组Id]
-
-        开启/关闭插件df[功能名称]: 开启/关闭指定插件进群默认状态
-        开启/关闭所有插件df: 开启/关闭所有插件进群默认状态
-        开启/关闭所有插件:
-            私聊中: 开启/关闭所有插件全局状态
-            群组中: 开启/关闭当前群组所有插件状态
-
-        开启/关闭群被动[name] ?[-g [group_id]]
-            私聊中: 开启/关闭全局指定的被动状态
-            群组中: 开启/关闭当前群组指定的被动状态
-            示例:
-                关闭群被动早晚安
-                关闭群被动早晚安 -g 12355555
-
-        开启/关闭默认群被动 [被动名称]
-            私聊下: 开启/关闭群被动默认状态
-            示例:
-                关闭默认群被动 早晚安
-
-        开启/关闭所有群被动 ?[-g [group_id]]
-            私聊中: 开启/关闭全局或指定群组被动状态
-            示例:
-                开启所有群被动: 开启全局所有被动
-                开启所有群被动 -g 12345678: 开启群组12345678所有被动
-
-        私聊下:
-            示例:
-            开启签到                : 全局开启签到
-            关闭签到                : 全局关闭签到
-            关闭签到 p              : 全局私聊关闭签到
-            关闭签到 -g 12345678    : 关闭群组12345678的签到功能(普通管理员无法开启)
-        """,
         admin_level=base_config.get("CHANGE_GROUP_SWITCH_LEVEL", 2),
+        superuser_help="""### 状态查询
+- `插件列表`：查看所有插件的全局状态、群聊状态
+- `被动状态`：查看所有被动技能的状态
+- `查看功能状态 [功能名]`：查看指定功能在所有群组中的开关状态
+- `查看被动状态 [被动名]`：查看指定被动在所有群组中的开关状态
+- `查看群状态`：查看所有群组的休眠/工作状态
+
+### 高级开关控制 (跨群/全局)
+支持在指令后追加以下参数进行批量操作：
+- `-g <群号>`：指定操作目标群（可多个）
+- `-t <标签>`：指定操作带有特定标签的群
+- `--all`：操作所有群组
+- `--only`：白名单模式，仅在指定群组开启，其他群组自动关闭
+- `-s`：**强制管控**。使用系统级字段禁用功能，群管理员无法通过普通指令自行开启
+
+**操作示例：**
+- `关闭 签到 抽卡 -t 游戏群`：关闭所有带有"游戏群"标签的群的签到和抽卡功能
+- `开启 色图 --only -g 123456 654321`：仅在这两个群开启色图，其余群全部关闭
+- `关闭 色图 -s`：在当前群强制锁定关闭色图，群管无法开启
+
+### 系统级开关
+追加 `--type [范围]` 或使用特定快捷词实现系统级控制。
+范围：`p` (私聊), `g` (所有群聊), `a` (全局)
+
+- `关闭 签到 --type a`：全局彻底禁用签到功能
+- `开启/关闭默认 [功能名]`：修改功能进群时的默认开关状态
+- `开启/关闭所有默认功能`：批量修改所有功能的进群默认状态
+
+### 强制唤醒/休眠
+同样支持高级目标参数。
+- `休息吧 --all`：所有群组进入休眠
+- `醒来 -t 内部测试群`：唤醒带有该标签的群组
+""",
         configs=[
             RegisterConfig(
                 key="CHANGE_GROUP_SWITCH_LEVEL",
@@ -103,276 +106,313 @@ async def _(
             session=session,
         )
         await MessageUtils.build_message(image).finish(reply_to=True)
-    else:
-        await MessageUtils.build_message("权限不足捏...").finish(reply_to=True)
+
+
+async def get_target_groups(
+    bot: Bot,
+    event: Event,
+    session: Uninfo,
+    tag: str | None,
+    groups: tuple[str, ...] | None,
+    all_scope: bool,
+) -> set[str] | None:
+    """解析目标群组列表，包含标签、群号和全量选项。"""
+    targets: set[str] = set()
+    is_superuser = await SUPERUSER_PERM(bot, event)
+
+    if (tag or groups or all_scope) and not is_superuser:
+        return None
+
+    if groups:
+        targets.update(str(group_id) for group_id in groups if group_id)
+
+    if tag:
+        tag_groups = await tag_manager.resolve_tag_to_group_ids(tag, bot=bot)
+        targets.update(str(group_id) for group_id in tag_groups)
+
+    if all_scope:
+        all_groups, _ = await PlatformUtils.get_group_list(bot)
+        targets.update(str(group.group_id) for group in all_groups if group.group_id)
+
+    if not targets and session.group:
+        targets.add(str(session.group.id))
+
+    return targets
+
+
+async def _handle_switch_command(
+    status: bool,
+    bot: Bot,
+    event: Event,
+    session: Uninfo,
+    arparma: Arparma,
+    plugin_names: Match[tuple[str, ...]],
+    groups: Match[tuple[str, ...]] = AlconnaMatch("groups"),
+    tag: Match[str] = AlconnaMatch("tag"),
+    task: Query[bool] = AlconnaQuery("task.value", False),
+    default_status: Query[bool] = AlconnaQuery("default.value", False),
+    all_groups_flag: Query[bool] = AlconnaQuery("all.value", False),
+    all_plugins_flag: Query[bool] = AlconnaQuery("all-plugins.value", False),
+    only_flag: Query[bool] | None = None,
+    use_su_field: Query[bool] = AlconnaQuery("su.value", False),
+):
+    is_superuser = await SUPERUSER_PERM(bot, event)
+    only_flag_value = only_flag.result if only_flag else False
+
+    is_remote = bool(
+        tag.available or groups.available or all_groups_flag.result or only_flag_value
+    )
+    use_su_field_final = is_remote or use_su_field.result
+
+    sub_name = "open" if status else "close"
+    block_type_val = arparma.query(f"{sub_name}.type.block_type")
+
+    if block_type_val is not None:
+        if not is_superuser:
+            return
+        if task.result:
+            await MessageUtils.build_message(
+                "被动技能不支持指定禁用范围，请直接使用 开启/关闭"
+            ).finish(reply_to=True)
+            return
+
+    if not all_plugins_flag.result and not plugin_names.available:
+        await MessageUtils.build_message("请输入功能/被动名称").finish(reply_to=True)
+        return
+
+    targets = await get_target_groups(
+        bot,
+        event,
+        session,
+        tag.result if tag and tag.available else None,
+        groups.result if groups and groups.available else None,
+        all_groups_flag.result,
+    )
+    if targets is None:
+        return
+
+    if all_plugins_flag.result:
+        if targets:
+            messages = []
+            for gid in targets:
+                messages.append(
+                    await PluginManager.set_all_plugin_status(
+                        status=status,
+                        is_default=default_status.result if is_superuser else False,
+                        group_id=gid,
+                        is_task=task.result,
+                        is_superuser=is_superuser,
+                        use_su_field=use_su_field_final,
+                    )
+                )
+            await MessageUtils.build_message("\n".join(messages)).finish(reply_to=True)
+            return
+        if is_superuser and not session.group:
+            result = await PluginManager.set_all_plugin_status(
+                status=status,
+                is_default=default_status.result,
+                group_id=None,
+                is_task=task.result,
+                is_superuser=is_superuser,
+                use_su_field=use_su_field_final,
+            )
+            await MessageUtils.build_message(result).finish(reply_to=True)
+            return
+        await MessageUtils.build_message("请输入目标群组").finish(reply_to=True)
+        return
+
+    names = plugin_names.result if plugin_names.available else ()
+    if isinstance(names, str):
+        names = (names,)
+
+    if (
+        not targets
+        and not (is_superuser and not session.group)
+        and not default_status.result
+        and block_type_val is None
+    ):
+        await MessageUtils.build_message("请选择一个目标群组").finish(reply_to=True)
+        return
+
+    messages = []
+    for name in names:
+        name_str = str(name)
+        if is_superuser and default_status.result:
+            result = await PluginManager.set_default_status(
+                name_str, status, is_task=task.result
+            )
+            messages.append(result)
+            continue
+
+        if block_type_val is not None:
+            _type = BlockType.ALL
+            if block_type_val in ["p", "private"]:
+                _type = BlockType.PRIVATE
+            elif block_type_val in ["g", "group"]:
+                _type = BlockType.GROUP
+            result = await PluginManager.superuser_set_status(
+                name_str, status, _type, None, is_task=task.result
+            )
+            messages.append(result)
+            continue
+
+        if not targets:
+            if is_superuser and not session.group:
+                target_block_type = BlockType.ALL if not status else None
+                result = await PluginManager.superuser_set_status(
+                    name_str, status, target_block_type, None, is_task=task.result
+                )
+                messages.append(result)
+                continue
+            messages.append(f"{name_str}: 请选择一个目标群组")
+            continue
+
+        msg = await PluginManager.batch_update_status(
+            name_str,
+            targets,
+            status=status,
+            is_task=task.result,
+            is_superuser=is_superuser,
+            is_whitelist_mode=only_flag_value,
+            use_su_field=use_su_field_final,
+            bot=bot,
+        )
+        action_name = "开启" if status else "关闭"
+        logger.info(
+            f"{action_name}操作: {name_str}, targets={targets}",
+            arparma.header_result,
+            session=session,
+        )
+        messages.append(msg)
+
+    await MessageUtils.build_message("\n".join(messages)).finish(reply_to=True)
 
 
 @_status_matcher.assign("open")
 async def _(
     bot: Bot,
+    event: Event,
     session: Uninfo,
     arparma: Arparma,
-    plugin_name: Match[str],
-    group: Match[str],
+    plugin_names: Match[tuple[str, ...]],
+    groups: Match[tuple[str, ...]] = AlconnaMatch("groups"),
+    tag: Match[str] = AlconnaMatch("tag"),
     task: Query[bool] = AlconnaQuery("task.value", False),
     default_status: Query[bool] = AlconnaQuery("default.value", False),
-    all: Query[bool] = AlconnaQuery("all.value", False),
+    all_groups_flag: Query[bool] = AlconnaQuery("all.value", False),
+    all_plugins_flag: Query[bool] = AlconnaQuery("all-plugins.value", False),
+    only_flag: Query[bool] = AlconnaQuery("only.value", False),
+    use_su_field: Query[bool] = AlconnaQuery("su.value", False),
 ):
-    if not all.result and not plugin_name.available:
-        await MessageUtils.build_message("请输入功能/被动名称").finish(reply_to=True)
-    name = plugin_name.result.strip()
-    if session.group:
-        group_id = session.group.id
-        """修改当前群组的数据"""
-        if task.result:
-            if all.result:
-                result = await PluginManager.unblock_group_all_task(group_id)
-                logger.info("开启所有群组被动", arparma.header_result, session=session)
-            else:
-                result = await PluginManager.unblock_group_task(name, group_id)
-                logger.info(
-                    f"开启群组被动 {name}", arparma.header_result, session=session
-                )
-        elif session.user.id in bot.config.superusers and default_status.result:
-            """单个插件的进群默认修改"""
-            result = await PluginManager.set_default_status(name, True)
-            logger.info(
-                f"超级用户开启 {name} 功能进群默认开关",
-                arparma.header_result,
-                session=session,
-            )
-        elif all.result:
-            """所有插件"""
-            result = await PluginManager.set_all_plugin_status(
-                True, default_status.result, group_id
-            )
-            logger.info(
-                "开启群组中全部功能",
-                arparma.header_result,
-                session=session,
-            )
-        else:
-            result = await PluginManager.unblock_group_plugin(name, group_id)
-            logger.info(f"开启功能 {name}", arparma.header_result, session=session)
-        await MessageUtils.build_message(result).finish(reply_to=True)
-    elif session.user.id in bot.config.superusers:
-        """私聊"""
-        group_id = group.result if group.available else None
-        if all.result:
-            if task.result:
-                """关闭全局或指定群全部被动"""
-                if group_id:
-                    result = await PluginManager.unblock_group_all_task(group_id)
-                else:
-                    result = await PluginManager.unblock_global_all_task(
-                        default_status.result
-                    )
-            else:
-                result = await PluginManager.set_all_plugin_status(
-                    True, default_status.result, group_id
-                )
-                logger.info(
-                    "超级用户开启全部功能全局开关"
-                    f" {f'指定群组: {group_id}' if group_id else ''}",
-                    arparma.header_result,
-                    session=session,
-                )
-            await MessageUtils.build_message(result).finish(reply_to=True)
-        if default_status.result and not task.result:
-            result = await PluginManager.set_default_status(name, True)
-            logger.info(
-                f"超级用户开启 {name} 功能进群默认开关",
-                arparma.header_result,
-                session=session,
-                target=group_id,
-            )
-            await MessageUtils.build_message(result).finish(reply_to=True)
-        if task.result:
-            split_list = name.split()
-            if len(split_list) > 1:
-                name = split_list[0]
-                group_id = split_list[1]
-            if group_id:
-                result = await PluginManager.superuser_task_handle(name, group_id, True)
-                logger.info(
-                    f"超级用户开启被动技能 {name}",
-                    arparma.header_result,
-                    session=session,
-                    target=group_id,
-                )
-            else:
-                result = await PluginManager.unblock_global_task(
-                    name, default_status.result
-                )
-                logger.info(
-                    f"超级用户开启全局被动技能 {name}",
-                    arparma.header_result,
-                    session=session,
-                )
-        else:
-            result = await PluginManager.superuser_unblock(name, None, group_id)
-            logger.info(
-                f"超级用户开启功能 {name}",
-                arparma.header_result,
-                session=session,
-                target=group_id,
-            )
-        await MessageUtils.build_message(result).finish(reply_to=True)
+    await _handle_switch_command(
+        True,
+        bot,
+        event,
+        session,
+        arparma,
+        plugin_names,
+        groups,
+        tag,
+        task,
+        default_status,
+        all_groups_flag,
+        all_plugins_flag,
+        only_flag=only_flag,
+        use_su_field=use_su_field,
+    )
 
 
 @_status_matcher.assign("close")
 async def _(
     bot: Bot,
+    event: Event,
     session: Uninfo,
     arparma: Arparma,
-    plugin_name: Match[str],
-    block_type: Match[str],
-    group: Match[str],
+    plugin_names: Match[tuple[str, ...]],
+    groups: Match[tuple[str, ...]] = AlconnaMatch("groups"),
+    tag: Match[str] = AlconnaMatch("tag"),
     task: Query[bool] = AlconnaQuery("task.value", False),
     default_status: Query[bool] = AlconnaQuery("default.value", False),
-    all: Query[bool] = AlconnaQuery("all.value", False),
+    all_groups_flag: Query[bool] = AlconnaQuery("all.value", False),
+    all_plugins_flag: Query[bool] = AlconnaQuery("all-plugins.value", False),
+    use_su_field: Query[bool] = AlconnaQuery("su.value", False),
 ):
-    if not all.result and not plugin_name.available:
-        await MessageUtils.build_message("请输入功能/被动名称").finish(reply_to=True)
-    name = plugin_name.result.strip()
-    if session.group:
-        group_id = session.group.id
-        """修改当前群组的数据"""
-        if task.result:
-            if all.result:
-                result = await PluginManager.block_group_all_task(group_id)
-                logger.info("开启所有群组被动", arparma.header_result, session=session)
-            else:
-                result = await PluginManager.block_group_task(name, group_id)
-                logger.info(
-                    f"关闭群组被动 {name}", arparma.header_result, session=session
-                )
-        elif session.user.id in bot.config.superusers and default_status.result:
-            """单个插件的进群默认修改"""
-            result = await PluginManager.set_default_status(name, False)
-            logger.info(
-                f"超级用户开启 {name} 功能进群默认开关",
-                arparma.header_result,
-                session=session,
-            )
-        elif all.result:
-            """所有插件"""
-            result = await PluginManager.set_all_plugin_status(
-                False, default_status.result, group_id
-            )
-            logger.info("关闭群组中全部功能", arparma.header_result, session=session)
-        else:
-            result = await PluginManager.block_group_plugin(name, group_id)
-            logger.info(f"关闭功能 {name}", arparma.header_result, session=session)
-        await MessageUtils.build_message(result).finish(reply_to=True)
-    elif session.user.id in bot.config.superusers:
-        group_id = group.result if group.available else None
-        if all.result:
-            if task.result:
-                """关闭全局或指定群全部被动"""
-                if group_id:
-                    result = await PluginManager.block_group_all_task(group_id)
-                else:
-                    result = await PluginManager.block_global_all_task(
-                        default_status.result
-                    )
-            else:
-                result = await PluginManager.set_all_plugin_status(
-                    False, default_status.result, group_id
-                )
-                logger.info(
-                    "超级用户关闭全部功能全局开关"
-                    f" {f'指定群组: {group_id}' if group_id else ''}",
-                    arparma.header_result,
-                    session=session,
-                )
-            await MessageUtils.build_message(result).finish(reply_to=True)
-        if default_status.result and not task.result:
-            result = await PluginManager.set_default_status(name, False)
-            logger.info(
-                f"超级用户关闭 {name} 功能进群默认开关",
-                arparma.header_result,
-                session=session,
-                target=group_id,
-            )
-            await MessageUtils.build_message(result).finish(reply_to=True)
-        if task.result:
-            split_list = name.split()
-            if len(split_list) > 1:
-                name = split_list[0]
-                group_id = split_list[1]
-            if group_id:
-                result = await PluginManager.superuser_task_handle(
-                    name, group_id, False
-                )
-                logger.info(
-                    f"超级用户关闭被动技能 {name}",
-                    arparma.header_result,
-                    session=session,
-                    target=group_id,
-                )
-            else:
-                result = await PluginManager.block_global_task(
-                    name, default_status.result
-                )
-                logger.info(
-                    f"超级用户关闭全局被动技能 {name}",
-                    arparma.header_result,
-                    session=session,
-                )
-        else:
-            parsed_block_type = (
-                block_type.result.lower()
-                if block_type.available and block_type.result
-                else ""
-            )
-            # 兼容中文快捷命令：`关闭功能名 p/g/a`
-            if not parsed_block_type and " " in name:
-                split_name = name.rsplit(maxsplit=1)
-                if len(split_name) == 2 and split_name[1].lower() in {
-                    "a",
-                    "all",
-                    "g",
-                    "group",
-                    "p",
-                    "private",
-                }:
-                    name = split_name[0].strip()
-                    parsed_block_type = split_name[1].lower()
-            _type = BlockType.ALL
-            if parsed_block_type in {"p", "private"}:
-                _type = BlockType.PRIVATE
-            elif parsed_block_type in {"g", "group"}:
-                _type = BlockType.GROUP
-            result = await PluginManager.superuser_block(name, _type, group_id)
-            logger.info(
-                f"超级用户关闭功能 {name}, 禁用类型: {_type}",
-                arparma.header_result,
-                session=session,
-                target=group_id,
-            )
-        await MessageUtils.build_message(result).finish(reply_to=True)
+    await _handle_switch_command(
+        False,
+        bot,
+        event,
+        session,
+        arparma,
+        plugin_names,
+        groups,
+        tag,
+        task,
+        default_status,
+        all_groups_flag,
+        all_plugins_flag,
+        use_su_field=use_su_field,
+    )
 
 
 @_group_status_matcher.handle()
 async def _(
+    bot: Bot,
+    event: Event,
     session: Uninfo,
     arparma: Arparma,
     status: str,
+    groups: Match[tuple[str, ...]] = AlconnaMatch("groups"),
+    tag: Match[str] = AlconnaMatch("tag"),
+    all_flag: Query[bool] = AlconnaQuery("all.value", False),
+    only_flag: Query[bool] = AlconnaQuery("only.value", False),
 ):
-    if session.group:
-        group_id = session.group.id
-        if status == "sleep":
-            await PluginManager.sleep(group_id)
-            logger.info("进行休眠", arparma.header_result, session=session)
-            await MessageUtils.build_message("那我先睡觉了...").finish()
-        else:
-            if await PluginManager.is_wake(group_id):
-                await MessageUtils.build_message("我还醒着呢！").finish()
-            await PluginManager.wake(group_id)
-            logger.info("醒来", arparma.header_result, session=session)
-            await MessageUtils.build_message("呜..醒来了...").finish()
-    return MessageUtils.build_message("群组id为空...").send()
+    is_wake = status == "wake"
+
+    if status == "check":
+        if not await SUPERUSER_PERM(bot, event):
+            return
+
+        try:
+            image = await render_group_active_status(bot)
+            logger.info(
+                "查看全服群组工作状态报表", arparma.header_result, session=session
+            )
+            await MessageUtils.build_message(image).finish(reply_to=True)
+        except FinishedException:
+            raise
+        except Exception as e:
+            logger.error(f"渲染群组激活状态报表失败: {e}", e=e)
+            await MessageUtils.build_message("生成状态报表失败，请检查日志").finish(
+                reply_to=True
+            )
+        return
+
+    targets = await get_target_groups(
+        bot,
+        event,
+        session,
+        tag.result if tag and tag.available else None,
+        groups.result if groups and groups.available else None,
+        all_flag.result,
+    )
+
+    if not targets:
+        await MessageUtils.build_message("请指定目标群组或在群聊中使用").finish(
+            reply_to=True
+        )
+        return
+
+    msg = await PluginManager.batch_set_group_active_status(
+        targets, status=is_wake, is_whitelist_mode=only_flag.result, bot=bot
+    )
+
+    action_name = "醒来" if is_wake else "进行休眠"
+    reply_msg = "呜..醒来了..." if is_wake else "那我先睡觉了..."
+    if len(targets) > 1 or only_flag.result:
+        reply_msg = msg
+
+    logger.info(action_name, arparma.header_result, session=session)
+    await MessageUtils.build_message(reply_msg).finish(reply_to=True)
 
 
 @_status_matcher.assign("task")
@@ -380,9 +420,37 @@ async def _(
     session: Uninfo,
     arparma: Arparma,
 ):
+    if arparma.find("check") or arparma.find("open") or arparma.find("close"):
+        return
+
     image = await build_task(session.group.id if session.group else None)
     if image:
         logger.info("查看群被动列表", arparma.header_result, session=session)
         await MessageUtils.build_message(image).finish(reply_to=True)
     else:
         await MessageUtils.build_message("获取群被动任务失败...").finish(reply_to=True)
+
+
+@_status_matcher.assign("check")
+async def _(
+    bot: Bot,
+    event: Event,
+    plugin_name: Match[str],
+    task: Query[bool] = AlconnaQuery("task.value", False),
+):
+    if not await SUPERUSER_PERM(bot, event):
+        return
+
+    name = plugin_name.result
+    try:
+        img = await render_global_status(name, is_task=task.result, bot=bot)
+        await MessageUtils.build_message(img).finish(reply_to=True)
+    except FinishedException:
+        raise
+    except ValueError as e:
+        await MessageUtils.build_message(str(e)).finish(reply_to=True)
+    except Exception as e:
+        logger.error(f"渲染状态图表失败: {e}", e=e)
+        await MessageUtils.build_message("生成状态报表失败，请检查日志").finish(
+            reply_to=True
+        )

@@ -259,6 +259,7 @@ class StoreManager:
         plugin_info: StorePluginInfo,
         is_external: bool = False,
         source: str | None = None,
+        branch: str = "main",
     ):
         """安装插件
 
@@ -283,7 +284,7 @@ class StoreManager:
         plugin_name = module_path.split(".")[-1] or plugin_info.module
         if is_dir:
             files = await RepoFileManager.list_directory_files(
-                github_url, replace_module_path, repo_type=repo_type
+                github_url, replace_module_path, branch, repo_type=repo_type
             )
         else:
             files = [RepoFileInfo(path=f"{replace_module_path}.py", is_dir=False)]
@@ -298,6 +299,7 @@ class StoreManager:
         result = await RepoFileManager.download_files(
             github_url,
             download_files,
+            branch,
             repo_type=repo_type,
             sparse_path=replace_module_path,
             target_dir=target_dir,
