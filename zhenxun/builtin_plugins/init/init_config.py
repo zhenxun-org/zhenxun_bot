@@ -83,7 +83,7 @@ def _generate_simple_config(exists_module: list[str]):
             _tmp_data.pop(module)
     Config.save()
     temp_file = DATA_PATH / "temp_config.yaml"
-    # 重新生成简易配置文件
+    # 重新生成简易配置文件以挂载注释
     try:
         with open(temp_file, "w", encoding="utf8") as wf:
             _yaml.dump(_tmp_data, wf)

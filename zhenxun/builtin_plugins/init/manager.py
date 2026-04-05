@@ -296,7 +296,7 @@ class Manager:
             db_data.max_count = limit.max_count  # type: ignore
         return db_data, False
 
-    def __get_file_data(self, limit_type: PluginLimitType) -> dict:
+    def __get_file_data(self, limit_type: PluginLimitType):
         """获取文件数据
 
         参数:
@@ -323,40 +323,57 @@ class Manager:
         参数:
             db_limits: 数据库limits
             module2plugin: 模块:插件信息
+            limit_type: 插件限制类型
 
         返回:
-            tuple[list[PluginLimit], list[PluginLimit]]: 创建列表，更新列表
+            tuple[list[PluginLimit], list[PluginLimit]], list[int]: 创建列表，更新列表，删除列表
         """
-        update_list = []
-        create_list = []
-        delete_list = []
+        update_list: list[PluginLimit] = []
+        create_list: list[PluginLimit] = []
+        delete_list: list[int] = []
+
+        # 过滤出当前类型的所有 limit
         db_type_limits = [
             limit for limit in db_limits if limit.limit_type == limit_type
         ]
-        if data := self.__get_file_data(limit_type):
-            db_type_limit_modules = [
-                (limit.module, limit.id) for limit in db_type_limits
-            ]
-            delete_list.extend(
-                id for module, id in db_type_limit_modules if module not in data.keys()
-            )
-            for k, v in data.items():
-                if not module2plugin.get(k):
-                    if k != "test":
-                        logger.warning(
-                            f"插件模块 {k} 未加载，已过滤当前 {v._type} 限制..."
-                        )
-                    continue
-                db_data = [limit for limit in db_type_limits if limit.module == k]
-                db_data, is_create = self.__set_data(
-                    k, db_data[0] if db_data else None, v, limit_type, module2plugin
-                )
-                if is_create:
-                    create_list.append(db_data)
-                else:
-                    update_list.append(db_data)
-        else:
+
+        # module - PluginLimit 映射
+        module2limit: dict[str, PluginLimit] = {
+            limit.module: limit for limit in db_type_limits
+        }
+
+        # 如果没有任何文件数据，对应类型下的记录全部删掉
+        data = self.__get_file_data(limit_type)
+        if not data:
             delete_list = [limit.id for limit in db_type_limits]
+            return create_list, update_list, delete_list
+
+        # 数据库中有，但文件里没有的模块，全部删掉
+        file_modules = set(data.keys())
+        for limit in db_type_limits:
+            if limit.module not in file_modules:
+                delete_list.append(limit.id)
+
+        # 遍历文件数据，生成 create / update / delete
+        for k, v in data.items():
+            db_data = module2limit.get(k)
+
+            # 插件未加载：删掉所有同模块的 limit
+            if k not in module2plugin:
+                if k != "test":
+                    logger.warning(f"插件模块 {k} 未加载，已忽略当前 {v._type} 限制...")
+                    if db_data:
+                        delete_list.append(db_data.id)
+                continue
+
+            db_data, is_create = self.__set_data(
+                k, db_data, v, limit_type, module2plugin
+            )
+            if is_create:
+                create_list.append(db_data)
+            else:
+                update_list.append(db_data)
+
         return create_list, update_list, delete_list
 
     async def __set_all_limit(
