@@ -327,7 +327,7 @@ class Manager:
 
         返回:
             tuple[list[PluginLimit], list[PluginLimit]], list[int]: 创建列表，更新列表，删除列表
-        """
+        """  # noqa: E501
         update_list: list[PluginLimit] = []
         create_list: list[PluginLimit] = []
         delete_list: list[int] = []
