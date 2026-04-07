@@ -4,6 +4,7 @@ import nonebot
 from nonebot.adapters import Bot
 from nonebot_plugin_apscheduler import scheduler
 
+from zhenxun.configs.config import Config
 from zhenxun.models.chat_history import ChatHistory
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.services.log import logger
@@ -16,6 +17,16 @@ nonebot.load_plugins(str(Path(__file__).parent.resolve()))
 
 
 driver = nonebot.get_driver()
+
+
+Config.add_plugin_config(
+    "auto_clean",
+    "CLEAN_CHAT_HISTORY",
+    True,
+    help="是否自动清理已退出群聊的聊天记录",
+    default_value=True,
+    type=bool,
+)
 
 
 @PriorityLifecycle.on_startup(priority=5)
@@ -66,16 +77,17 @@ async def _(bot: Bot):
         "群认证同步",
     )
 
-    # 清理已退出群组的聊天记录
-    scheduler.add_job(
-        clean_chat_history,
-        "cron",
-        hour=1,
-        minute=0,
-        args=(current_group_list,),
-        id="clean_chat_history",
-        replace_existing=True,
-    )
+    if Config.get_config("auto_clean", "CLEAN_CHAT_HISTORY"):
+        # 清理已退出群组的聊天记录
+        scheduler.add_job(
+            clean_chat_history,
+            "cron",
+            hour=1,
+            minute=0,
+            args=(current_group_list,),
+            id="clean_chat_history",
+            replace_existing=True,
+        )
 
 
 async def clean_chat_history(
