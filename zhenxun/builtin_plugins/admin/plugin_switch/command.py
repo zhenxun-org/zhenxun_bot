@@ -105,7 +105,7 @@ def _switch_wrapper(slot: str, content: str | None, context: dict) -> str:
 
 
 _status_matcher.shortcut(
-    r"^(?P<action>开启|关闭)\s*(?P<all>所有|全部)?\s*(?P<default>默认)?\s*(?P<type>群被动|被动|插件|功能)?\s*",
+    r"(?P<action>开启|关闭)\s*(?P<all>所有|全部)?\s*(?P<default>默认)?\s*(?P<type>群被动|被动|插件|功能)?\s*",
     command="switch {all} {default} {type} {action} {* }",
     wrapper=_switch_wrapper,  # type: ignore
     prefix=True,
