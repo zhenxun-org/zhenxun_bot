@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 import nonebot
@@ -49,7 +50,6 @@ async def _(bot: Bot):
 
     # 实际在用的群列表（当前 bot 连接可见的群）
     current_group_list, _ = await PlatformUtils.get_group_list(bot)
-    current_group_ids = {g.group_id for g in current_group_list}
 
     # 数据库中已有的群记录
     db_group_list: list[str] = await GroupConsole.all().values_list(
@@ -67,57 +67,80 @@ async def _(bot: Bot):
     if create_list:
         await GroupConsole.bulk_create(create_list, 10)
 
-    if delete_ids := list(db_group_ids - current_group_ids):
-        deleted_count = await GroupConsole.filter(group_id__in=delete_ids).delete()
-    else:
-        deleted_count = 0
     logger.info(
-        f"更新Bot: {bot.self_id} 的群认证完成，共创建 {len(create_list)} 条数据，"
-        f"删除 {deleted_count} 条已退出群组的数据...",
+        f"更新Bot: {bot.self_id} 的群认证完成，共创建 {len(create_list)} 条数据..."
         "群认证同步",
     )
 
     if Config.get_config("auto_clean", "CLEAN_CHAT_HISTORY"):
+        await _update_global_group_cache({g.group_id for g in current_group_list})
         # 清理已退出群组的聊天记录
         scheduler.add_job(
             clean_chat_history,
             "cron",
             hour=1,
             minute=0,
-            args=(current_group_list,),
-            id="clean_chat_history",
+            id="clean_chat_history_cron",
+            replace_existing=True,
+        )
+
+        scheduler.add_job(
+            clean_chat_history,
+            "date",
+            run_date=datetime.now(),
+            id="clean_chat_history_immediate",
             replace_existing=True,
         )
 
 
+# 用于在多 Bot 场景下聚合“所有 Bot 当前仍在的群号”
+_GLOBAL_ACTIVE_GROUP_IDS: set[str] = set()
+
+
+async def _update_global_group_cache(current_ids: set[str]) -> None:
+    """更新全局活跃群组缓存。
+
+    参数:
+        current_ids: 某个 Bot 当前仍然存在的群号集合
+    """
+    # 这里简单地做 union：某个群只要任一 Bot 还在，就会出现在全局集合中，
+    # 清理时只会删除不在该集合中的群记录，不会误删其它 Bot 仍在的群。
+    _GLOBAL_ACTIVE_GROUP_IDS.update(current_ids)
+
+
 async def clean_chat_history(
-    group_list: list[GroupConsole],
     max_delete: int = 2000,
 ):
-    """清理已退出群组的聊天记录
+    """清理已退出群组的聊天记录。
 
     为避免一次调用删除过多数据，单次调用最多删除 max_delete 条。
+    在多 Bot 场景下，会使用所有 Bot 的活跃群组 union 作为保留白名单：
+    只有对所有 Bot 都已退出的群，聊天记录才会被清理。
     """
-    # 将传入的对象统一转成 group_id 字符串列表
-    group_ids: list[str] = [g.group_id for g in group_list]
-
-    if not group_ids:
-        logger.warning("传入群组列表为空，跳过清理", "定时清理群组聊天记录")
+    if not _GLOBAL_ACTIVE_GROUP_IDS:
+        logger.warning("全局活跃群组集合为空，跳过清理", "定时清理群组聊天记录")
         return
 
+    group_ids = list(_GLOBAL_ACTIVE_GROUP_IDS)
+
     # 只取最多 max_delete 条记录的 id，然后删除这些记录，避免一次删太多
+    # 优先删除最旧的记录：按 create_time 升序
     ids = (
         await ChatHistory.filter(group_id__not_in=group_ids)
+        .order_by("create_time")
         .limit(max_delete)
         .values_list("id", flat=True)
     )
     ids = list(ids)
     if not ids:
         logger.info(
-            f"群组数 {len(group_ids)}，无聊天记录可删除", "定时清理群组聊天记录"
+            f"活跃群组数 {len(group_ids)}，无聊天记录可删除", "定时清理群组聊天记录"
         )
         return
 
     await ChatHistory.filter(id__in=ids).delete()
 
-    logger.success(f"已清理 {len(ids)} 条已退出群组的聊天记录", "定时清理群组聊天记录")
+    logger.success(
+        f"已清理 {len(ids)} 条所有 Bot 均已退出群组的聊天记录",
+        "定时清理群组聊天记录",
+    )
