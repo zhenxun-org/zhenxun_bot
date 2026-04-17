@@ -10,8 +10,9 @@ import nonebot
 from nonebot.utils import is_coroutine_callable
 from tortoise import Tortoise
 from tortoise.connection import connections
+
 # 修改点 1：在这里引入了 ConfigurationError
-from tortoise.exceptions import OperationalError, ConfigurationError
+from tortoise.exceptions import ConfigurationError, OperationalError
 
 from zhenxun.configs.config import BotConfig
 from zhenxun.services.log import logger

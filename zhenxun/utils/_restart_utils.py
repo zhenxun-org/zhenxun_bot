@@ -1,11 +1,10 @@
+import _thread
 import asyncio
+import atexit
 import os
-import signal
+from pathlib import Path
 import subprocess
 import sys
-import _thread
-import atexit
-from pathlib import Path
 
 from zhenxun.services.log import logger
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
@@ -19,10 +18,10 @@ def _exec_new_process() -> None:
 
     is_windows = platform.system().lower() == "windows"
     uv_path = shutil.which("uv")
-    
+
     # 确保路径兼容性
     cwd_path = str(Path().resolve())
-    
+
     # Windows 下设为 0，不再弹新 CMD 窗口，实现“原地重启”
     win_creation_flag = 0
 
@@ -67,7 +66,9 @@ async def _execute_restart() -> None:
 @atexit.register
 def _emergency_restart() -> None:
     if _restart_pending:
-        logger.warning("检测到非正常退出 (可能因插件清理报错)，触发 atexit 保底重启...", "重启")
+        logger.warning(
+            "检测到非正常退出 (可能因插件清理报错)，触发 atexit 保底重启...", "重启"
+        )
         _exec_new_process()
 
 
