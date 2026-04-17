@@ -1,9 +1,11 @@
 import asyncio
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
+import _thread
+import atexit
+from pathlib import Path
 
 from zhenxun.services.log import logger
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
@@ -17,6 +19,12 @@ def _exec_new_process() -> None:
 
     is_windows = platform.system().lower() == "windows"
     uv_path = shutil.which("uv")
+    
+    # 确保路径兼容性
+    cwd_path = str(Path().resolve())
+    
+    # Windows 下设为 0，不再弹新 CMD 窗口，实现“原地重启”
+    win_creation_flag = 0
 
     if uv_path and not is_windows:
         try:
@@ -28,8 +36,8 @@ def _exec_new_process() -> None:
         try:
             subprocess.Popen(
                 [uv_path, "run", "zx"],
-                cwd=Path().resolve(),
-                creationflags=subprocess.CREATE_NEW_CONSOLE if is_windows else 0,
+                cwd=cwd_path,
+                creationflags=win_creation_flag,
             )
             os._exit(0)
         except Exception:
@@ -38,8 +46,8 @@ def _exec_new_process() -> None:
     try:
         subprocess.Popen(
             [sys.executable, "-m", "zhenxun"],
-            cwd=Path().resolve(),
-            creationflags=subprocess.CREATE_NEW_CONSOLE if is_windows else 0,
+            cwd=cwd_path,
+            creationflags=win_creation_flag,
         )
         os._exit(0)
     except Exception:
@@ -55,15 +63,24 @@ async def _execute_restart() -> None:
     _exec_new_process()
 
 
+# 【新增】终极保底机制：即使关机过程中任何插件抛出严重异常导致进程崩溃，这里也能确保新进程被拉起
+@atexit.register
+def _emergency_restart() -> None:
+    if _restart_pending:
+        logger.warning("检测到非正常退出 (可能因插件清理报错)，触发 atexit 保底重启...", "重启")
+        _exec_new_process()
+
+
 async def schedule_restart() -> None:
-    """触发优雅重启：发 SIGINT 让 NoneBot 执行完所有 shutdown hook，最后由
-    priority=99 的 hook 执行进程替换，避免 Playwright / 线程池等资源被强杀。
+    """触发优雅重启：引发 KeyboardInterrupt 让 NoneBot 执行完所有 shutdown hook，
+    最后由 priority=99 的 hook 或 atexit 执行进程替换。
     """
     global _restart_pending
     _restart_pending = True
 
     async def _send_sigint() -> None:
         await asyncio.sleep(0.3)
-        os.kill(os.getpid(), signal.SIGINT)
+        logger.info("发送重启信号...", "重启")
+        _thread.interrupt_main()
 
     asyncio.create_task(_send_sigint())  # noqa: RUF006
