@@ -89,16 +89,21 @@ def _get_creationflags() -> int:
 
 
 def _spawn_target(command: list[str], cwd: str) -> int:
-    kwargs: dict[str, object] = {
-        "cwd": cwd,
-        "close_fds": True,
-    }
-    if os.name == "nt":
-        kwargs["creationflags"] = _get_creationflags()
-    else:
-        kwargs["start_new_session"] = True
     try:
-        subprocess.Popen(command, **kwargs)
+        if os.name == "nt":
+            subprocess.Popen(
+                command,
+                cwd=cwd,
+                close_fds=True,
+                creationflags=_get_creationflags(),
+            )
+        else:
+            subprocess.Popen(
+                command,
+                cwd=cwd,
+                close_fds=True,
+                start_new_session=True,
+            )
     except Exception:
         return 1
     return 0

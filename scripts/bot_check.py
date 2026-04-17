@@ -23,18 +23,38 @@ driver.on_shutdown(disconnect)
 nonebot.load_plugins("zhenxun/builtin_plugins")
 nonebot.load_plugins("zhenxun/plugins")
 
-all_plugins = [name.replace(":", ".") for name in nonebot.get_available_plugin_names()]
+
+def _normalize_plugin_name(name: str) -> str:
+    return name.replace(":", ".")
+
+
+def _collect_loaded_plugin_names() -> set[str]:
+    loaded_names: set[str] = set()
+    for plugin in nonebot.get_loaded_plugins():
+        loaded_names.add(_normalize_plugin_name(plugin.name))
+        loaded_names.add(
+            _normalize_plugin_name(
+                re.sub(
+                    r"^zhenxun\.(plugins|builtin_plugins)\.",
+                    "",
+                    plugin.module_name,
+                )
+            )
+        )
+    return loaded_names
+
+
+all_plugins = [
+    _normalize_plugin_name(name) for name in nonebot.get_available_plugin_names()
+]
 logger.info(f"所有插件：{all_plugins}")
-loaded_plugins = tuple(
-    re.sub(r"^zhenxun\.(plugins|builtin_plugins)\.", "", plugin.module_name)
-    for plugin in nonebot.get_loaded_plugins()
-)
+loaded_plugins = _collect_loaded_plugin_names()
 logger.info(f"已加载插件：{loaded_plugins}")
 
 for plugin in all_plugins.copy():
     if plugin.startswith(("platform",)):
         logger.info(f"平台插件：{plugin}")
-    elif plugin.endswith(loaded_plugins):
+    elif plugin in loaded_plugins:
         logger.info(f"已加载插件：{plugin}")
     else:
         logger.info(f"未加载插件：{plugin}")
