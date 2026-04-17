@@ -1,14 +1,12 @@
-import asyncio
-import os
 from pathlib import Path
 import re
-import time
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 import nonebot
 
 from zhenxun.configs.config import BotConfig, Config
+from zhenxun.utils._restart_utils import issue_restart_ticket, request_restart
 
 from ...base_model import Result
 from .data_source import test_db_connection
@@ -19,8 +17,6 @@ router = APIRouter(prefix="/configure")
 driver = nonebot.get_driver()
 
 port = driver.config.port
-
-FILE_NAME = ".configure_restart"
 
 
 @router.post(
@@ -76,11 +72,7 @@ async def _(setting: Setting) -> Result:
         Config.set_config("web-ui", "username", setting.username)
     Config.set_config("web-ui", "password", setting.password, True)
     to_env_file.write_text(env_text, encoding="utf-8")
-    for file in os.listdir(Path()):
-        if file.startswith(FILE_NAME):
-            Path(file).unlink()
-    flag_file = Path() / f"{FILE_NAME}_{int(time.time())}"
-    flag_file.touch()
+    issue_restart_ticket("webui.configure", ttl_seconds=10 * 60)
     return Result.ok(True, info="设置成功，请重启真寻以完成配置！")
 
 
@@ -104,19 +96,10 @@ async def _(db_url: str) -> Result:
     description="重启",
 )
 async def _() -> Result:
-    flag_file = next(
-        (Path() / file for file in os.listdir(Path()) if file.startswith(FILE_NAME)),
-        None,
+    ok, message = await request_restart(
+        "webui.configure",
+        require_ticket="webui.configure",
     )
-    if not flag_file or not flag_file.exists():
-        return Result.fail("重启标志文件不存在...")
-    set_time = flag_file.name.split("_")[-1]
-    if time.time() - float(set_time) > 10 * 60:
-        return Result.fail("重启标志文件已过期，请重新设置配置。")
-    flag_file.unlink()
-    try:
-        return Result.ok(info="执行重启命令成功")
-    finally:
-        from zhenxun.utils._restart_utils import schedule_restart
-
-        asyncio.create_task(schedule_restart())  # noqa: RUF006
+    if not ok:
+        return Result.fail(message)
+    return Result.ok(info=message)

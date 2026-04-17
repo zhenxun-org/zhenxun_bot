@@ -10,8 +10,6 @@ import nonebot
 from nonebot.utils import is_coroutine_callable
 from tortoise import Tortoise
 from tortoise.connection import connections
-
-# 修改点 1：在这里引入了 ConfigurationError
 from tortoise.exceptions import ConfigurationError, OperationalError
 
 from zhenxun.configs.config import BotConfig
@@ -250,11 +248,11 @@ async def init():
         raise DbConnectError(f"数据库连接错误... e:{e}") from e
 
 
-# 修改点 2：给清理函数加上了错误拦截
+@PriorityLifecycle.on_shutdown(priority=100)
 async def disconnect():
     try:
         await connections.close_all()
     except ConfigurationError:
-        pass
+        logger.debug("数据库连接未初始化，跳过关闭")
     except Exception as e:
         logger.error(f"关闭数据库连接时发生意外错误: {e}")

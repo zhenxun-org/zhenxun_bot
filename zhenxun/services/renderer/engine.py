@@ -9,6 +9,7 @@ from pathlib import Path
 import time
 from typing import Any, ClassVar, cast
 
+import nonebot_plugin_htmlrender as htmlrender_module
 import nonebot_plugin_htmlrender.browser as htmlrender_browser
 import psutil
 
@@ -16,6 +17,11 @@ from zhenxun.configs.config import Config
 from zhenxun.services.log import logger
 
 from .types import BaseScreenshotEngine
+
+_PLAYWRIGHT_DISCONNECT_ERROR = "Connection closed while reading from the driver"
+_UNRETRIEVED_FUTURE_MESSAGE = "Future exception was never retrieved"
+_LOOP_EXCEPTION_FILTER_STATE_ATTR = "_zhenxun_playwright_exception_filter_state"
+_DISCONNECT_SUPPRESSION_WINDOW_SECONDS = 10.0
 
 
 async def _await_if_needed(value: Any) -> Any:
@@ -32,23 +38,68 @@ async def _get_browser_instance() -> Any:
     raise RuntimeError("nonebot_plugin_htmlrender.browser 未提供可用浏览器获取函数。")
 
 
-async def _shutdown_browser_instance() -> None:
-    loop = asyncio.get_event_loop()
-    _orig = loop.get_exception_handler()
+def _is_ignorable_playwright_disconnect(ctx: dict[str, Any]) -> bool:
+    exc = ctx.get("exception")
+    return (
+        ctx.get("message") == _UNRETRIEVED_FUTURE_MESSAGE
+        and isinstance(exc, Exception)
+        and _PLAYWRIGHT_DISCONNECT_ERROR in str(exc)
+    )
 
-    def _filter(lp, ctx):
-        exc = ctx.get("exception")
-        if (
-            ctx.get("message") == "Future exception was never retrieved"
-            and isinstance(exc, Exception)
-            and "Connection closed while reading from the driver" in str(exc)
-        ):
+
+def _get_loop_exception_filter_state(
+    loop: asyncio.AbstractEventLoop,
+) -> dict[str, Any] | None:
+    state = getattr(loop, _LOOP_EXCEPTION_FILTER_STATE_ATTR, None)
+    if isinstance(state, dict):
+        return state
+    return None
+
+
+def _ensure_loop_exception_filter(
+    loop: asyncio.AbstractEventLoop,
+) -> dict[str, Any]:
+    state = _get_loop_exception_filter_state(loop)
+    if state is not None:
+        return state
+
+    state = {
+        "original_handler": loop.get_exception_handler(),
+        "suppress_until": 0.0,
+    }
+
+    def _filter(lp: asyncio.AbstractEventLoop, ctx: dict[str, Any]) -> None:
+        if _is_ignorable_playwright_disconnect(ctx):
+            suppress_until = float(state.get("suppress_until", 0.0))
+            if suppress_until >= time.monotonic():
+                return
+        original_handler = state.get("original_handler")
+        if callable(original_handler):
+            original_handler(lp, ctx)
             return
-        (_orig or lp.default_exception_handler)(lp, ctx)
+        lp.default_exception_handler(ctx)
 
     loop.set_exception_handler(_filter)
+    setattr(loop, _LOOP_EXCEPTION_FILTER_STATE_ATTR, state)
+    return state
+
+
+def _arm_disconnect_exception_suppression(
+    loop: asyncio.AbstractEventLoop,
+    *,
+    seconds: float = _DISCONNECT_SUPPRESSION_WINDOW_SECONDS,
+) -> None:
+    state = _ensure_loop_exception_filter(loop)
+    deadline = time.monotonic() + max(seconds, 0.0)
+    state["suppress_until"] = max(float(state.get("suppress_until", 0.0)), deadline)
+
+
+async def _shutdown_browser_instance() -> None:
+    loop = asyncio.get_running_loop()
+    _arm_disconnect_exception_suppression(loop)
 
     browser_obj = getattr(htmlrender_browser, "_browser", None)
+    playwright_obj = getattr(htmlrender_browser, "_playwright", None)
     if browser_obj is not None:
         is_connected_fn = getattr(browser_obj, "is_connected", None)
         if callable(is_connected_fn) and not is_connected_fn():
@@ -56,40 +107,26 @@ async def _shutdown_browser_instance() -> None:
                 setattr(htmlrender_browser, "_browser", None)
             with contextlib.suppress(Exception):
                 setattr(htmlrender_browser, "_playwright", None)
-            logger.debug("浏览器进程已退出，跳过关闭", "PlaywrightEngine")
             return
 
-    for attr_name in (
-        "shutdown_htmlrender",
-        "shutdown_browser",
-        "close_browser",
-        "close_htmlrender",
-    ):
-        shutdown_func = getattr(htmlrender_browser, attr_name, None)
-        if callable(shutdown_func):
-            try:
-                await _await_if_needed(shutdown_func())
-            except Exception as e:
-                if "Connection closed while reading from the driver" not in str(e):
-                    logger.debug(f"关闭浏览器实例时忽略异常: {e}")
-            finally:
-                with contextlib.suppress(Exception):
-                    setattr(htmlrender_browser, "_browser", None)
-                with contextlib.suppress(Exception):
-                    setattr(htmlrender_browser, "_playwright", None)
-            return
+    if browser_obj is None and playwright_obj is None:
+        return
 
-    browser_obj = getattr(htmlrender_browser, "_browser", None)
     close_func = getattr(browser_obj, "close", None) if browser_obj else None
     if callable(close_func):
-        with contextlib.suppress(Exception):
+        try:
             await _await_if_needed(close_func())
+        except Exception as e:
+            if _PLAYWRIGHT_DISCONNECT_ERROR not in str(e):
+                logger.debug(f"关闭浏览器实例时忽略异常: {e}")
 
-    playwright_obj = getattr(htmlrender_browser, "_playwright", None)
     stop_func = getattr(playwright_obj, "stop", None) if playwright_obj else None
     if callable(stop_func):
-        with contextlib.suppress(Exception):
+        try:
             await _await_if_needed(stop_func())
+        except Exception as e:
+            if _PLAYWRIGHT_DISCONNECT_ERROR not in str(e):
+                logger.debug(f"关闭 Playwright 实例时忽略异常: {e}")
 
     with contextlib.suppress(Exception):
         setattr(htmlrender_browser, "_browser", None)
@@ -97,15 +134,23 @@ async def _shutdown_browser_instance() -> None:
         setattr(htmlrender_browser, "_playwright", None)
 
     if callable(close_func) or callable(stop_func):
+        await asyncio.sleep(0)
+
+
+def _patch_htmlrender_shutdown() -> None:
+    if getattr(htmlrender_browser, "_zhenxun_shutdown_patched", False):
         return
 
-    logger.debug(
-        "未找到 htmlrender 浏览器关闭函数，跳过 shutdown。",
-        "PlaywrightEngine",
-    )
+    async def _patched_shutdown_browser() -> None:
+        await _shutdown_browser_instance()
+
+    setattr(htmlrender_browser, "shutdown_browser", _patched_shutdown_browser)
+    setattr(htmlrender_module, "shutdown_browser", _patched_shutdown_browser)
+    setattr(htmlrender_browser, "_zhenxun_shutdown_patched", True)
 
 
 def _patch_playwright_env_check_once() -> None:
+    _patch_htmlrender_shutdown()
     if getattr(htmlrender_browser, "_zhenxun_check_once_patched", False):
         return
 

@@ -78,10 +78,6 @@ def _run_bot() -> None:
     driver = nonebot.get_driver()
     driver.register_adapter(OneBotV11Adapter)
 
-    from zhenxun.services.db_context import disconnect
-
-    driver.on_shutdown(disconnect)
-
     nonebot.load_plugins("zhenxun/builtin_plugins")
     nonebot.load_plugins("zhenxun/plugins")
 
