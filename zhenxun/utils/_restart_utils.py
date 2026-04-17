@@ -137,16 +137,21 @@ def _spawn_restart_guard() -> bool:
         "--",
         *_build_restart_command(),
     ]
-    kwargs: dict[str, object] = {
-        "cwd": cwd_path,
-        "close_fds": True,
-    }
-    if os.name == "nt":
-        kwargs["creationflags"] = _get_helper_creationflags()
-    else:
-        kwargs["start_new_session"] = True
     try:
-        subprocess.Popen(helper_cmd, **kwargs)
+        if os.name == "nt":
+            subprocess.Popen(
+                helper_cmd,
+                cwd=cwd_path,
+                close_fds=True,
+                creationflags=_get_helper_creationflags(),
+            )
+        else:
+            subprocess.Popen(
+                helper_cmd,
+                cwd=cwd_path,
+                close_fds=True,
+                start_new_session=True,
+            )
     except Exception as e:
         logger.error(f"启动重启守护进程失败: {e}", "重启")
         return False
