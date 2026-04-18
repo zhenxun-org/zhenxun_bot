@@ -1,15 +1,18 @@
 """zx CLI — 绪山真寻 Bot 命令行工具
 
 用法:
-    zx run       启动 Bot
-    zx version   显示版本信息
+    zx run          启动 launcher
+    zx run-worker   启动 worker（由 launcher 调用）
+    zx version      显示版本信息
 """
 
 from __future__ import annotations
 
 import importlib.metadata
 from pathlib import Path
+import subprocess
 import sys
+import time
 
 
 def _print_version() -> None:
@@ -20,20 +23,22 @@ def _print_version() -> None:
     sys.stdout.write(f"zhenxun-bot {ver}\n")
 
 
-def _run_bot() -> None:
-    """启动 Bot（必须在项目目录下执行）"""
+def _ensure_project_root() -> Path:
     cwd = Path.cwd()
-
-    # 检查是否在有效的项目目录中
     if not (cwd / "zhenxun").is_dir():
         sys.stderr.write("错误: 当前目录不是 zhenxun_bot 项目目录。\n")
         sys.stderr.write("请在项目根目录（包含 zhenxun/ 目录的位置）执行 zx run。\n")
         sys.exit(1)
 
-    # 确保 CWD 在 sys.path 中，以便 nonebot.load_plugins 能找到 zhenxun 包
     cwd_str = str(cwd)
     if cwd_str not in sys.path:
         sys.path.insert(0, cwd_str)
+    return cwd
+
+
+def _run_worker() -> None:
+    """启动 Bot worker（必须在项目目录下执行）"""
+    _ensure_project_root()
 
     import contextlib
     import platform
@@ -92,11 +97,61 @@ def _run_bot() -> None:
     nonebot.run()
 
 
+def _build_worker_command() -> list[str]:
+    return [sys.executable, "-m", "zhenxun.cli", "run-worker"]
+
+
+def _wait_worker_exit(proc: subprocess.Popen, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return True
+        time.sleep(0.1)
+    return proc.poll() is not None
+
+
+def _terminate_worker(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    if _wait_worker_exit(proc, 8.0):
+        return
+    proc.terminate()
+    if _wait_worker_exit(proc, 5.0):
+        return
+    proc.kill()
+    proc.wait(timeout=5)
+
+
+def _run_launcher() -> None:
+    cwd = _ensure_project_root()
+    from zhenxun.utils.restart_state import (
+        clear_launcher_restart_signal,
+        consume_launcher_restart_signal,
+    )
+
+    clear_launcher_restart_signal()
+    while True:
+        worker = subprocess.Popen(_build_worker_command(), cwd=str(cwd))
+        try:
+            return_code = worker.wait()
+        except KeyboardInterrupt:
+            clear_launcher_restart_signal()
+            _terminate_worker(worker)
+            return
+
+        should_restart = consume_launcher_restart_signal()
+        if should_restart:
+            continue
+        raise SystemExit(return_code)
+
+
 def main() -> None:
     args = sys.argv[1:]
 
     if not args or args[0] == "run":
-        _run_bot()
+        _run_launcher()
+    elif args[0] == "run-worker":
+        _run_worker()
     elif args[0] == "version":
         _print_version()
     elif args[0] in ("-h", "--help", "help"):

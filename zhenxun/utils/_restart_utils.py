@@ -2,16 +2,11 @@ import _thread
 import asyncio
 import copy
 import json
-import os
 from pathlib import Path
-import subprocess
-import sys
 import time
 from typing import Any
 
-import nonebot
 from nonebot.adapters import Bot
-import psutil
 
 from zhenxun.services.log import logger
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
@@ -22,27 +17,10 @@ _LEGACY_RESTART_SCRIPT = Path() / "restart.sh"
 _LEGACY_CONFIGURE_RESTART_PREFIX = ".configure_restart"
 _RESTART_TICKET_KEY = "restart_ticket"
 _PENDING_REQUEST_KEY = "pending_request"
+_LAUNCHER_ACTION_KEY = "launcher_action"
+_ACTION_RESTART = "restart"
 
 _restart_pending: bool = False
-
-
-def _build_restart_command() -> list[str]:
-    import shutil
-
-    if uv_path := shutil.which("uv"):
-        return [uv_path, "run", "zx"]
-    return [sys.executable, "-m", "zhenxun.cli", "run"]
-
-
-def _get_helper_creationflags() -> int:
-    creationflags = 0
-    for flag_name in (
-        "CREATE_NEW_PROCESS_GROUP",
-        "DETACHED_PROCESS",
-        "CREATE_NO_WINDOW",
-    ):
-        creationflags |= getattr(subprocess, flag_name, 0)
-    return creationflags
 
 
 def _ensure_state_parent() -> None:
@@ -116,58 +94,13 @@ def _validate_restart_ticket(
     return True, ""
 
 
-def _spawn_restart_guard() -> bool:
-    driver = nonebot.get_driver()
-    cwd_path = str(Path().resolve())
-    parent = psutil.Process(os.getpid())
-    helper_cmd = [
-        sys.executable,
-        "-m",
-        "zhenxun.utils._restart_helper",
-        "--parent-pid",
-        str(parent.pid),
-        "--parent-create-time",
-        str(parent.create_time()),
-        "--cwd",
-        cwd_path,
-        "--host",
-        str(driver.config.host),
-        "--port",
-        str(driver.config.port),
-        "--",
-        *_build_restart_command(),
-    ]
-    try:
-        if os.name == "nt":
-            subprocess.Popen(
-                helper_cmd,
-                cwd=cwd_path,
-                close_fds=True,
-                creationflags=_get_helper_creationflags(),
-            )
-        else:
-            subprocess.Popen(
-                helper_cmd,
-                cwd=cwd_path,
-                close_fds=True,
-                start_new_session=True,
-            )
-    except Exception as e:
-        logger.error(f"启动重启守护进程失败: {e}", "重启")
-        return False
-    logger.info("已启动外部重启守护进程，等待当前进程安全退出...", "重启")
-    return True
-
-
 async def _schedule_restart() -> tuple[bool, str]:
     global _restart_pending
     if _restart_pending:
         logger.warning("重启已在进行中，忽略重复请求。", "重启")
         return False, "重启已在进行中，请稍后查看结果。"
-    if not _spawn_restart_guard():
-        logger.error("重启守护进程启动失败，已取消本次重启。", "重启")
-        return False, "启动重启守护进程失败。"
     _restart_pending = True
+    logger.info("已标记重启请求，等待 launcher 接管下一代 worker...", "重启")
 
     async def _send_sigint() -> None:
         await asyncio.sleep(0.3)
@@ -202,6 +135,7 @@ async def request_restart(
             "user_id": receipt_user_id,
         }
     state[_PENDING_REQUEST_KEY] = pending_request
+    state[_LAUNCHER_ACTION_KEY] = _ACTION_RESTART
     if require_ticket:
         state.pop(_RESTART_TICKET_KEY, None)
 
@@ -292,4 +226,4 @@ async def _cleanup_restart_artifacts() -> None:
 @PriorityLifecycle.on_shutdown(priority=99)
 async def _notify_restart_shutdown() -> None:
     if _restart_pending:
-        logger.info("重启守护进程已接管，继续执行剩余 shutdown 流程...", "重启")
+        logger.info("launcher 将在当前 worker 退出后接管重启。", "重启")

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import nonebot
 from nonebot.adapters import Bot
+from nonebot.adapters.onebot.v11.exception import NetworkError
 from nonebot_plugin_apscheduler import scheduler
 
 from zhenxun.configs.config import Config
@@ -47,7 +48,14 @@ async def _(bot: Bot):
 
     logger.debug(f"更新Bot: {bot.self_id} 的群认证...", "群认证同步")
 
-    current_group_list, _ = await PlatformUtils.get_group_list(bot)
+    try:
+        current_group_list, _ = await PlatformUtils.get_group_list(bot)
+    except NetworkError as e:
+        logger.debug(
+            f"Bot: {bot.self_id} 群认证同步被连接关闭打断，跳过本次同步: {e}",
+            "群认证同步",
+        )
+        return
     current_group_ids = {g.group_id for g in current_group_list}
 
     db_group_list: list[str] = await GroupConsole.all().values_list(
@@ -85,6 +93,17 @@ async def _(bot: Bot):
         try:
             other_groups, _ = await PlatformUtils.get_group_list(other_bot)
             all_visible.update(g.group_id for g in other_groups)
+        except NetworkError as e:
+            reason = (
+                f"Bot: {other_bot.self_id} 群列表同步被连接关闭打断，"
+                f"回退到数据库集合: {e}"
+            )
+            logger.debug(
+                reason,
+                "群认证同步",
+            )
+            all_visible.update(db_group_ids)
+            break
         except Exception:
             all_visible.update(db_group_ids)
             break
