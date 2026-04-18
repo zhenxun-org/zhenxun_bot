@@ -115,11 +115,12 @@ class StatisticsManage:
     @classmethod
     async def __build_image(cls, data_list: list[tuple[str, int]], title: str) -> bytes:
         module2count = {x[0]: x[1] for x in data_list}
-        plugin_info = await PluginInfo.filter(
-            module__in=module2count.keys(),
+        plugin_info = await PluginInfo.get_plugins(
+            module__in=list(module2count.keys()),
             load_status=True,
+            filter_parent=False,
             plugin_type=PluginType.NORMAL,
-        ).all()
+        )
         x_index = []
         data = []
         for plugin in plugin_info:

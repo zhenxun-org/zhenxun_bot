@@ -52,20 +52,34 @@ async def _(
 async def _() -> Result[PluginCount]:
     try:
         plugin_count = PluginCount()
-        plugin_count.normal = await DbPluginInfo.filter(
-            plugin_type=PluginType.NORMAL, load_status=True
-        ).count()
-        plugin_count.admin = await DbPluginInfo.filter(
-            plugin_type__in=[PluginType.ADMIN, PluginType.SUPER_AND_ADMIN],
-            load_status=True,
-        ).count()
-        plugin_count.superuser = await DbPluginInfo.filter(
-            plugin_type__in=[PluginType.SUPERUSER, PluginType.SUPER_AND_ADMIN],
-            load_status=True,
-        ).count()
-        plugin_count.other = await DbPluginInfo.filter(
-            plugin_type__in=[PluginType.HIDDEN, PluginType.DEPENDANT], load_status=True
-        ).count()
+        plugin_count.normal = len(
+            await DbPluginInfo.get_plugins(
+                plugin_type=PluginType.NORMAL,
+                load_status=True,
+                filter_parent=False,
+            )
+        )
+        plugin_count.admin = len(
+            await DbPluginInfo.get_plugins(
+                plugin_type__in=[PluginType.ADMIN, PluginType.SUPER_AND_ADMIN],
+                load_status=True,
+                filter_parent=False,
+            )
+        )
+        plugin_count.superuser = len(
+            await DbPluginInfo.get_plugins(
+                plugin_type__in=[PluginType.SUPERUSER, PluginType.SUPER_AND_ADMIN],
+                load_status=True,
+                filter_parent=False,
+            )
+        )
+        plugin_count.other = len(
+            await DbPluginInfo.get_plugins(
+                plugin_type__in=[PluginType.HIDDEN, PluginType.DEPENDANT],
+                load_status=True,
+                filter_parent=False,
+            )
+        )
         return Result.ok(plugin_count, "拿到信息啦!")
     except Exception as e:
         logger.error(f"{router.prefix}/get_plugin_count 调用错误", "WebUi", e=e)
@@ -125,10 +139,10 @@ async def _(param: PluginSwitch) -> Result:
 async def _() -> Result[list[str]]:
     try:
         menu_type_list = []
-        result = (
-            await DbPluginInfo.filter(load_status=True)
-            .annotate()
-            .values_list("menu_type", flat=True)
+        result = await DbPluginInfo.get_plugins_values_list(
+            "menu_type",
+            load_status=True,
+            filter_parent=False,
         )
         for r in result:
             if r not in menu_type_list and r:

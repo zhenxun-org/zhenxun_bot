@@ -350,7 +350,11 @@ class ApiDataSource:
         )
         hot_plugin_list = []
         module_list = [x[0] for x in data_list]
-        plugins = await PluginInfo.filter(module__in=module_list).all()
+        plugins = await PluginInfo.get_plugins(
+            load_status=None,
+            filter_parent=False,
+            module__in=module_list,
+        )
         module2name = {p.module: p.name for p in plugins}
         for data in data_list:
             module = data[0]
@@ -376,10 +380,16 @@ class ApiDataSource:
             return None
         block_tasks = []
         block_plugins = []
-        all_plugins = await PluginInfo.filter(
-            load_status=True, plugin_type=PluginType.NORMAL
-        ).values("module", "name")
-        all_task = await TaskInfo.annotate().values("module", "name")
+        plugin_records = await PluginInfo.get_plugins(
+            load_status=True,
+            filter_parent=False,
+            plugin_type=PluginType.NORMAL,
+        )
+        all_plugins = [
+            {"module": plugin.module, "name": plugin.name} for plugin in plugin_records
+        ]
+        task_records = await TaskInfo.get_tasks(load_status=None)
+        all_task = [{"module": task.module, "name": task.name} for task in task_records]
         if bot_data.block_tasks:
             tasks = CommonUtils.convert_module_format(bot_data.block_tasks)
             block_tasks = [t["module"] for t in all_task if t["module"] in tasks]

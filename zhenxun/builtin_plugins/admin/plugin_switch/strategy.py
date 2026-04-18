@@ -103,8 +103,11 @@ class PluginStrategy(SwitchStrategy):
     async def get_all_modules(self) -> list[str]:
         return cast(
             list[str],
-            await PluginInfo.filter(plugin_type=PluginType.NORMAL).values_list(
-                "module", flat=True
+            await PluginInfo.get_plugins_values_list(
+                "module",
+                load_status=None,
+                filter_parent=False,
+                plugin_type=PluginType.NORMAL,
             ),
         )
 
@@ -158,7 +161,7 @@ class TaskStrategy(SwitchStrategy):
         return is_su_blocked, is_norm_blocked
 
     async def get_all_modules(self) -> list[str]:
-        return cast(list[str], await TaskInfo.all().values_list("module", flat=True))
+        return await TaskInfo.get_modules(load_status=None)
 
     async def set_default_status(self, entity: TaskInfo, status: bool) -> None:
         entity.default_status = status

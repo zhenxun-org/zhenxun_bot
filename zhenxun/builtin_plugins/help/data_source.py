@@ -147,24 +147,24 @@ async def create_help_img(
     return image_bytes
 
 
-async def get_user_allow_help(user_id: str) -> list[PluginType]:
+async def get_user_allow_help(user_id: str) -> list[str]:
     """获取用户可访问插件类型列表
 
     参数:
         user_id: 用户id
 
     返回:
-        list[PluginType]: 插件类型列表
+        list[str]: 插件类型列表
     """
-    type_list = [PluginType.NORMAL, PluginType.DEPENDANT]
+    type_list = ["NORMAL", "DEPENDANT"]
     for level in await LevelUser.filter(user_id=user_id).values_list(
         "user_level", flat=True
     ):
         if level > 0:  # type: ignore
-            type_list.extend((PluginType.ADMIN, PluginType.SUPER_AND_ADMIN))
+            type_list.extend(("ADMIN", "ADMIN_SUPER"))
             break
     if user_id in driver.config.superusers:
-        type_list.append(PluginType.SUPERUSER)
+        type_list.append("SUPERUSER")
     return type_list
 
 
@@ -265,9 +265,12 @@ async def get_llm_help(question: str, user_id: str) -> str | bytes:
     try:
         allowed_types = await get_user_allow_help(user_id)
 
-        plugins = await PluginInfo.filter(
-            is_show=True, plugin_type__in=allowed_types
-        ).all()
+        plugins = await PluginInfo.get_plugins(
+            load_status=None,
+            filter_parent=False,
+            is_show=True,
+            plugin_type__in=allowed_types,
+        )
 
         knowledge_base_parts = []
         for p in plugins:

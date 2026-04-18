@@ -113,8 +113,9 @@ class GroupConsole(Model):
         """
         return cast(
             list[str],
-            await TaskInfo.filter(default_status=default_status).values_list(
-                "module", flat=True
+            await TaskInfo.get_modules(
+                default_status=default_status,
+                load_status=None,
             ),
         )
 
@@ -127,10 +128,13 @@ class GroupConsole(Model):
         """
         return cast(
             list[str],
-            await PluginInfo.filter(
+            await PluginInfo.get_plugins_values_list(
+                "module",
+                load_status=None,
+                filter_parent=False,
                 plugin_type__in=[PluginType.NORMAL, PluginType.DEPENDANT],
                 default_status=default_status,
-            ).values_list("module", flat=True),
+            ),
         )
 
     @classmethod

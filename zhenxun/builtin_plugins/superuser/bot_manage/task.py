@@ -38,7 +38,7 @@ async def bot_task(session: Uninfo, bot_id: Match[str] = AlconnaMatch("bot_id"))
         }
     else:
         data_dict = await BotConsole.get_tasks(status=False)
-    db_task_list = await TaskInfo.all()
+    db_task_list = await TaskInfo.get_tasks(load_status=None)
     column_name = ["ID", "模块", "名称", "全局状态", "运行时间"]
     img_list = []
     for __bot_id, tk in data_dict.items():
@@ -71,9 +71,10 @@ async def enable_task(
     bot_id: Match[str] = AlconnaMatch("bot_id"),
 ):
     if task_name.available:
-        task: TaskInfo | None = await TaskInfo.get_or_none(name=task_name.result)
+        task = await TaskInfo.get_task(name=task_name.result)
         if not task:
             await MessageUtils.build_message("未找到被动...").finish()
+            return
         if bot_id.available:
             logger.info(
                 f"开启 {bot_id.result} 被动的 {task_name.available}",
@@ -121,9 +122,10 @@ async def disable_task(
     bot_id: Match[str] = AlconnaMatch("bot_id"),
 ):
     if task_name.available:
-        task: TaskInfo | None = await TaskInfo.get_or_none(name=task_name.result)
+        task = await TaskInfo.get_task(name=task_name.result)
         if not task:
             await MessageUtils.build_message("未找到被动...").finish()
+            return
         if bot_id.available:
             logger.info(
                 f"禁用 {bot_id.result} 被动的 {task_name.available}",

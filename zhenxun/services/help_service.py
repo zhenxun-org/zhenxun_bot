@@ -30,7 +30,11 @@ class PluginData(BaseModel):
 
 async def _get_plugins_by_types(plugin_types: list[PluginType]) -> list[PluginData]:
     """根据指定的插件类型列表获取插件数据"""
-    plugin_list = await PluginInfo.filter(plugin_type__in=plugin_types).all()
+    plugin_list = await PluginInfo.get_plugins(
+        load_status=None,
+        filter_parent=False,
+        plugin_type__in=plugin_types,
+    )
     data_list = []
     for plugin in plugin_list:
         if _plugin := nonebot.get_plugin_by_module_name(plugin.module_path):
@@ -42,7 +46,7 @@ async def _get_plugins_by_types(plugin_types: list[PluginType]) -> list[PluginDa
 async def _get_task_category() -> dict:
     """获取被动技能帮助类别"""
     task_items = []
-    if task_list := await TaskInfo.all():
+    if task_list := await TaskInfo.get_tasks(load_status=True):
         task_names = "\n".join([task.name for task in task_list])
         task_items.append(
             {

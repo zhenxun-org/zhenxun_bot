@@ -368,35 +368,47 @@ class PluginLimitSnapshot:
 
 @dataclass(frozen=True)
 class TaskInfoSnapshot:
+    id: int
     module: str
+    name: str
     status: bool
     load_status: bool
     default_status: bool
+    run_time: str | None
 
     @classmethod
     def from_model(cls, model) -> "TaskInfoSnapshot":
         return cls(
+            id=int(getattr(model, "id", 0) or 0),
             module=str(model.module),
+            name=str(getattr(model, "name", "") or ""),
             status=bool(getattr(model, "status", True)),
             load_status=bool(getattr(model, "load_status", True)),
             default_status=bool(getattr(model, "default_status", True)),
+            run_time=getattr(model, "run_time", None),
         )
 
     def to_payload(self) -> dict[str, Any]:
         return {
+            "id": self.id,
             "module": self.module,
+            "name": self.name,
             "status": self.status,
             "load_status": self.load_status,
             "default_status": self.default_status,
+            "run_time": self.run_time,
         }
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "TaskInfoSnapshot":
         return cls(
+            id=int(payload.get("id", 0) or 0),
             module=str(payload.get("module", "")),
+            name=str(payload.get("name", "") or ""),
             status=bool(payload.get("status", True)),
             load_status=bool(payload.get("load_status", True)),
             default_status=bool(payload.get("default_status", True)),
+            run_time=payload.get("run_time"),
         )
 
 
@@ -1208,6 +1220,7 @@ class LevelUserMemoryCache:
 class TaskInfoMemoryCache:
     _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
     _by_module: ClassVar[dict[str, TaskInfoSnapshot]] = {}
+    _by_name: ClassVar[dict[str, TaskInfoSnapshot]] = {}
     _negative: ClassVar[dict[str, float]] = {}
     _loaded: ClassVar[bool] = False
     _refresh_task: ClassVar[asyncio.Task | None] = None
@@ -1246,7 +1259,15 @@ class TaskInfoMemoryCache:
 
         async with cls._lock:
             records = await TaskInfo.all()
-            cls._by_module = {r.module: TaskInfoSnapshot.from_model(r) for r in records}
+            by_module: dict[str, TaskInfoSnapshot] = {}
+            by_name: dict[str, TaskInfoSnapshot] = {}
+            for record in records:
+                entry = TaskInfoSnapshot.from_model(record)
+                by_module[entry.module] = entry
+                if entry.name:
+                    by_name[entry.name] = entry
+            cls._by_module = by_module
+            cls._by_name = by_name
             cls._negative = {}
             cls._loaded = True
             logger.debug(
@@ -1276,6 +1297,21 @@ class TaskInfoMemoryCache:
         return None
 
     @classmethod
+    async def get_by_name(cls, name: str | None) -> TaskInfoSnapshot | None:
+        name = (name or "").strip()
+        if not name:
+            return None
+        if not cls._loaded:
+            await cls.ensure_loaded()
+        return cls._by_name.get(name)
+
+    @classmethod
+    async def get_all(cls) -> list[TaskInfoSnapshot]:
+        if not cls._loaded:
+            await cls.ensure_loaded()
+        return sorted(cls._by_module.values(), key=lambda item: (item.id, item.module))
+
+    @classmethod
     async def is_disabled(cls, module: str | None) -> bool:
         entry = await cls.get(module)
         if not entry:
@@ -1287,6 +1323,8 @@ class TaskInfoMemoryCache:
         entry = TaskInfoSnapshot.from_model(record)
         async with cls._lock:
             cls._by_module[entry.module] = entry
+            if entry.name:
+                cls._by_name[entry.name] = entry
             cls._negative.pop(entry.module, None)
         RuntimeCacheSync.publish_event("task", "upsert", entry.to_payload())
 
@@ -1297,6 +1335,8 @@ class TaskInfoMemoryCache:
             return
         async with cls._lock:
             cls._by_module[entry.module] = entry
+            if entry.name:
+                cls._by_name[entry.name] = entry
             cls._negative.pop(entry.module, None)
 
     @classmethod
@@ -1305,7 +1345,11 @@ class TaskInfoMemoryCache:
         if not module:
             return
         async with cls._lock:
-            cls._by_module.pop(module, None)
+            removed = cls._by_module.pop(module, None)
+            if removed and removed.name:
+                current = cls._by_name.get(removed.name)
+                if current and current.module == removed.module:
+                    cls._by_name.pop(removed.name, None)
         RuntimeCacheSync.publish_event("task", "delete", {"module": module})
 
     @classmethod

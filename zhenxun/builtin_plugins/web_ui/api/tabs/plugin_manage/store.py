@@ -30,9 +30,7 @@ async def _() -> Result[dict]:
             {**model_dump(plugin), "name": plugin.name, "id": idx}
             for idx, plugin in enumerate(plugin_list + extra_plugin_list)
         ]
-        modules = await PluginInfo.filter(load_status=True).values_list(
-            "module", flat=True
-        )
+        modules = await PluginInfo.get_plugins_values_list("module", load_status=True)
         return Result.ok({"install_module": modules, "plugin_list": plugin_list})
     except Exception as e:
         logger.error("获取插件商店插件信息失败", "WebUi", e=e)

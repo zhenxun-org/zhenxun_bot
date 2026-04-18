@@ -50,9 +50,11 @@ async def bot_plugin(session: Uninfo, bot_id: Match[str] = AlconnaMatch("bot_id"
         }
     else:
         data_dict = await BotConsole.get_plugins(status=False)
-    db_plugin_list = await PluginInfo.filter(
-        load_status=True, plugin_type__not=PluginType.HIDDEN
-    ).all()
+    db_plugin_list = await PluginInfo.get_plugins(
+        load_status=True,
+        filter_parent=False,
+        plugin_type__not=PluginType.HIDDEN,
+    )
     img_list = []
     for __bot_id, tk in data_dict.items():
         column_data = [
@@ -92,6 +94,7 @@ async def enable_plugin(
         plugin: PluginInfo | None = await PluginInfo.get_plugin(name=plugin_name.result)
         if not plugin:
             await MessageUtils.build_message("未找到该插件...").finish()
+            return
         if bot_id.available:
             logger.info(
                 f"开启 {bot_id.result} 的插件 {plugin_name.result}",
@@ -142,6 +145,7 @@ async def disable_plugin(
         plugin = await PluginInfo.get_plugin(name=plugin_name.result)
         if not plugin:
             await MessageUtils.build_message("未找到该插件...").finish()
+            return
         if bot_id.available:
             logger.info(
                 f"禁用 {bot_id.result} 的插件 {plugin_name.result}",

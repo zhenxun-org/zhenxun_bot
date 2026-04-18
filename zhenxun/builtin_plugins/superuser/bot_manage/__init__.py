@@ -1,5 +1,3 @@
-from typing import cast
-
 import nonebot
 from nonebot.adapters import Bot
 from nonebot.plugin import PluginMetadata
@@ -70,9 +68,7 @@ async def init_bot_console(bot: Bot):
             plugin_type__in=[PluginType.NORMAL, PluginType.DEPENDANT, PluginType.ADMIN]
         )
     ]
-    task_list = cast(
-        list[str], await TaskInfo.filter(status=True).values_list("module", flat=True)
-    )
+    task_list = await TaskInfo.get_modules(status=True)
     platform = PlatformUtils.get_platform(bot)
     try:
         bot_data, created = await BotConsole.get_or_create(

@@ -12,7 +12,7 @@ async def sort_type() -> dict[str, list[PluginInfo]]:
     """
     对插件按照菜单类型分类
     """
-    data = await PluginInfo.filter(
+    data = await PluginInfo.get_plugins(
         menu_type__not="",
         load_status=True,
         plugin_type__in=[PluginType.NORMAL, PluginType.DEPENDANT],

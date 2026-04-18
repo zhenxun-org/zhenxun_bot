@@ -104,7 +104,7 @@ class StoreManager:
         返回:
             list[str]: 已加载的插件
         """
-        return await PluginInfo.filter(load_status=True).values_list(*args)
+        return await PluginInfo.get_plugins_values_list(*args, load_status=True)
 
     @classmethod
     async def get_plugins_info(cls) -> list[BuildImage] | str:

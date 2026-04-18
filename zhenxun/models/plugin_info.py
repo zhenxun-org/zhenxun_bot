@@ -93,9 +93,55 @@ class PluginInfo(Model):
         await super().delete(*args, **kwargs)
         await PluginInfoMemoryCache.remove(module, module_path)
 
+    @staticmethod
+    def _supports_cached_filter(key: str) -> bool:
+        if "__" not in key:
+            return True
+        return key.rsplit("__", 1)[1] in {"in", "not", "not_in"}
+
+    @staticmethod
+    def _match_filter_value(current, operator: str, expected) -> bool:
+        if operator == "in":
+            return current in expected
+        if operator == "not":
+            return current != expected
+        if operator == "not_in":
+            return current not in expected
+        return current == expected
+
+    @classmethod
+    def _can_use_cached_filters(cls, filters: dict) -> bool:
+        return all(cls._supports_cached_filter(key) for key in filters)
+
+    @classmethod
+    async def _get_cached_plugins(cls) -> list[Self]:
+        plugins = await PluginInfoMemoryCache.get_all()
+        return sorted(
+            plugins.values(),
+            key=lambda item: (int(getattr(item, "id", 0) or 0), item.module or ""),
+        )
+
+    @classmethod
+    def _filter_cached_plugins(cls, plugins: list[Self], filters: dict) -> list[Self]:
+        result: list[Self] = []
+        for plugin in plugins:
+            matched = True
+            for key, expected in filters.items():
+                if "__" in key:
+                    field, operator = key.rsplit("__", 1)
+                else:
+                    field, operator = key, ""
+                current = getattr(plugin, field, None)
+                if not cls._match_filter_value(current, operator, expected):
+                    matched = False
+                    break
+            if matched:
+                result.append(plugin)
+        return result
+
     @classmethod
     async def get_plugin(
-        cls, load_status: bool = True, filter_parent: bool = True, **kwargs
+        cls, load_status: bool | None = True, filter_parent: bool = True, **kwargs
     ) -> Self | None:
         """获取插件列表
 
@@ -106,15 +152,14 @@ class PluginInfo(Model):
         返回:
             Self | None: 插件
         """
-        if not kwargs.get("plugin_type") and filter_parent:
-            return await cls.get_or_none(
-                load_status=load_status, plugin_type__not=PluginType.PARENT, **kwargs
-            )
-        return await cls.get_or_none(load_status=load_status, **kwargs)
+        plugins = await cls.get_plugins(
+            load_status=load_status, filter_parent=filter_parent, **kwargs
+        )
+        return plugins[0] if plugins else None
 
     @classmethod
     async def get_plugins(
-        cls, load_status: bool = True, filter_parent: bool = True, **kwargs
+        cls, load_status: bool | None = True, filter_parent: bool = True, **kwargs
     ) -> list[Self]:
         """获取插件列表
 
@@ -125,11 +170,38 @@ class PluginInfo(Model):
         返回:
             list[Self]: 插件列表
         """
-        if not kwargs.get("plugin_type") and filter_parent:
-            return await cls.filter(
-                load_status=load_status, plugin_type__not=PluginType.PARENT, **kwargs
-            ).all()
-        return await cls.filter(load_status=load_status, **kwargs).all()
+        filters = dict(kwargs)
+        if load_status is not None:
+            filters.setdefault("load_status", load_status)
+        if filter_parent and not any(key.startswith("plugin_type") for key in filters):
+            filters["plugin_type__not"] = PluginType.PARENT
+
+        if cls._can_use_cached_filters(filters):
+            plugins = await cls._get_cached_plugins()
+            return cls._filter_cached_plugins(plugins, filters)
+
+        return await cls.filter(**filters).all()
+
+    @classmethod
+    async def get_plugins_values_list(
+        cls,
+        *fields: str,
+        load_status: bool | None = True,
+        filter_parent: bool = True,
+        **kwargs,
+    ) -> list:
+        plugins = await cls.get_plugins(
+            load_status=load_status,
+            filter_parent=filter_parent,
+            **kwargs,
+        )
+        if len(fields) == 1:
+            field = fields[0]
+            return [getattr(plugin, field, None) for plugin in plugins]
+        return [
+            tuple(getattr(plugin, field, None) for field in fields)
+            for plugin in plugins
+        ]
 
     @classmethod
     async def _run_script(cls):

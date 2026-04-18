@@ -34,12 +34,16 @@ class ApiDataSource:
             list[PluginInfo]: 插件数据列表
         """
         plugin_list: list[PluginInfo] = []
-        query = DbPluginInfo
+        filters = {}
         if plugin_type:
-            query = query.filter(plugin_type__in=plugin_type, load_status=True)
+            filters["plugin_type__in"] = plugin_type
         if menu_type:
-            query = query.filter(menu_type=menu_type, load_status=True)
-        plugins = await query.all()
+            filters["menu_type"] = menu_type
+        plugins = await DbPluginInfo.get_plugins(
+            load_status=True,
+            filter_parent=False,
+            **filters,
+        )
         for plugin in plugins:
             plugin_info = PluginInfo(
                 id=plugin.id,

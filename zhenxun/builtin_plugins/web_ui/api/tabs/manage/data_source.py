@@ -36,7 +36,7 @@ class ApiDataSource:
         db_group = await GroupConsole.get_group_db(group.group_id) or GroupConsole(
             group_id=group.group_id
         )
-        task_list = await TaskInfo.all().values_list("module", flat=True)
+        task_list = await TaskInfo.get_modules(load_status=None)
         db_group.level = group.level
         db_group.status = group.status
         if group.close_plugins:
@@ -120,7 +120,11 @@ class ApiDataSource:
         )
         like_plugin = {}
         module_list = [x[0] for x in like_plugin_list]
-        plugins = await PluginInfo.filter(module__in=module_list).all()
+        plugins = await PluginInfo.get_plugins(
+            load_status=None,
+            filter_parent=False,
+            module__in=module_list,
+        )
         module2name = {p.module: p.name for p in plugins}
         for data in like_plugin_list:
             name = module2name.get(data[0]) or data[0]
@@ -213,26 +217,26 @@ class ApiDataSource:
         返回:
             list[Task]: 群组被动列表
         """
-        all_task = await TaskInfo.annotate().values_list("module", "name")
-        task_module2name = {x[0]: x[1] for x in all_task}
+        all_task = await TaskInfo.get_tasks(load_status=None)
+        task_module2name = {task.module: task.name for task in all_task}
         task_list = []
         if group.block_task or group.superuser_block_plugin:
             sbp = CommonUtils.convert_module_format(group.superuser_block_task)
             tasks = CommonUtils.convert_module_format(group.block_task)
             task_list.extend(
                 Task(
-                    name=task[0],
-                    zh_name=task_module2name.get(task[0]) or task[0],
-                    status=task[0] not in tasks and task[0] not in sbp,
-                    is_super_block=task[0] in sbp,
+                    name=task.module,
+                    zh_name=task_module2name.get(task.module) or task.module,
+                    status=task.module not in tasks and task.module not in sbp,
+                    is_super_block=task.module in sbp,
                 )
                 for task in all_task
             )
         else:
             task_list.extend(
                 Task(
-                    name=task[0],
-                    zh_name=task_module2name.get(task[0]) or task[0],
+                    name=task.module,
+                    zh_name=task_module2name.get(task.module) or task.module,
                     status=True,
                     is_super_block=False,
                 )

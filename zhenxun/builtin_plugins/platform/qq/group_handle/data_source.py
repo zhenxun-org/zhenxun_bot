@@ -103,7 +103,11 @@ class GroupManager:
             await group.save(update_fields=["group_flag"])
         else:
             block_plugin = ""
-            if plugin_list := await PluginInfo.filter(default_status=False).all():
+            if plugin_list := await PluginInfo.get_plugins(
+                load_status=None,
+                filter_parent=False,
+                default_status=False,
+            ):
                 for plugin in plugin_list:
                     block_plugin += f"<{plugin.module},"
             group_info = await _safe_get_group_info(bot, group_id)
