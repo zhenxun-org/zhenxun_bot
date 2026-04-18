@@ -258,14 +258,9 @@ def _patch_htmlrender_shutdown() -> None:
     if getattr(htmlrender_browser, "_zhenxun_shutdown_patched", False):
         return
 
-    original_shutdown_browser = getattr(htmlrender_browser, "shutdown_browser", None)
-
     async def _patched_shutdown_browser() -> None:
         if _HTMLRENDER_TASK_TRACKER.is_draining:
             await _HTMLRENDER_TASK_TRACKER.wait_for_idle()
-        if callable(original_shutdown_browser):
-            await _await_if_needed(original_shutdown_browser())
-            return
         await _shutdown_browser_instance()
 
     setattr(htmlrender_browser, "shutdown_browser", _patched_shutdown_browser)
