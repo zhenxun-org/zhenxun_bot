@@ -4158,6 +4158,7 @@ dependencies = [
     { name = "aiocache", extra = ["redis"] },
     { name = "aiofiles" },
     { name = "alibabacloud-devops20210625" },
+    { name = "asyncpg" },
     { name = "beautifulsoup4" },
     { name = "cattrs" },
     { name = "cn2an" },
@@ -4185,6 +4186,7 @@ dependencies = [
     { name = "pytest-timeout" },
     { name = "python-jose", extra = ["cryptography"] },
     { name = "python-multipart" },
+    { name = "redis" },
     { name = "retrying" },
     { name = "ruamel-yaml" },
     { name = "strenum" },
@@ -4192,14 +4194,6 @@ dependencies = [
     { name = "tortoise-orm" },
     { name = "ujson" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
-]
-
-[package.optional-dependencies]
-postgresql = [
-    { name = "asyncpg" },
-]
-redis = [
-    { name = "redis" },
 ]
 
 [package.dev-dependencies]
@@ -4219,7 +4213,7 @@ requires-dist = [
     { name = "aiocache", extras = ["redis"], specifier = ">=0.12.3" },
     { name = "aiofiles", specifier = ">=23.2.1" },
     { name = "alibabacloud-devops20210625", specifier = ">=5.0.2,<6.0.0" },
-    { name = "asyncpg", marker = "extra == 'postgresql'", specifier = ">=0.20.0" },
+    { name = "asyncpg", specifier = ">=0.20.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.3,<5.0.0" },
     { name = "cattrs", specifier = ">=23.2.3,<24.0.0" },
     { name = "cn2an", specifier = ">=0.5.22,<0.6.0" },
@@ -4247,7 +4241,7 @@ requires-dist = [
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3.0,<4.0.0" },
     { name = "python-multipart", specifier = ">=0.0.9,<0.1.0" },
-    { name = "redis", marker = "extra == 'redis'", specifier = ">=5" },
+    { name = "redis", specifier = ">=5" },
     { name = "retrying", specifier = ">=1.3.4,<2.0.0" },
     { name = "ruamel-yaml", specifier = ">=0.18.5" },
     { name = "strenum", specifier = ">=0.4.15,<0.5.0" },
@@ -4256,7 +4250,6 @@ requires-dist = [
     { name = "ujson", specifier = ">=5.9.0" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0" },
 ]
-provides-extras = ["redis", "postgresql"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -9,6 +9,15 @@ Zhenxun Bot - 核心服务模块
 - 定时任务调度器 (scheduler): 提供持久化的、可管理的定时任务服务。
 """
 
+from nonebot import require
+
+require("nonebot_plugin_apscheduler")
+require("nonebot_plugin_alconna")
+require("nonebot_plugin_session")
+require("nonebot_plugin_htmlrender")
+require("nonebot_plugin_uninfo")
+require("nonebot_plugin_waiter")
+
 from .avatar_service import avatar_service
 from .db_context import Model, disconnect, with_db_timeout
 from .group_settings_service import group_settings_service

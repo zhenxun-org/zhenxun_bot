@@ -33,6 +33,8 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0,<4.0.0",
     "python-multipart>=0.0.9,<0.1.0",
     "aiocache[redis]>=0.12.3",
+    "asyncpg>=0.20.0",
+    "redis>=5",
     "py-cpuinfo>=9.0.0,<10.0.0",
     "nonebot-plugin-alconna>=0.56.0",
     "tenacity>=9.0.0,<10.0.0",
@@ -44,10 +46,6 @@ dependencies = [
     "uvloop>=0.21.0; sys_platform != 'win32'",
     "pytest-timeout>=2.4.0",
 ]
-
-[project.optional-dependencies]
-redis = ["redis>=5"]
-postgresql = ["asyncpg>=0.20.0"]
 
 [project.scripts]
 zx = "zhenxun.cli:main"
