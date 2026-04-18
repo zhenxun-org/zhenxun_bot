@@ -1,5 +1,4 @@
 from typing import ClassVar
-from typing_extensions import Self
 
 from tortoise import fields
 
@@ -114,7 +113,7 @@ class PluginInfo(Model):
         return all(cls._supports_cached_filter(key) for key in filters)
 
     @classmethod
-    async def _get_cached_plugins(cls) -> list[Self]:
+    async def _get_cached_plugins(cls) -> list["PluginInfo"]:
         plugins = await PluginInfoMemoryCache.get_all()
         return sorted(
             plugins.values(),
@@ -122,8 +121,10 @@ class PluginInfo(Model):
         )
 
     @classmethod
-    def _filter_cached_plugins(cls, plugins: list[Self], filters: dict) -> list[Self]:
-        result: list[Self] = []
+    def _filter_cached_plugins(
+        cls, plugins: list["PluginInfo"], filters: dict
+    ) -> list["PluginInfo"]:
+        result: list["PluginInfo"] = []
         for plugin in plugins:
             matched = True
             for key, expected in filters.items():
@@ -142,7 +143,7 @@ class PluginInfo(Model):
     @classmethod
     async def get_plugin(
         cls, load_status: bool | None = True, filter_parent: bool = True, **kwargs
-    ) -> Self | None:
+    ) -> "PluginInfo | None":
         """获取插件列表
 
         参数:
@@ -160,7 +161,7 @@ class PluginInfo(Model):
     @classmethod
     async def get_plugins(
         cls, load_status: bool | None = True, filter_parent: bool = True, **kwargs
-    ) -> list[Self]:
+    ) -> list["PluginInfo"]:
         """获取插件列表
 
         参数:
@@ -180,7 +181,7 @@ class PluginInfo(Model):
             plugins = await cls._get_cached_plugins()
             return cls._filter_cached_plugins(plugins, filters)
 
-        return await cls.filter(**filters).all()
+        return await PluginInfo.filter(**filters).all()
 
     @classmethod
     async def get_plugins_values_list(
