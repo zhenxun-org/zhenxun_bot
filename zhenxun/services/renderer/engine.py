@@ -24,6 +24,75 @@ _LOOP_EXCEPTION_FILTER_STATE_ATTR = "_zhenxun_playwright_exception_filter_state"
 _DISCONNECT_SUPPRESSION_WINDOW_SECONDS = 10.0
 
 
+class HtmlrenderTaskTracker:
+    """只追踪 htmlrender 渲染任务的轻量运行时。"""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._idle_event = asyncio.Event()
+        self._idle_event.set()
+        self._active_tasks = 0
+        self._draining = False
+        self._drain_reason: str | None = None
+
+    @property
+    def active_tasks(self) -> int:
+        return self._active_tasks
+
+    @property
+    def is_draining(self) -> bool:
+        return self._draining
+
+    async def reset(self) -> None:
+        async with self._lock:
+            self._draining = False
+            self._drain_reason = None
+            if self._active_tasks == 0:
+                self._idle_event.set()
+
+    async def resume(self) -> None:
+        async with self._lock:
+            self._draining = False
+            self._drain_reason = None
+
+    async def mark_draining(self, reason: str) -> None:
+        async with self._lock:
+            self._draining = True
+            self._drain_reason = reason
+
+    async def begin(self, owner: str) -> None:
+        async with self._lock:
+            if self._draining:
+                reason = self._drain_reason or "unknown"
+                message = (
+                    "htmlrender 正在排空，拒绝新的渲染任务: "
+                    f"owner={owner}, reason={reason}"
+                )
+                raise RuntimeError(message)
+            self._active_tasks += 1
+            self._idle_event.clear()
+
+    async def end(self) -> None:
+        async with self._lock:
+            self._active_tasks = max(0, self._active_tasks - 1)
+            if self._active_tasks == 0:
+                self._idle_event.set()
+
+    async def wait_for_idle(self) -> None:
+        await self._idle_event.wait()
+
+    @contextlib.asynccontextmanager
+    async def track(self, owner: str):
+        await self.begin(owner)
+        try:
+            yield
+        finally:
+            await self.end()
+
+
+_HTMLRENDER_TASK_TRACKER = HtmlrenderTaskTracker()
+
+
 async def _await_if_needed(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await cast(Awaitable[Any], value)
@@ -137,11 +206,45 @@ async def _shutdown_browser_instance() -> None:
         await asyncio.sleep(0)
 
 
+def _patch_htmlrender_task_tracking() -> None:
+    if getattr(htmlrender_browser, "_zhenxun_task_tracking_patched", False):
+        return
+
+    try:
+        import nonebot_plugin_htmlrender.data_source as htmlrender_data_source
+    except Exception as e:
+        logger.warning("导入 htmlrender.data_source 失败，跳过任务追踪补丁。", e=e)
+        return
+
+    original_get_new_page = getattr(htmlrender_browser, "get_new_page", None)
+    if not callable(original_get_new_page):
+        logger.warning("htmlrender 未提供 get_new_page，跳过任务追踪补丁。")
+        return
+
+    @contextlib.asynccontextmanager
+    async def _tracked_get_new_page(*args: Any, **kwargs: Any):
+        async with _HTMLRENDER_TASK_TRACKER.track("htmlrender"):
+            async with original_get_new_page(*args, **kwargs) as page:
+                yield page
+
+    setattr(htmlrender_browser, "get_new_page", _tracked_get_new_page)
+    setattr(htmlrender_module, "get_new_page", _tracked_get_new_page)
+    setattr(htmlrender_data_source, "get_new_page", _tracked_get_new_page)
+    setattr(htmlrender_browser, "_zhenxun_task_tracking_patched", True)
+
+
 def _patch_htmlrender_shutdown() -> None:
     if getattr(htmlrender_browser, "_zhenxun_shutdown_patched", False):
         return
 
+    original_shutdown_browser = getattr(htmlrender_browser, "shutdown_browser", None)
+
     async def _patched_shutdown_browser() -> None:
+        if _HTMLRENDER_TASK_TRACKER.is_draining:
+            await _HTMLRENDER_TASK_TRACKER.wait_for_idle()
+        if callable(original_shutdown_browser):
+            await _await_if_needed(original_shutdown_browser())
+            return
         await _shutdown_browser_instance()
 
     setattr(htmlrender_browser, "shutdown_browser", _patched_shutdown_browser)
@@ -150,6 +253,7 @@ def _patch_htmlrender_shutdown() -> None:
 
 
 def _patch_playwright_env_check_once() -> None:
+    _patch_htmlrender_task_tracking()
     _patch_htmlrender_shutdown()
     if getattr(htmlrender_browser, "_zhenxun_check_once_patched", False):
         return
@@ -394,6 +498,7 @@ class PlaywrightEngine(BaseScreenshotEngine):
             if current_rss := self._get_total_rss():
                 self._rss_baseline_bytes = current_rss
             self._idle_recycle_task = asyncio.create_task(self._idle_recycle_loop())
+        await _HTMLRENDER_TASK_TRACKER.reset()
         # 浏览器在首次 _acquire_context 时按需启动，无需预热
 
     async def close(self) -> None:
@@ -402,21 +507,32 @@ class PlaywrightEngine(BaseScreenshotEngine):
             self._closing = True
             idle_task = self._idle_recycle_task
             self._idle_recycle_task = None
-            for task in self._inflight_tasks.values():
-                task.cancel()
-            self._inflight_tasks.clear()
             self._recent_results.clear()
             self._recycle_pending = False
+
+        await _HTMLRENDER_TASK_TRACKER.mark_draining("engine_close")
 
         if idle_task:
             idle_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await idle_task
 
+        await _HTMLRENDER_TASK_TRACKER.wait_for_idle()
+
+        async with self._state_lock:
+            inflight_tasks = list(self._inflight_tasks.values())
+
+        if inflight_tasks:
+            await asyncio.gather(*inflight_tasks, return_exceptions=True)
+
+        async with self._state_lock:
+            self._inflight_tasks.clear()
+
         await self._dispose_context_pool()
         await _shutdown_browser_instance()
 
     async def _on_render_begin(self) -> None:
+        await _HTMLRENDER_TASK_TRACKER.begin("zhenxun_renderer")
         async with self._state_lock:
             self._active_renders += 1
 
@@ -428,10 +544,11 @@ class PlaywrightEngine(BaseScreenshotEngine):
             now = time.monotonic()
             self._last_render_finished_at = now
             self._mark_recycle_if_needed_nolock(now)
-            if self._recycle_pending and self._active_renders == 0:
+            if self._recycle_pending and _HTMLRENDER_TASK_TRACKER.active_tasks == 0:
                 self._recycle_pending = False
                 self._last_recycle_at = now
                 should_recycle = True
+        await _HTMLRENDER_TASK_TRACKER.end()
         if should_recycle:
             await self._recycle_browser("active")
 
@@ -862,6 +979,8 @@ class PlaywrightEngine(BaseScreenshotEngine):
     async def _recycle_browser(self, reason: str) -> None:
         async with self._recycle_lock:
             try:
+                await _HTMLRENDER_TASK_TRACKER.mark_draining(f"recycle:{reason}")
+                await _HTMLRENDER_TASK_TRACKER.wait_for_idle()
                 await self._dispose_context_pool()
                 await _shutdown_browser_instance()
                 current_rss = self._get_total_rss()
@@ -874,6 +993,9 @@ class PlaywrightEngine(BaseScreenshotEngine):
                 )
             except Exception as e:
                 logger.warning("浏览器实例重建失败。", "PlaywrightEngine", e=e)
+            finally:
+                if not self._closing:
+                    await _HTMLRENDER_TASK_TRACKER.resume()
 
     async def _prewarm_browser_and_pool(self) -> None:
         if self._closing:
@@ -931,7 +1053,7 @@ class PlaywrightEngine(BaseScreenshotEngine):
                 if self._closing:
                     return
                 now = time.monotonic()
-                if self._active_renders > 0:
+                if _HTMLRENDER_TASK_TRACKER.active_tasks > 0:
                     continue
                 if now - self._last_recycle_at < self._RECYCLE_COOLDOWN_SECONDS:
                     continue
@@ -977,6 +1099,9 @@ class PlaywrightEngine(BaseScreenshotEngine):
         return result
 
     async def render(self, html: str, base_url_path: Path, **render_options) -> bytes:
+        if self._closing or _HTMLRENDER_TASK_TRACKER.is_draining:
+            raise RuntimeError("截图引擎正在排空/关闭，暂不接受新的渲染任务。")
+
         base_url_for_browser = self._normalize_base_url(base_url_path)
 
         final_render_options = {
