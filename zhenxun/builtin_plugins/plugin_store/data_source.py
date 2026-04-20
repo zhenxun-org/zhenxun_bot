@@ -129,21 +129,9 @@ class StoreManager:
             dict[str, str]: 模块 -> 版本
         """
         db_plugin_list = await PluginInfo.get_plugins_values_list(
-            "module", "version", load_status=None
+            "module", "version", load_status=True, filter_parent=False
         )
-        installed_plugins = {p[0]: (p[1] or "0.1") for p in db_plugin_list}
-        plugin_list, extra_plugin_list = await cls.get_data()
-        for plugin_info in plugin_list:
-            if plugin_info.module not in installed_plugins and cls._is_plugin_installed(
-                plugin_info, is_external=False
-            ):
-                installed_plugins[plugin_info.module] = plugin_info.version or "0.1"
-        for plugin_info in extra_plugin_list:
-            if plugin_info.module not in installed_plugins and cls._is_plugin_installed(
-                plugin_info, is_external=True
-            ):
-                installed_plugins[plugin_info.module] = plugin_info.version or "0.1"
-        return installed_plugins
+        return {p[0]: (p[1] or "0.1") for p in db_plugin_list}
 
     @classmethod
     async def get_plugins_info(cls) -> list[BuildImage] | str:
@@ -274,19 +262,16 @@ class StoreManager:
                     is_dir=_path.is_dir(),
                 )
                 is_external = True
-            installed_by_files = cls._is_plugin_installed(
-                plugin_info, is_external=is_external
-            )
-            if plugin_info.module not in installed_modules and not installed_by_files:
+            if plugin_info.module not in installed_modules:
                 raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法移除")
             if plugin_obj := await PluginInfo.get_plugin(
                 module=plugin_info.module,
                 plugin_type=PluginType.PARENT,
-                load_status=None,
+                load_status=True,
             ):
                 plugin_info.module_path = plugin_obj.module_path
             elif plugin_obj := await PluginInfo.get_plugin(
-                module=plugin_info.module, load_status=None
+                module=plugin_info.module, load_status=True
             ):
                 plugin_info.module_path = plugin_obj.module_path
             return plugin_info, is_external
@@ -295,16 +280,11 @@ class StoreManager:
             raise PluginStoreException(f"插件不存在: {plugin_key}")
 
         if is_update:
-            installed_by_files = cls._is_plugin_installed(
-                plugin_info, is_external=is_external
-            )
-            if plugin_info.module not in installed_modules and not installed_by_files:
+            if plugin_info.module not in installed_modules:
                 raise PluginStoreException(f"插件 {plugin_info.name} 未安装，无法更新")
             return plugin_info, is_external
 
-        if plugin_info.module in installed_modules or cls._is_plugin_installed(
-            plugin_info, is_external=is_external
-        ):
+        if plugin_info.module in installed_modules:
             raise PluginStoreException(f"插件 {plugin_info.name} 已安装，无需重复安装")
 
         return plugin_info, is_external

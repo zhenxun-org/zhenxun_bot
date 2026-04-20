@@ -1,4 +1,6 @@
 from nonebot.adapters import Bot, Event
+from nonebot.adapters.onebot.v11 import Bot as OneBotV11Bot
+from nonebot.adapters.onebot.v12 import Bot as OneBotV12Bot
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 from nonebot_plugin_alconna import Alconna, Arparma, on_alconna
@@ -48,18 +50,27 @@ def reply_check() -> Rule:
 _matcher = on_alconna(Alconna("撤回"), priority=5, block=True, rule=reply_check())
 
 
+def _resolve_delete_message_id(bot: Bot, reply_id: str | int):
+    if isinstance(bot, OneBotV11Bot):
+        return int(reply_id)
+    if isinstance(bot, OneBotV12Bot):
+        return str(reply_id)
+    return reply_id
+
+
 @_matcher.handle()
 async def _(bot: Bot, event: Event, session: Uninfo, arparma: Arparma):
     if reply := await reply_fetch(event, bot):
+        message_id = _resolve_delete_message_id(bot, reply.id)
         if session.user.id in bot.config.superusers:
             try:
-                await bot.delete_msg(message_id=reply.id)
+                await bot.delete_msg(message_id=message_id)
                 logger.info("撤回消息", arparma.header_result, session=session)
             except Exception:
                 await MessageUtils.build_message("撤回失败，可能消息已过期...").send()
         elif MessageManager.check(session.user.id, reply.id):
             try:
-                await bot.delete_msg(message_id=reply.id)
+                await bot.delete_msg(message_id=message_id)
                 logger.info("撤回消息", arparma.header_result, session=session)
             except Exception:
                 await MessageUtils.build_message("撤回失败，可能消息已过期...").send()

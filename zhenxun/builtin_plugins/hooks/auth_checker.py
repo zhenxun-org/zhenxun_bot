@@ -462,14 +462,26 @@ def _matcher_route_cache_key(event: Event) -> str:
 
 
 def _event_plain_text(event: Event) -> str:
+    def _normalize(text: str) -> str:
+        normalized = text.strip()
+        if not normalized:
+            return ""
+        # strip leading placeholders like "[reply:id=10004]撤回"
+        normalized = re.sub(
+            r"^(?:\s*(?:\[[^\]]*]|\<[^>]*>))+\s*",
+            "",
+            normalized,
+        )
+        return normalized.strip()
+
     with contextlib.suppress(Exception):
         # Use raw_message if available (OneBot v11) to get the original text
         # before nickname stripping. This ensures command matching works correctly
         # for commands like "真寻日报" when "真寻" is a bot nickname.
         raw = getattr(event, "raw_message", None)
         if isinstance(raw, str) and raw:
-            return raw.strip()
-        return (event.get_plaintext() or "").strip()
+            return _normalize(raw)
+        return _normalize(event.get_plaintext() or "")
     return ""
 
 
