@@ -12,10 +12,10 @@ from zhenxun.utils.message import MessageUtils
 
 __plugin_meta__ = PluginMetadata(
     name="好友群组列表",
-    description="查看好友群组列表以",
+    description="查看好友/群组列表",
     usage="""
-        查看所有好友
-        查看所有群组
+        好友列表
+        群组列表
     """.strip(),
     extra=PluginExtraData(
         author="HibiKier",
