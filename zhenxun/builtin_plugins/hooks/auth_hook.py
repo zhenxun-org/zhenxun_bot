@@ -1,4 +1,3 @@
-import asyncio
 import contextlib
 import time
 
@@ -30,13 +29,6 @@ from .auth_checker import (
 
 _SKIP_AUTH_PLUGINS = {"chat_history", "chat_message"}
 _BOT_CONNECT_TS: float | None = None
-_AUTH_QUEUE_MAXSIZE = 200
-_AUTH_QUEUE: asyncio.Queue[tuple[Matcher, Event, Bot, Uninfo, UniMsg | None]] = (
-    asyncio.Queue(maxsize=_AUTH_QUEUE_MAXSIZE)
-)
-_AUTH_QUEUE_STARTED = False
-_AUTH_WORKERS: list[asyncio.Task] = []
-_LAST_DROP_LOG = 0.0
 
 driver = get_driver()
 register_runtime_bootstrap(driver)
@@ -47,27 +39,6 @@ async def _mark_bot_connected(bot: Bot):
     del bot
     global _BOT_CONNECT_TS
     _BOT_CONNECT_TS = time.time()
-
-
-async def _auth_worker(worker_id: int) -> None:
-    while True:
-        matcher, event, bot, session, message = await _AUTH_QUEUE.get()
-        try:
-            await auth(
-                matcher,
-                event,
-                bot,
-                session,
-                message,
-                skip_ban=True,
-            )
-        except IgnoredException:
-            pass
-        except Exception as exc:
-            if not is_overloaded():
-                logger.error("async auth failed", LOGGER_COMMAND, e=exc)
-        finally:
-            _AUTH_QUEUE.task_done()
 
 
 def _extract_plain_text(message: UniMsg | None, event: Event) -> str:
@@ -82,33 +53,12 @@ def _extract_plain_text(message: UniMsg | None, event: Event) -> str:
 
 
 @driver.on_startup
-async def _start_auth_queue():
-    global _AUTH_QUEUE_STARTED
-    if _AUTH_QUEUE_STARTED:
-        return
-    _AUTH_QUEUE_STARTED = True
-    worker_count = max(1, min(6, _AUTH_QUEUE_MAXSIZE // 50))
-    for idx in range(worker_count):
-        _AUTH_WORKERS.append(asyncio.create_task(_auth_worker(idx)))
+async def _start_auth_runtime_tasks():
     await start_auth_runtime_tasks()
 
 
 @driver.on_shutdown
-async def _stop_auth_queue():
-    global _AUTH_QUEUE_STARTED
-    _AUTH_QUEUE_STARTED = False
-    workers = _AUTH_WORKERS.copy()
-    _AUTH_WORKERS.clear()
-    for task in workers:
-        task.cancel()
-    if workers:
-        await asyncio.gather(*workers, return_exceptions=True)
-
-    while not _AUTH_QUEUE.empty():
-        with contextlib.suppress(Exception):
-            _AUTH_QUEUE.get_nowait()
-            _AUTH_QUEUE.task_done()
-
+async def _stop_auth_runtime_tasks():
     await stop_auth_runtime_tasks()
 
 

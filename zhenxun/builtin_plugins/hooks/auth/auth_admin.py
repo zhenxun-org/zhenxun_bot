@@ -11,7 +11,6 @@ from zhenxun.utils.utils import get_entity_ids
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .exception import SkipPluginException
-from .utils import send_message
 
 
 async def auth_admin(
@@ -51,29 +50,24 @@ async def auth_admin(
             user_level = max(user_level, group_users.user_level)
 
             if user_level < plugin.admin_level:
-                await send_message(
-                    session,
-                    [
+                raise SkipPluginException(
+                    f"{plugin.name}({plugin.module}) 管理员权限不足...",
+                    tip_message=[
                         At(flag="user", target=session.user.id),
                         f"你的权限不足喔，该功能需要的权限等级: {plugin.admin_level}",
                     ],
-                    entity.user_id,
-                    background=True,
-                )
-
-                raise SkipPluginException(
-                    f"{plugin.name}({plugin.module}) 管理员权限不足..."
+                    tip_check_tag=entity.user_id,
+                    tip_background=True,
                 )
         elif global_user:
             if global_user.user_level < plugin.admin_level:
-                await send_message(
-                    session,
-                    f"你的权限不足喔，该功能需要的权限等级: {plugin.admin_level}",
-                    background=True,
-                )
-
                 raise SkipPluginException(
-                    f"{plugin.name}({plugin.module}) 管理员权限不足..."
+                    f"{plugin.name}({plugin.module}) 管理员权限不足...",
+                    tip_message=(
+                        f"你的权限不足喔，该功能需要的权限等级: "
+                        f"{plugin.admin_level}"
+                    ),
+                    tip_background=True,
                 )
     finally:
         # 记录执行时间

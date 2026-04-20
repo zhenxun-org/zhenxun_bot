@@ -158,7 +158,7 @@ async def _():
     #     if limit_create:
     #         await PluginLimit.bulk_create(limit_create, 10)
     await PluginInfo.filter(module_path__in=load_plugin).update(load_status=True)
-    await PluginInfo.filter(module_path__not_in=load_plugin).delete()
+    await PluginInfo.filter(module_path__not_in=load_plugin).update(load_status=False)
     from zhenxun.services.cache.runtime_cache import PluginInfoMemoryCache
 
     await PluginInfoMemoryCache.refresh()

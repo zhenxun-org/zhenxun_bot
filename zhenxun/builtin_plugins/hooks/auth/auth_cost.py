@@ -8,7 +8,6 @@ from zhenxun.services.log import logger
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .exception import SkipPluginException
-from .utils import send_message
 
 DEFAULT_GOLD = 100
 
@@ -32,8 +31,10 @@ async def auth_cost(
         user_gold = user.gold if user else DEFAULT_GOLD
         if user_gold < plugin.cost_gold:
             """插件消耗金币不足"""
-            await send_message(session, f"金币不足..该功能需要{plugin.cost_gold}金币..")
-            raise SkipPluginException(f"{plugin.name}({plugin.module}) 金币限制...")
+            raise SkipPluginException(
+                f"{plugin.name}({plugin.module}) 金币限制...",
+                tip_message=f"金币不足..该功能需要{plugin.cost_gold}金币..",
+            )
         return plugin.cost_gold
     finally:
         # 记录执行时间

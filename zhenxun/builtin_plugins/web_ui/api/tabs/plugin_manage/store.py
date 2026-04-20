@@ -3,7 +3,6 @@ from fastapi.responses import JSONResponse
 from nonebot import require
 from nonebot.compat import model_dump
 
-from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.services.log import logger
 
 from ....base_model import Result
@@ -30,7 +29,7 @@ async def _() -> Result[dict]:
             {**model_dump(plugin), "name": plugin.name, "id": idx}
             for idx, plugin in enumerate(plugin_list + extra_plugin_list)
         ]
-        modules = await PluginInfo.get_plugins_values_list("module", load_status=True)
+        modules = list((await StoreManager.get_installed_plugins()).keys())
         return Result.ok({"install_module": modules, "plugin_list": plugin_list})
     except Exception as e:
         logger.error("获取插件商店插件信息失败", "WebUi", e=e)

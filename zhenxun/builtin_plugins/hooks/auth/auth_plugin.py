@@ -11,7 +11,7 @@ from zhenxun.utils.enum import BlockType
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .exception import IsSuperuserException, SkipPluginException
-from .utils import freq, is_poke, send_message
+from .utils import freq, is_poke
 
 
 def _get_group_block_sets(
@@ -59,46 +59,41 @@ class GroupCheck:
                     self.group_data
                     and self.plugin.module in self.superuser_block_plugin_set
                 ):
-                    if freq.is_send_limit_message(
+                    should_tip = freq.is_send_limit_message(
                         self.plugin, self.group_id, self.is_poke
-                    ):
-                        await send_message(
-                            self.session,
-                            "超级管理员禁用了该群此功能...",
-                            self.group_id,
-                            background=True,
-                        )
+                    )
                     raise SkipPluginException(
                         f"{self.plugin.name}({self.plugin.module})"
-                        f" 超级管理员禁用了该群此功能..."
+                        f" 超级管理员禁用了该群此功能...",
+                        tip_message=(
+                            "超级管理员禁用了该群此功能..." if should_tip else None
+                        ),
+                        tip_check_tag=self.group_id if should_tip else None,
+                        tip_background=should_tip,
                     )
 
                 # 检查普通禁用
                 if self.group_data and self.plugin.module in self.block_plugin_set:
-                    if freq.is_send_limit_message(
+                    should_tip = freq.is_send_limit_message(
                         self.plugin, self.group_id, self.is_poke
-                    ):
-                        await send_message(
-                            self.session,
-                            "该群未开启此功能...",
-                            self.group_id,
-                            background=True,
-                        )
+                    )
                     raise SkipPluginException(
-                        f"{self.plugin.name}({self.plugin.module}) 未开启此功能..."
+                        f"{self.plugin.name}({self.plugin.module}) 未开启此功能...",
+                        tip_message="该群未开启此功能..." if should_tip else None,
+                        tip_check_tag=self.group_id if should_tip else None,
+                        tip_background=should_tip,
                     )
 
             # 检查全局禁用
             if self.plugin.block_type == BlockType.GROUP:
-                if freq.is_send_limit_message(self.plugin, self.group_id, self.is_poke):
-                    await send_message(
-                        self.session,
-                        "该功能在群组中已被禁用...",
-                        self.group_id,
-                        background=True,
-                    )
+                should_tip = freq.is_send_limit_message(
+                    self.plugin, self.group_id, self.is_poke
+                )
                 raise SkipPluginException(
-                    f"{self.plugin.name}({self.plugin.module})该插件在群组中已被禁用..."
+                    f"{self.plugin.name}({self.plugin.module})该插件在群组中已被禁用...",
+                    tip_message="该功能在群组中已被禁用..." if should_tip else None,
+                    tip_check_tag=self.group_id if should_tip else None,
+                    tip_background=should_tip,
                 )
         finally:
             # 记录执行时间
@@ -131,14 +126,14 @@ class PluginCheck:
             IgnoredException: 忽略插件
         """
         if plugin.block_type == BlockType.PRIVATE:
-            if freq.is_send_limit_message(plugin, self.session.user.id, self.is_poke):
-                await send_message(
-                    self.session,
-                    "该功能在私聊中已被禁用...",
-                    background=True,
-                )
+            should_tip = freq.is_send_limit_message(
+                plugin, self.session.user.id, self.is_poke
+            )
             raise SkipPluginException(
-                f"{plugin.name}({plugin.module}) 该插件在私聊中已被禁用..."
+                f"{plugin.name}({plugin.module}) 该插件在私聊中已被禁用...",
+                tip_message="该功能在私聊中已被禁用..." if should_tip else None,
+                tip_check_tag=self.session.user.id if should_tip else None,
+                tip_background=should_tip,
             )
 
     async def check_global(self, plugin: PluginInfo):
@@ -159,15 +154,12 @@ class PluginCheck:
                 raise IsSuperuserException()
 
             sid = self.group_id or self.session.user.id
-            if freq.is_send_limit_message(plugin, sid, self.is_poke):
-                await send_message(
-                    self.session,
-                    "全局未开启此功能...",
-                    sid,
-                    background=True,
-                )
+            should_tip = freq.is_send_limit_message(plugin, sid, self.is_poke)
             raise SkipPluginException(
-                f"{plugin.name}({plugin.module}) 全局未开启此功能..."
+                f"{plugin.name}({plugin.module}) 全局未开启此功能...",
+                tip_message="全局未开启此功能..." if should_tip else None,
+                tip_check_tag=sid if should_tip else None,
+                tip_background=should_tip,
             )
         finally:
             # 记录执行时间

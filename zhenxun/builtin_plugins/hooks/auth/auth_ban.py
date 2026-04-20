@@ -1,7 +1,6 @@
 import asyncio
 import time
 
-from nonebot.adapters import Bot
 from nonebot.matcher import Matcher
 from nonebot_plugin_alconna import At
 from nonebot_plugin_uninfo import Uninfo
@@ -18,7 +17,7 @@ from zhenxun.utils.utils import EntityIDs, get_entity_ids
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .exception import SkipPluginException
-from .utils import freq, send_message
+from .utils import freq
 
 Config.add_plugin_config(
     "hook",
@@ -189,20 +188,15 @@ async def user_handle(plugin: PluginInfo, entity: EntityIDs, session: Uninfo) ->
             and ban_result
             and freq.is_send_limit_message(plugin, entity.user_id, False)
         ):
-            try:
-                await asyncio.wait_for(
-                    send_message(
-                        session,
-                        [
-                            At(flag="user", target=entity.user_id),
-                            f"{ban_result}\n在..在 {time_str} 后才会理你喔",
-                        ],
-                        entity.user_id,
-                    ),
-                    timeout=DB_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"发送消息超时: {entity.user_id}", LOGGER_COMMAND)
+            raise SkipPluginException(
+                "用户处于黑名单中...",
+                tip_message=[
+                    At(flag="user", target=entity.user_id),
+                    f"{ban_result}\n在..在 {time_str} 后才会理你喔",
+                ],
+                tip_check_tag=entity.user_id,
+                tip_timeout=DB_TIMEOUT_SECONDS,
+            )
         raise SkipPluginException("用户处于黑名单中...")
     finally:
         # 记录执行时间
@@ -217,16 +211,16 @@ async def user_handle(plugin: PluginInfo, entity: EntityIDs, session: Uninfo) ->
 
 async def auth_ban(
     matcher: Matcher,
-    bot: Bot,
     session: Uninfo,
     plugin: PluginInfo,
+    *,
     entity: EntityIDs | None = None,
+    is_superuser: bool = False,
 ) -> None:
     """权限检查 - ban 检查
 
     参数:
         matcher: Matcher
-        bot: Bot
         session: Uninfo
     """
     start_time = time.time()
@@ -237,7 +231,7 @@ async def auth_ban(
             return
         if entity is None:
             entity = get_entity_ids(session)
-        if entity.user_id in bot.config.superusers:
+        if is_superuser:
             return
         if entity.group_id:
             try:

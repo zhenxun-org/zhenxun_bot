@@ -36,7 +36,7 @@ from zhenxun.utils.platform import PlatformUtils
 from zhenxun.utils.utils import get_entity_ids
 
 from .auth.auth_admin import auth_admin
-from .auth.auth_ban import auth_ban, is_ban
+from .auth.auth_ban import auth_ban
 from .auth.auth_bot import auth_bot
 from .auth.auth_cost import auth_cost
 from .auth.auth_group import auth_group
@@ -49,6 +49,7 @@ from .auth.exception import (
     PermissionExemption,
     SkipPluginException,
 )
+from .auth.utils import send_message
 
 AUTH_HOOKS_CONCURRENCY_LIMIT = 5
 AUTH_DB_CONCURRENCY_LIMIT = 6
@@ -1028,12 +1029,6 @@ async def _fetch_user_readonly(
     )
 
 
-async def _fetch_plugin(plugin_dao: DataAccess, module: str) -> PluginInfo | None:
-    return await with_timeout(
-        plugin_dao.safe_get_or_none(module=module), name="get_plugin"
-    )
-
-
 async def get_plugin_and_user(
     module: str,
     user_id: str,
@@ -1078,7 +1073,11 @@ async def get_plugin_and_user(
 
 
 async def get_plugin_cost(
-    bot: Bot, user: UserConsole | None, plugin: PluginInfo, session: Uninfo
+    user: UserConsole | None,
+    plugin: PluginInfo,
+    session: Uninfo,
+    *,
+    is_superuser: bool = False,
 ) -> int:
     """获取插件费用
 
@@ -1096,7 +1095,7 @@ async def get_plugin_cost(
         int: 调用插件金币费用
     """
     cost_gold = await with_timeout(auth_cost(user, plugin, session), name="auth_cost")
-    if session.user.id in bot.config.superusers:
+    if is_superuser:
         if plugin.plugin_type == PluginType.SUPERUSER:
             raise IsSuperuserException()
         if not plugin.limit_superuser:
@@ -1184,30 +1183,6 @@ async def _leave_hooks_section():
     HOOKS_ACTIVE_COUNT = max(HOOKS_ACTIVE_COUNT - 1, 0)
 
 
-async def auth_ban_fast(
-    matcher: Matcher, event: Event, bot: Bot, session: Uninfo
-) -> None:
-    """快速 ban 检测（仅使用内存缓存），用于前置快速裁决。"""
-    entity = get_entity_ids(session)
-    event_cache = _get_event_cache(event, session, entity)
-    if event_cache is not None and event_cache.get("ban_state") is True:
-        raise SkipPluginException("user or group banned (cached)")
-    if entity.user_id in bot.config.superusers:
-        if event_cache is not None:
-            event_cache["ban_state"] = False
-        return
-    if entity.group_id and await is_ban(None, entity.group_id):
-        if event_cache is not None:
-            event_cache["ban_state"] = True
-        raise SkipPluginException("group banned (fast)")
-    if entity.user_id and await is_ban(entity.user_id, entity.group_id):
-        if event_cache is not None:
-            event_cache["ban_state"] = True
-        raise SkipPluginException("user banned (fast)")
-    if event_cache is not None:
-        event_cache["ban_state"] = False
-
-
 async def route_precheck(
     matcher: Matcher,
     event: Event,
@@ -1243,60 +1218,6 @@ async def route_precheck(
     return False
 
 
-async def auth_precheck(
-    matcher: Matcher,
-    event: Event,
-    bot: Bot,
-    session: Uninfo,
-    message: UniMsg,
-) -> None:
-    """轻量前置检查：命令路由 + 必要管理员权限。"""
-    module = matcher.plugin_name or ""
-    if not module:
-        return
-    if _is_hidden_plugin(matcher):
-        return
-    entity = get_entity_ids(session)
-
-    if session.user.id in bot.config.superusers:
-        return
-
-    plugin = cast(PluginInfo | None, await PluginInfoMemoryCache.get_by_module(module))
-    if not plugin:
-        return
-
-    if plugin.plugin_type == PluginType.SUPERUSER:
-        raise SkipPluginException("超级管理员权限不足...")
-
-    if _needs_admin_check(plugin):
-        await LevelUserMemoryCache.ensure_fresh()
-        levels = await LevelUserMemoryCache.get_levels(session.user.id, entity.group_id)
-        await auth_admin(plugin, session, cached_levels=levels)
-        # 缓存 admin 检查结果到 event_cache，避免 auth() 重复执行
-        event_cache = _get_event_cache(event, session, entity)
-        if event_cache is not None:
-            event_cache["admin_levels"] = levels
-            event_cache["admin_timeout"] = False
-            event_cache["admin_precheck_done"] = True
-
-
-async def _call_auth_ban_compat(
-    matcher: Matcher,
-    bot: Bot,
-    session: Uninfo,
-    plugin: PluginInfo,
-    *,
-    entity,
-) -> None:
-    """兼容旧签名 auth_ban(matcher, bot, session, plugin)。"""
-    try:
-        await auth_ban(matcher, bot, session, plugin, entity=entity)
-    except TypeError as exc:
-        if "unexpected keyword argument 'entity'" not in str(exc):
-            raise
-        await auth_ban(matcher, bot, session, plugin)
-
-
 async def auth(
     matcher: Matcher,
     event: Event,
@@ -1309,7 +1230,7 @@ async def auth(
     event_cache: dict | None = None,
     text: str | None = None,
     route_modules: set[str] | None = None,
-    is_superuser: bool | None = None,
+    is_superuser: bool = False,
 ):
     """权限检查
 
@@ -1325,8 +1246,6 @@ async def auth(
     ignore_flag = False
     if entity is None:
         entity = get_entity_ids(session)
-    if is_superuser is None:
-        is_superuser = session.user.id in bot.config.superusers
     module = matcher.plugin_name or ""
     is_command_matcher = _is_command_matcher_class(type(matcher))
     if event_cache is None:
@@ -1451,8 +1370,12 @@ async def auth(
             else:
                 ban_start = time.time()
                 try:
-                    await _call_auth_ban_compat(
-                        matcher, bot, session, plugin, entity=entity
+                    await auth_ban(
+                        matcher,
+                        session,
+                        plugin,
+                        entity=entity,
+                        is_superuser=is_superuser,
                     )
                     hook_recorder.set("auth_ban", f"{time.time() - ban_start:.3f}s")
                     if event_cache is not None:
@@ -1468,7 +1391,13 @@ async def auth(
             cost_start = time.time()
             try:
                 cost_gold = await with_timeout(
-                    get_plugin_cost(bot, user, plugin, session), name="get_plugin_cost"
+                    get_plugin_cost(
+                        user,
+                        plugin,
+                        session,
+                        is_superuser=is_superuser,
+                    ),
+                    name="get_plugin_cost",
                 )
                 hook_recorder.set("cost_gold", f"{time.time() - cost_start:.3f}s")
             except asyncio.TimeoutError:
@@ -1622,6 +1551,20 @@ async def auth(
 
     except SkipPluginException as e:
         LimitManager.unblock(module, entity.user_id, entity.group_id, entity.channel_id)
+        if e.tip_message:
+            try:
+                tip_coro = send_message(
+                    session,
+                    e.tip_message,
+                    e.tip_check_tag,
+                    background=e.tip_background,
+                )
+                if e.tip_timeout and not e.tip_background:
+                    await asyncio.wait_for(tip_coro, timeout=e.tip_timeout)
+                else:
+                    await tip_coro
+            except asyncio.TimeoutError:
+                logger.error("发送权限提示超时", LOGGER_COMMAND, session=session)
         logger.info(str(e), LOGGER_COMMAND, session=session)
         ignore_flag = True
         auth_allowed = False
