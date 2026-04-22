@@ -1,4 +1,3 @@
-import asyncio
 import time
 
 from nonebot.matcher import Matcher
@@ -234,23 +233,10 @@ async def auth_ban(
         if is_superuser:
             return
         if entity.group_id:
-            try:
-                await asyncio.wait_for(
-                    group_handle(entity.group_id), timeout=DB_TIMEOUT_SECONDS
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"群组ban检查超时: {entity.group_id}", LOGGER_COMMAND)
-                # 超时时不阻塞，继续执行
+            await group_handle(entity.group_id)
 
         if entity.user_id:
-            try:
-                await asyncio.wait_for(
-                    user_handle(plugin, entity, session),
-                    timeout=DB_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"用户ban检查超时: {entity.user_id}", LOGGER_COMMAND)
-                # 超时时不阻塞，继续执行
+            await user_handle(plugin, entity, session)
     finally:
         # 记录总执行时间
         elapsed = time.time() - start_time

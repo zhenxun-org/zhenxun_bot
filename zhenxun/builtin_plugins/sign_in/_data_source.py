@@ -9,13 +9,17 @@ import pytz
 from zhenxun import ui
 from zhenxun.configs.path_config import IMAGE_PATH
 from zhenxun.models.friend_user import FriendUser
+from zhenxun.models.goods_info import GoodsInfo
 from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.models.sign_log import SignLog
 from zhenxun.models.sign_user import SignUser
 from zhenxun.models.user_console import UserConsole
+from zhenxun.models.user_gold_log import UserGoldLog
 from zhenxun.services.avatar_service import avatar_service
 from zhenxun.services.log import logger
 from zhenxun.ui.models import ImageCell, TextCell
+from zhenxun.utils.enum import GoldHandle
+from zhenxun.utils.exception import GoodsNotFound
 from zhenxun.utils.platform import PlatformUtils
 
 from ._random_event import random_event
@@ -182,11 +186,32 @@ class SignManage:
         gift = random_event(float(user.impression))
         if isinstance(gift, int):
             gold += gift
-            await UserConsole.add_gold(user.user_id, gold + gift, "sign_in", platform)
+            user_console = await UserConsole.get_user(user.user_id, platform)
+            user_console.gold += gold + gift
+            await user_console.save(update_fields=["gold"])
+            await UserGoldLog.create(
+                user_id=user.user_id,
+                gold=gold + gift,
+                handle=GoldHandle.GET,
+                source="sign_in",
+            )
             gift = f"额外金币 +{gift}"
         else:
-            await UserConsole.add_gold(user.user_id, gold, "sign_in", platform)
-            await UserConsole.add_props_by_name(user.user_id, gift, 1, platform)
+            goods = await GoodsInfo.get_or_none(goods_name=gift)
+            if not goods:
+                raise GoodsNotFound("未找到商品...")
+            user_console = await UserConsole.get_user(user.user_id, platform)
+            user_console.gold += gold
+            if goods.uuid not in user_console.props:
+                user_console.props[goods.uuid] = 0
+            user_console.props[goods.uuid] += 1
+            await user_console.save(update_fields=["gold", "props"])
+            await UserGoldLog.create(
+                user_id=user.user_id,
+                gold=gold,
+                handle=GoldHandle.GET,
+                source="sign_in",
+            )
             gift += " + 1"
         logger.info(
             f"签到成功. score: {user.impression:.2f} "

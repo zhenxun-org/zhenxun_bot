@@ -6,6 +6,7 @@ import os
 import anyio.to_thread
 from nonebot.drivers import Driver
 
+from zhenxun.services.uninfo_patch import apply_uninfo_onebot11_patch
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
 DEFAULT_EXECUTOR_MIN_WORKERS = 16
@@ -59,6 +60,7 @@ def _apply_alconna_conflict_patch() -> None:
 
 def register_runtime_bootstrap(driver: Driver) -> None:
     _apply_alconna_conflict_patch()
+    apply_uninfo_onebot11_patch()
     global _runtime_hooks_registered
     if _runtime_hooks_registered:
         return

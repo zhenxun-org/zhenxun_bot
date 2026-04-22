@@ -1,24 +1,33 @@
 import asyncio
+from collections import deque
 from collections.abc import Awaitable, Callable
-from typing import Generic, TypeVar
+import contextlib
 
-_T = TypeVar("_T")
-LogListener = Callable[[_T], Awaitable[None]]
+from nonebot.log import default_filter, default_format
+
+from zhenxun.services.log import logger_
+
+LogListener = Callable[[str], Awaitable[None]]
+DEFAULT_MAX_LOGS = 1000
 
 
-class LogStorage(Generic[_T]):
+class LogStorage:
     """
     日志存储
     """
 
-    def __init__(self, rotation: float = 5 * 60):
+    def __init__(self, rotation: float = 5 * 60, max_logs: int = DEFAULT_MAX_LOGS):
         self.count, self.rotation = 0, rotation
+        self.max_logs = max_logs
         self.logs: dict[int, str] = {}
-        self.listeners: set[LogListener[str]] = set()
+        self._order: deque[int] = deque()
+        self.listeners: set[LogListener] = set()
 
     async def add(self, log: str):
         seq = self.count = self.count + 1
         self.logs[seq] = log
+        self._order.append(seq)
+        self._trim()
         asyncio.get_running_loop().call_later(self.rotation, self.remove, seq)
         await asyncio.gather(
             *(listener(log) for listener in self.listeners),
@@ -27,7 +36,41 @@ class LogStorage(Generic[_T]):
         return seq
 
     def remove(self, seq: int):
-        del self.logs[seq]
+        self.logs.pop(seq, None)
+        with contextlib.suppress(ValueError):
+            self._order.remove(seq)
+
+    def _trim(self) -> None:
+        while self._order and self._order[0] not in self.logs:
+            self._order.popleft()
+        while len(self.logs) > self.max_logs and self._order:
+            self.logs.pop(self._order.popleft(), None)
 
 
-LOG_STORAGE: LogStorage[str] = LogStorage[str]()
+LOG_STORAGE = LogStorage()
+
+_LOG_SINK_ID: int | None = None
+
+
+async def ensure_log_sink_started() -> None:
+    global _LOG_SINK_ID
+    if _LOG_SINK_ID is not None:
+        return
+
+    async def log_sink(message: str) -> None:
+        await LOG_STORAGE.add(message.rstrip("\n"))
+
+    _LOG_SINK_ID = logger_.add(
+        log_sink,
+        colorize=True,
+        filter=default_filter,
+        format=default_format,
+    )
+
+
+def stop_log_sink_if_idle() -> None:
+    global _LOG_SINK_ID
+    if LOG_STORAGE.listeners or _LOG_SINK_ID is None:
+        return
+    logger_.remove(_LOG_SINK_ID)
+    _LOG_SINK_ID = None

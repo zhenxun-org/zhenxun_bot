@@ -3,7 +3,7 @@ from loguru import logger
 from nonebot.utils import escape_tag
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from .log_manager import LOG_STORAGE
+from .log_manager import LOG_STORAGE, ensure_log_sink_started, stop_log_sink_if_idle
 
 router = APIRouter()
 
@@ -11,6 +11,7 @@ router = APIRouter()
 @router.websocket("/logs")
 async def system_logs_realtime(websocket: WebSocket):
     await websocket.accept()
+    await ensure_log_sink_started()
 
     async def log_listener(log: str):
         await websocket.send_text(log)
@@ -26,4 +27,5 @@ async def system_logs_realtime(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        LOG_STORAGE.listeners.remove(log_listener)
+        LOG_STORAGE.listeners.discard(log_listener)
+        stop_log_sink_if_idle()

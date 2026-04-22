@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 import contextlib
-import os
+import importlib
 import re
 import time
 from typing import cast
@@ -91,21 +91,17 @@ MATCHER_ROUTE_PREFILTER_TTL = 2
 PREFILTER_STATS_LOG_INTERVAL = 10.0
 CACHE_SWEEP_INTERVAL = 1.0
 
-CPU_COUNT = os.cpu_count() or 4
-COMMAND_MATCHER_CONCURRENCY = max(8, min(48, CPU_COUNT * 4))
-HEAVY_COMMAND_CONCURRENCY = max(1, min(3, CPU_COUNT // 2))
-HEAVY_COMMAND_MODULES = frozenset({"shop", "sign_in"})
-
 # 全局信号量与计数器
 HOOKS_ACTIVE_COUNT = 0
 HOOKS_SEMAPHORE = asyncio.Semaphore(HOOKS_CONCURRENCY_LIMIT)
-COMMAND_MATCHER_SEMAPHORE = asyncio.Semaphore(COMMAND_MATCHER_CONCURRENCY)
-HEAVY_COMMAND_SEMAPHORE = asyncio.Semaphore(HEAVY_COMMAND_CONCURRENCY)
 
 DB_SEMAPHORE = asyncio.Semaphore(DB_CONCURRENCY_LIMIT)
 DB_ACTIVE_COUNT = 0
 _CHECK_MATCHER_PATCHED = False
 _ORIGINAL_CHECK_AND_RUN_MATCHER: Callable[..., Awaitable[None]] | None = None
+_HANDLE_EVENT_PATCHED = False
+_ORIGINAL_HANDLE_EVENT: Callable[..., Awaitable[None]] | None = None
+_ORIGINAL_ADAPTER_HANDLE_EVENTS: dict[object, object] = {}
 _MATCHER_COMMAND_TYPE_CACHE: dict[type[Matcher], bool] = {}
 _MATCHER_COMMAND_LITERAL_CACHE: dict[type[Matcher], tuple[str, ...] | None] = {}
 _MATCHER_ALCONNA_SHORTCUT_CACHE: dict[type[Matcher], bool] = {}
@@ -115,6 +111,10 @@ _CHECK_MATCHER_ROUTE_CACHE = CacheDict(
 _PREFILTER_STATS = {
     "checked": 0,
     "skipped": 0,
+    "before_task_checked": 0,
+    "before_task_skipped": 0,
+    "inside_task_checked": 0,
+    "inside_task_skipped": 0,
     "type_miss": 0,
     "route_miss": 0,
     "command_miss": 0,
@@ -510,11 +510,23 @@ def _get_route_modules_for_event(event: Event, state: dict | None = None) -> set
     return route_modules
 
 
-def _record_prefilter_stats(skipped: bool, reason: str | None) -> None:
+def _record_prefilter_stats(
+    skipped: bool,
+    reason: str | None,
+    stage: str = "inside_task",
+) -> None:
     global _PREFILTER_LAST_LOG
     _PREFILTER_STATS["checked"] += 1
     if skipped:
         _PREFILTER_STATS["skipped"] += 1
+    if stage == "before_task":
+        _PREFILTER_STATS["before_task_checked"] += 1
+        if skipped:
+            _PREFILTER_STATS["before_task_skipped"] += 1
+    else:
+        _PREFILTER_STATS["inside_task_checked"] += 1
+        if skipped:
+            _PREFILTER_STATS["inside_task_skipped"] += 1
     if reason == "type_miss":
         _PREFILTER_STATS["type_miss"] += 1
     elif reason == "route_miss":
@@ -537,6 +549,10 @@ def _record_prefilter_stats(skipped: bool, reason: str | None) -> None:
             "matcher prefilter stats: "
             f"checked={_PREFILTER_STATS['checked']} "
             f"skipped={_PREFILTER_STATS['skipped']} "
+            f"before_task={_PREFILTER_STATS['before_task_skipped']}/"
+            f"{_PREFILTER_STATS['before_task_checked']} "
+            f"inside_task={_PREFILTER_STATS['inside_task_skipped']}/"
+            f"{_PREFILTER_STATS['inside_task_checked']} "
             f"type_miss={_PREFILTER_STATS['type_miss']} "
             f"route_miss={_PREFILTER_STATS['route_miss']} "
             f"command_miss={_PREFILTER_STATS['command_miss']} "
@@ -643,15 +659,6 @@ def _matcher_has_alconna_shortcuts(matcher_cls: type[Matcher]) -> bool:
     return has_shortcuts
 
 
-def _is_heavy_command_module(module: str) -> bool:
-    normalized = module.strip().lower()
-    if not normalized:
-        return False
-    if normalized in HEAVY_COMMAND_MODULES:
-        return True
-    return any(normalized.endswith(f".{name}") for name in HEAVY_COMMAND_MODULES)
-
-
 async def _check_matcher_prefilter(
     matcher_cls: type[Matcher], event: Event, state: dict | None = None
 ) -> tuple[bool, str | None]:
@@ -686,6 +693,17 @@ async def _check_matcher_prefilter(
     if not module:
         return False, None
 
+    command_matched = False
+    matcher_commands = _extract_matcher_command_literals(matcher_cls)
+    if matcher_commands:
+        for command in matcher_commands:
+            if _command_matches(text, command):
+                command_matched = True
+                break
+        else:
+            if not _matcher_has_alconna_shortcuts(matcher_cls):
+                return True, "command_miss"
+
     ai_route_modules = _collect_ai_route_modules(event, state)
     ai_route_heads = _collect_ai_route_heads(event, state)
     if ai_route_modules and module not in ai_route_modules:
@@ -696,25 +714,85 @@ async def _check_matcher_prefilter(
         await _ensure_route_index()
 
     if module not in _ROUTE_MODULES_WITH_COMMANDS:
-        matcher_commands = _extract_matcher_command_literals(matcher_cls)
-        if matcher_commands:
-            for command in matcher_commands:
-                if _command_matches(text, command):
-                    return False, None
-            if _matcher_has_alconna_shortcuts(matcher_cls):
-                return False, None
-            return True, "command_miss"
         return False, None
 
     route_modules = _get_route_modules_for_event(event, state)
     if module not in route_modules:
+        if command_matched:
+            return False, None
         if _matcher_has_alconna_shortcuts(matcher_cls):
             return False, None
         return True, "route_miss"
     return False, None
 
 
-_MATCHER_SEMAPHORE_TIMEOUT = 8.0
+def _check_matcher_prefilter_before_task(
+    matcher_cls: type[Matcher], event: Event, state: dict | None = None
+) -> tuple[bool, str | None]:
+    """Conservative selector before creating matcher task.
+
+    This mirrors the async matcher prefilter but never performs IO or route-index
+    rebuild. If anything is uncertain, let the existing check_and_run_matcher
+    patch handle it inside the task.
+    """
+    event_type = event.get_type()
+    matcher_type = getattr(matcher_cls, "type", "") or ""
+    if isinstance(matcher_type, str) and matcher_type and matcher_type != event_type:
+        return True, "type_miss"
+
+    if event_type != "message":
+        return False, None
+
+    if getattr(matcher_cls, "temp", False):
+        return False, None
+
+    if not _is_command_matcher_class(matcher_cls):
+        return False, None
+
+    text = _state_plain_text(state)
+    if not text:
+        text = _event_plain_text(event)
+        if state is not None and text:
+            state["_zx_plain_text"] = text
+    if not text:
+        return True, "empty_text"
+
+    module = _matcher_module_name(matcher_cls)
+    if not module:
+        return False, None
+
+    command_matched = False
+    matcher_commands = _extract_matcher_command_literals(matcher_cls)
+    has_alconna_shortcuts = _matcher_has_alconna_shortcuts(matcher_cls)
+    if matcher_commands:
+        for command in matcher_commands:
+            if _command_matches(text, command):
+                command_matched = True
+                break
+        else:
+            if not has_alconna_shortcuts:
+                return True, "command_miss"
+
+    ai_route_modules = _collect_ai_route_modules(event, state)
+    ai_route_heads = _collect_ai_route_heads(event, state)
+    if ai_route_modules and module not in ai_route_modules:
+        if not _matcher_matches_ai_route_heads(matcher_cls, ai_route_heads):
+            return True, "route_miss"
+
+    if not _ROUTE_INDEX_READY:
+        return False, None
+
+    if module not in _ROUTE_MODULES_WITH_COMMANDS:
+        return False, None
+
+    route_modules = _get_route_modules_for_event(event, state)
+    if module not in route_modules:
+        if command_matched or has_alconna_shortcuts:
+            return False, None
+        return True, "route_miss"
+    return False, None
+
+
 _MAX_MATCHER_CACHE = 512
 
 
@@ -729,7 +807,7 @@ async def _patched_check_and_run_matcher(
     skip, reason = await _check_matcher_prefilter(
         Matcher, event, state if isinstance(state, dict) else None
     )
-    _record_prefilter_stats(skip, reason)
+    _record_prefilter_stats(skip, reason, "inside_task")
     if skip:
         return
 
@@ -744,28 +822,6 @@ async def _patched_check_and_run_matcher(
         "stack": stack,
         "dependency_cache": dependency_cache,
     }
-    if _is_command_matcher_class(Matcher):
-        module = _matcher_module_name(Matcher)
-        sem = (
-            HEAVY_COMMAND_SEMAPHORE
-            if _is_heavy_command_module(module)
-            else COMMAND_MATCHER_SEMAPHORE
-        )
-        try:
-            await asyncio.wait_for(sem.acquire(), timeout=_MATCHER_SEMAPHORE_TIMEOUT)
-        except asyncio.TimeoutError:
-            logger.warning(
-                f"matcher semaphore acquire timeout for {module}, "
-                "executing without concurrency limit",
-                LOGGER_COMMAND,
-            )
-            await original(**kwargs)
-            return
-        try:
-            await original(**kwargs)
-        finally:
-            sem.release()
-        return
     await original(**kwargs)
 
 
@@ -786,6 +842,137 @@ def _uninstall_matcher_prefilter() -> None:
         nb_message.check_and_run_matcher = _ORIGINAL_CHECK_AND_RUN_MATCHER  # type: ignore[assignment]
     _CHECK_MATCHER_PATCHED = False
     _ORIGINAL_CHECK_AND_RUN_MATCHER = None
+
+
+async def _patched_handle_event(bot: Bot, event: Event) -> None:
+    show_log = True
+    escape_tag = getattr(nb_message, "escape_tag")
+    logger_ = getattr(nb_message, "logger")
+    no_log_exception = getattr(nb_message, "NoLogException")
+
+    log_msg = f"<m>{escape_tag(bot.type)} {escape_tag(bot.self_id)}</m> | "
+    try:
+        log_msg += event.get_log_string()
+    except no_log_exception:
+        show_log = False
+    if show_log:
+        logger_.opt(colors=True).success(log_msg)
+
+    state = {}
+    dependency_cache = {}
+    async_exit_stack = getattr(nb_message, "AsyncExitStack")
+    apply_event_preprocessors = getattr(nb_message, "_apply_event_preprocessors")
+    apply_event_postprocessors = getattr(nb_message, "_apply_event_postprocessors")
+    trie_rule = getattr(nb_message, "TrieRule")
+    matchers = getattr(nb_message, "matchers")
+    catch = getattr(nb_message, "catch")
+    stop_propagation = getattr(nb_message, "StopPropagation")
+    handle_exception = getattr(nb_message, "_handle_exception")
+    anyio_mod = getattr(nb_message, "anyio")
+    run_coro_with_shield = getattr(nb_message, "run_coro_with_shield")
+
+    async with async_exit_stack() as stack:
+        if not await apply_event_preprocessors(
+            bot=bot,
+            event=event,
+            state=state,
+            stack=stack,
+            dependency_cache=dependency_cache,
+        ):
+            return
+
+        try:
+            trie_rule.get_value(bot, event, state)
+        except Exception as e:
+            logger_.opt(colors=True, exception=e).warning(
+                "Error while parsing command for event"
+            )
+
+        break_flag = False
+
+        def _handle_stop_propagation(_exc_group) -> None:
+            nonlocal break_flag
+            break_flag = True
+            logger_.debug("Stop event propagation")
+
+        for priority in sorted(matchers.keys()):
+            if break_flag:
+                break
+
+            if show_log:
+                logger_.debug(f"Checking for matchers in priority {priority}...")
+
+            if not (priority_matchers := matchers[priority]):
+                continue
+
+            with catch(
+                {
+                    stop_propagation: _handle_stop_propagation,
+                    Exception: handle_exception(
+                        "<r><bg #f8bbd0>Error when checking Matcher.</bg #f8bbd0></r>"
+                    ),
+                }
+            ):
+                async with anyio_mod.create_task_group() as tg:
+                    for matcher in priority_matchers:
+                        skip, reason = _check_matcher_prefilter_before_task(
+                            matcher,
+                            event,
+                            state,
+                        )
+                        _record_prefilter_stats(skip, reason, "before_task")
+                        if skip:
+                            continue
+                        tg.start_soon(
+                            run_coro_with_shield,
+                            nb_message.check_and_run_matcher(
+                                matcher,
+                                bot,
+                                event,
+                                state.copy(),
+                                stack,
+                                dependency_cache,
+                            ),
+                        )
+
+        if show_log:
+            logger_.debug("Checking for matchers completed")
+
+        await apply_event_postprocessors(bot, event, state, stack, dependency_cache)
+
+
+def _install_handle_event_selector() -> None:
+    global _HANDLE_EVENT_PATCHED, _ORIGINAL_HANDLE_EVENT
+    if _HANDLE_EVENT_PATCHED:
+        return
+    _ORIGINAL_HANDLE_EVENT = nb_message.handle_event
+    nb_message.handle_event = _patched_handle_event  # type: ignore[assignment]
+    for module_name in (
+        "nonebot.adapters.onebot.v11.bot",
+        "nonebot.adapters.onebot.v12.bot",
+        "onebug.mixin.process",
+    ):
+        with contextlib.suppress(Exception):
+            module = importlib.import_module(module_name)
+            current = getattr(module, "handle_event", None)
+            if current is not None:
+                _ORIGINAL_ADAPTER_HANDLE_EVENTS[module] = current
+                setattr(module, "handle_event", _patched_handle_event)
+    _HANDLE_EVENT_PATCHED = True
+
+
+def _uninstall_handle_event_selector() -> None:
+    global _HANDLE_EVENT_PATCHED, _ORIGINAL_HANDLE_EVENT
+    if not _HANDLE_EVENT_PATCHED:
+        return
+    if _ORIGINAL_HANDLE_EVENT is not None:
+        nb_message.handle_event = _ORIGINAL_HANDLE_EVENT  # type: ignore[assignment]
+    for module, original in list(_ORIGINAL_ADAPTER_HANDLE_EVENTS.items()):
+        with contextlib.suppress(Exception):
+            setattr(module, "handle_event", original)
+    _ORIGINAL_ADAPTER_HANDLE_EVENTS.clear()
+    _HANDLE_EVENT_PATCHED = False
+    _ORIGINAL_HANDLE_EVENT = None
 
 
 def _get_message_text(
@@ -843,12 +1030,14 @@ async def start_auth_runtime_tasks() -> None:
     global _CACHE_SWEEP_TASK
     await _ensure_route_index()
     _install_matcher_prefilter()
+    _install_handle_event_selector()
     if _CACHE_SWEEP_TASK is None or _CACHE_SWEEP_TASK.done():
         _CACHE_SWEEP_TASK = asyncio.create_task(_cache_sweep_loop())
 
 
 async def stop_auth_runtime_tasks() -> None:
     global _CACHE_SWEEP_TASK
+    _uninstall_handle_event_selector()
     _uninstall_matcher_prefilter()
     task = _CACHE_SWEEP_TASK
     _CACHE_SWEEP_TASK = None
@@ -873,6 +1062,12 @@ async def _has_limits_cached(module: str, event_cache: dict | None) -> bool:
 @contextlib.asynccontextmanager
 async def _db_section():
     global DB_ACTIVE_COUNT
+    if DB_SEMAPHORE.locked():
+        logger.warning(
+            "db semaphore saturated, allowing permission check to continue",
+            LOGGER_COMMAND,
+        )
+        raise PermissionExemption("db semaphore saturated, allow pass")
     await DB_SEMAPHORE.acquire()
     DB_ACTIVE_COUNT += 1
     try:
@@ -1074,12 +1269,18 @@ async def get_plugin_and_user(
             if user_id in user_cache:
                 user = user_cache[user_id]
             else:
-                async with _db_section():
-                    user = await _fetch_user_readonly(user_dao, user_id)
+                try:
+                    async with _db_section():
+                        user = await _fetch_user_readonly(user_dao, user_id)
+                except PermissionExemption:
+                    user = None
                 user_cache[user_id] = user
         else:
-            async with _db_section():
-                user = await _fetch_user_readonly(user_dao, user_id)
+            try:
+                async with _db_section():
+                    user = await _fetch_user_readonly(user_dao, user_id)
+            except PermissionExemption:
+                user = None
 
     return plugin, user
 
@@ -1124,7 +1325,7 @@ async def reduce_gold(user_id: str, module: str, cost_gold: int, session: Uninfo
         cost_gold: 消耗金币
         session: Uninfo
     """
-    user_dao = DataAccess(UserConsole)
+    should_clear_cache = False
     try:
         await with_timeout(
             UserConsole.reduce_gold(
@@ -1141,14 +1342,16 @@ async def reduce_gold(user_id: str, module: str, cost_gold: int, session: Uninfo
             u.gold = 0
             await u.save(update_fields=["gold"])
     except asyncio.TimeoutError:
+        should_clear_cache = True
         logger.error(
             f"扣除金币超时，用户: {user_id}, 金币: {cost_gold}",
             LOGGER_COMMAND,
             session=session,
         )
 
-    # 清除缓存，使下次查询时从数据库获取最新数据
-    await user_dao.clear_cache(user_id=user_id)
+    # 正常写入路径由 UserConsole.save() 统一失效缓存；超时状态不确定时兜底清理。
+    if should_clear_cache:
+        await DataAccess(UserConsole).clear_cache(user_id=user_id)
     logger.debug(f"调用功能花费金币: {cost_gold}", LOGGER_COMMAND, session=session)
 
 
@@ -1174,16 +1377,15 @@ async def time_hook(coro, name, recorder: HookTraceRecorder | None = None):
 
 
 async def _enter_hooks_section():
-    """尝试获取全局信号量并更新计数器，超时则抛出 PermissionExemption。"""
+    """尝试获取全局信号量并更新计数器，饱和时快速放行。"""
     global HOOKS_ACTIVE_COUNT
-    try:
-        await asyncio.wait_for(HOOKS_SEMAPHORE.acquire(), timeout=TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
+    if HOOKS_SEMAPHORE.locked():
         logger.warning(
-            "hooks semaphore acquire timeout, allowing pass",
+            "hooks semaphore saturated, allowing pass",
             LOGGER_COMMAND,
         )
-        raise PermissionExemption("hooks semaphore timeout, allow pass")
+        raise PermissionExemption("hooks semaphore saturated, allow pass")
+    await HOOKS_SEMAPHORE.acquire()
     HOOKS_ACTIVE_COUNT += 1
 
 
@@ -1446,6 +1648,10 @@ async def auth(
         hooks_start = time.time()
         allow_sleep_bypass = _is_bot_wake_command(module, text)
 
+        # 先进入 hooks 并行检查区域；饱和时快速放行，避免创建并积压协程。
+        await _enter_hooks_section()
+        entered_hooks = True
+
         # 创建所有 hook 任务
         hook_tasks = []
         if event_cache is None:
@@ -1537,11 +1743,6 @@ async def auth(
                 hook_recorder.set("auth_limit", "skipped")
         else:
             hook_recorder.set("auth_limit", "skipped")
-
-        if hook_tasks:
-            # 进入 hooks 并行检查区域（会在高并发时排队）
-            await _enter_hooks_section()
-            entered_hooks = True
 
         # 使用 gather 并行执行所有 hook，但添加总体超时控制
         try:

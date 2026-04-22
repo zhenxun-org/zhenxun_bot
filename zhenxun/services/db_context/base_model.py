@@ -150,7 +150,7 @@ class Model(TortoiseModel):
                     obj = await cls.filter(**kwargs).using_db(connection).get()
                     result = (obj, False)
 
-        if cache_type := cls.get_cache_type():
+        if result[1] and (cache_type := cls.get_cache_type()):
             await CacheRoot.invalidate_cache(cache_type, cls.get_cache_key(result[0]))
         return result
 

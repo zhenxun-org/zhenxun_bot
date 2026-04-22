@@ -1,20 +1,17 @@
-import asyncio
 import secrets
 
 from fastapi import APIRouter, FastAPI
 import nonebot
-from nonebot.log import default_filter, default_format
 from nonebot.plugin import PluginMetadata
 
 from zhenxun.configs.config import Config as gConfig
 from zhenxun.configs.utils import PluginExtraData, RegisterConfig
-from zhenxun.services.log import logger, logger_
+from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
 from .api.configure import router as configure_router
 from .api.logs import router as ws_log_routes
-from .api.logs.log_manager import LOG_STORAGE
 from .api.menu import router as menu_router
 from .api.tabs.dashboard import router as dashboard_router
 from .api.tabs.database import router as database_router
@@ -95,25 +92,6 @@ WsApiRouter.include_router(chat_routes)
 @PriorityLifecycle.on_startup(priority=0)
 async def _():
     try:
-        # 存储任务引用的列表，防止任务被垃圾回收
-        _tasks = []
-
-        async def log_sink(message: str):
-            loop = None
-            if not loop:
-                try:
-                    loop = asyncio.get_running_loop()
-                except Exception as e:
-                    logger.warning("Web Ui log_sink", e=e)
-            if not loop:
-                loop = asyncio.new_event_loop()
-            # 存储任务引用到外部列表中
-            _tasks.append(loop.create_task(LOG_STORAGE.add(message.rstrip("\n"))))
-
-        logger_.add(
-            log_sink, colorize=True, filter=default_filter, format=default_format
-        )
-
         app: FastAPI = nonebot.get_app()
         app.include_router(BaseApiRouter)
         app.include_router(WsApiRouter)
