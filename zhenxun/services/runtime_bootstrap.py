@@ -6,6 +6,10 @@ import os
 import anyio.to_thread
 from nonebot.drivers import Driver
 
+from zhenxun.services.memory_governor import (
+    start_memory_governor,
+    stop_memory_governor,
+)
 from zhenxun.services.uninfo_patch import apply_uninfo_onebot11_patch
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
@@ -79,10 +83,12 @@ def register_runtime_bootstrap(driver: Driver) -> None:
         with contextlib.suppress(Exception):
             limiter = anyio.to_thread.current_default_thread_limiter()
             limiter.total_tokens = _get_anyio_tokens(workers)
+        await start_memory_governor()
 
     @PriorityLifecycle.on_shutdown(priority=50)
     async def _shutdown_runtime_concurrency() -> None:
         global _thread_executor
+        await stop_memory_governor()
         executor = _thread_executor
         _thread_executor = None
         if executor is not None:

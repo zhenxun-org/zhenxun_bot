@@ -16,7 +16,11 @@ async def system_logs_realtime(websocket: WebSocket):
     async def log_listener(log: str):
         await websocket.send_text(log)
 
-    LOG_STORAGE.listeners.add(log_listener)
+    if not LOG_STORAGE.add_listener(log_listener):
+        await websocket.send_text("日志连接数已达上限，请稍后再试。")
+        await websocket.close()
+        stop_log_sink_if_idle()
+        return
     try:
         while websocket.client_state == WebSocketState.CONNECTED:
             recv = await websocket.receive()
@@ -27,5 +31,5 @@ async def system_logs_realtime(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        LOG_STORAGE.listeners.discard(log_listener)
+        LOG_STORAGE.remove_listener(log_listener)
         stop_log_sink_if_idle()

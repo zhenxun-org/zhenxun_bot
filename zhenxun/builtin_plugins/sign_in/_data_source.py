@@ -187,11 +187,11 @@ class SignManage:
         if isinstance(gift, int):
             gold += gift
             user_console = await UserConsole.get_user(user.user_id, platform)
-            user_console.gold += gold + gift
+            user_console.gold += gold
             await user_console.save(update_fields=["gold"])
             await UserGoldLog.create(
                 user_id=user.user_id,
-                gold=gold + gift,
+                gold=gold,
                 handle=GoldHandle.GET,
                 source="sign_in",
             )

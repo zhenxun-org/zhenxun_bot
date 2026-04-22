@@ -12,7 +12,7 @@ from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun.services.cache.runtime_cache import is_cache_ready
 from zhenxun.services.log import logger
-from zhenxun.services.message_load import is_overloaded
+from zhenxun.services.message_load import is_overloaded, mark_activity
 from zhenxun.services.runtime_bootstrap import register_runtime_bootstrap
 from zhenxun.utils.utils import get_entity_ids
 
@@ -103,6 +103,7 @@ def _resolve_event_channel_id(
 
 @event_preprocessor
 async def _drop_message_before_cache_ready(event: Event):
+    mark_activity()
     if event.get_type() != "message":
         return
     if not is_cache_ready():

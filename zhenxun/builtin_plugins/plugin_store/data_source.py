@@ -61,14 +61,6 @@ class StoreManager:
         return path.parent / f"{plugin_name}.py"
 
     @classmethod
-    def _is_plugin_installed(
-        cls, plugin_info: StorePluginInfo, *, is_external: bool
-    ) -> bool:
-        return cls._resolve_local_plugin_path(
-            plugin_info, is_external=is_external
-        ).exists()
-
-    @classmethod
     @cached(60)
     async def get_data(cls) -> tuple[list[StorePluginInfo], list[StorePluginInfo]]:
         """获取插件信息数据

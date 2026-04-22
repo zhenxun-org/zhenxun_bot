@@ -9,6 +9,7 @@ from zhenxun.services.log import logger_
 
 LogListener = Callable[[str], Awaitable[None]]
 DEFAULT_MAX_LOGS = 1000
+DEFAULT_MAX_LISTENERS = 16
 
 
 class LogStorage:
@@ -16,9 +17,15 @@ class LogStorage:
     日志存储
     """
 
-    def __init__(self, rotation: float = 5 * 60, max_logs: int = DEFAULT_MAX_LOGS):
+    def __init__(
+        self,
+        rotation: float = 5 * 60,
+        max_logs: int = DEFAULT_MAX_LOGS,
+        max_listeners: int = DEFAULT_MAX_LISTENERS,
+    ):
         self.count, self.rotation = 0, rotation
         self.max_logs = max_logs
+        self.max_listeners = max_listeners
         self.logs: dict[int, str] = {}
         self._order: deque[int] = deque()
         self.listeners: set[LogListener] = set()
@@ -29,11 +36,25 @@ class LogStorage:
         self._order.append(seq)
         self._trim()
         asyncio.get_running_loop().call_later(self.rotation, self.remove, seq)
-        await asyncio.gather(
-            *(listener(log) for listener in self.listeners),
-            return_exceptions=True,
-        )
+        listeners = tuple(self.listeners)
+        if listeners:
+            results = await asyncio.gather(
+                *(listener(log) for listener in listeners),
+                return_exceptions=True,
+            )
+            for listener, result in zip(listeners, results, strict=False):
+                if isinstance(result, BaseException):
+                    self.listeners.discard(listener)
         return seq
+
+    def add_listener(self, listener: LogListener) -> bool:
+        if len(self.listeners) >= self.max_listeners:
+            return False
+        self.listeners.add(listener)
+        return True
+
+    def remove_listener(self, listener: LogListener) -> None:
+        self.listeners.discard(listener)
 
     def remove(self, seq: int):
         self.logs.pop(seq, None)

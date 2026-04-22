@@ -111,10 +111,19 @@ class ApiDataSource:
         other_update_fields = set()
         updated_count = 0
         errors = []
+        modules = [item.module for item in params.updates]
+        plugin_records = await DbPluginInfo.get_plugins(
+            module__in=modules,
+            load_status=None,
+            filter_parent=False,
+        )
+        plugin_map = {plugin.module: plugin for plugin in plugin_records}
 
         for item in params.updates:
             try:
-                db_plugin = await DbPluginInfo.get(module=item.module)
+                db_plugin = plugin_map.get(item.module)
+                if db_plugin is None:
+                    raise DoesNotExist()
                 plugin_changed_other = False
                 plugin_changed_block = False
 

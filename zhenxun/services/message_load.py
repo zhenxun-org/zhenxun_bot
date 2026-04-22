@@ -3,6 +3,17 @@ from __future__ import annotations
 import time
 
 _OVERLOAD_UNTIL = 0.0
+_LAST_ACTIVITY = time.monotonic()
+
+
+def mark_activity() -> None:
+    """Record lightweight runtime activity for idle-only maintenance jobs."""
+    global _LAST_ACTIVITY
+    _LAST_ACTIVITY = time.monotonic()
+
+
+def idle_seconds() -> float:
+    return max(0.0, time.monotonic() - _LAST_ACTIVITY)
 
 
 def signal_overload(duration: float = 5.0) -> None:

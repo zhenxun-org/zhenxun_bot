@@ -1103,29 +1103,43 @@ class PlaywrightEngine(BaseScreenshotEngine):
         template_path: str,
         render_options: dict[str, Any],
     ) -> bytes:
-        generation, context = await self._acquire_context()
-        page = None
-        broken = False
-        try:
-            page = await context.new_page()
-            page_options = self._build_page_options(render_options, pooled=True)
-            viewport = page_options.get("viewport")
-            if isinstance(viewport, dict):
-                width = viewport.get("width")
-                height = viewport.get("height")
-                if isinstance(width, int) and isinstance(height, int):
-                    await page.set_viewport_size({"width": width, "height": height})
-            return await self._render_with_page(
-                page, html, template_path, render_options
-            )
-        except Exception:
-            broken = True
-            raise
-        finally:
-            if page is not None:
-                with contextlib.suppress(Exception):
-                    await page.close()
-            await self._release_context(generation, context, broken=broken)
+        last_error: Exception | None = None
+        for attempt in range(2):
+            generation, context = await self._acquire_context()
+            page = None
+            broken = False
+            try:
+                page = await context.new_page()
+                page_options = self._build_page_options(render_options, pooled=True)
+                viewport = page_options.get("viewport")
+                if isinstance(viewport, dict):
+                    width = viewport.get("width")
+                    height = viewport.get("height")
+                    if isinstance(width, int) and isinstance(height, int):
+                        await page.set_viewport_size({"width": width, "height": height})
+                return await self._render_with_page(
+                    page, html, template_path, render_options
+                )
+            except Exception as e:
+                broken = True
+                last_error = e
+                if attempt == 0:
+                    logger.warning(
+                        "截图引擎上下文已失效，丢弃后重试一次。",
+                        "PlaywrightEngine",
+                        e=e,
+                    )
+                    continue
+                raise
+            finally:
+                if page is not None:
+                    with contextlib.suppress(Exception):
+                        await page.close()
+                await self._release_context(generation, context, broken=broken)
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("截图引擎上下文池渲染失败。")
 
     async def _render_html(
         self,

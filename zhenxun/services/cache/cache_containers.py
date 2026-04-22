@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 import time
 from typing import Any, Generic, TypeVar
+import weakref
 
 T = TypeVar("T")
+
+DEFAULT_CACHE_MAX_ITEMS = 10000
 
 
 @dataclass
@@ -16,16 +19,21 @@ class CacheData(Generic[T]):
 class CacheDict(Generic[T]):
     """缓存字典类，提供类似普通字典的接口，数据只存储在内存中"""
 
-    def __init__(self, name: str, expire: int = 0):
+    _instances: weakref.WeakSet = weakref.WeakSet()
+
+    def __init__(self, name: str, expire: int = 0, max_items: int | None = None):
         """初始化缓存字典
 
         参数:
             name: 字典名称
             expire: 过期时间（秒），默认为0表示永不过期
+            max_items: 最大缓存项数，None 使用统一默认值，0 表示不限制
         """
         self.name = name.upper()
         self.expire = expire
+        self.max_items = DEFAULT_CACHE_MAX_ITEMS if max_items is None else max_items
         self._data: dict[str, CacheData[T]] = {}
+        self.__class__._instances.add(self)
 
     def expire_time(self, key: str) -> float:
         """获取字典项的过期时间"""
@@ -62,6 +70,7 @@ class CacheDict(Generic[T]):
         """
         expire_time = time.time() + self.expire if self.expire > 0 else 0
         self._data[key] = CacheData(value=value, expire_time=expire_time)
+        self._enforce_limit()
 
     def __delitem__(self, key: str) -> None:
         """删除字典项
@@ -122,6 +131,7 @@ class CacheDict(Generic[T]):
             expire_time = time.time() + self.expire
 
         self._data[key] = CacheData(value=value, expire_time=expire_time)
+        self._enforce_limit()
 
     def pop(self, key: str, default: Any = None) -> T:
         """删除并返回字典项
@@ -145,6 +155,17 @@ class CacheDict(Generic[T]):
     def clear(self) -> None:
         """清空字典"""
         self._data.clear()
+
+    @classmethod
+    def clear_all(cls) -> dict[str, int]:
+        """清空所有 CacheDict，返回各缓存清理的条目数。"""
+        result: dict[str, int] = {}
+        for cache in list(cls._instances):
+            size = len(cache._data)
+            if size:
+                cache.clear()
+                result[cache.name] = result.get(cache.name, 0) + size
+        return result
 
     def keys(self) -> list[str]:
         """获取所有键
@@ -187,6 +208,12 @@ class CacheDict(Generic[T]):
         for key in expired_keys:
             del self._data[key]
 
+    def _enforce_limit(self) -> None:
+        if self.max_items <= 0:
+            return
+        while len(self._data) > self.max_items:
+            self._data.pop(next(iter(self._data)))
+
     def __len__(self) -> int:
         """获取字典长度
 
@@ -211,17 +238,22 @@ class CacheDict(Generic[T]):
 class CacheList(Generic[T]):
     """缓存列表类，提供类似普通列表的接口，数据只存储在内存中"""
 
-    def __init__(self, name: str, expire: int = 0):
+    _instances: weakref.WeakSet = weakref.WeakSet()
+
+    def __init__(self, name: str, expire: int = 0, max_items: int | None = None):
         """初始化缓存列表
 
         参数:
             name: 列表名称
             expire: 过期时间（秒），默认为0表示永不过期
+            max_items: 最大缓存项数，None 使用统一默认值，0 表示不限制
         """
         self.name = name.upper()
         self.expire = expire
+        self.max_items = DEFAULT_CACHE_MAX_ITEMS if max_items is None else max_items
         self._data: list[CacheData[T]] = []
         self._expire_time = 0
+        self.__class__._instances.add(self)
 
         # 如果设置了过期时间，计算整个列表的过期时间
         if self.expire > 0:
@@ -303,6 +335,7 @@ class CacheList(Generic[T]):
             self.clear()
 
         self._data.append(CacheData(value=value))
+        self._enforce_limit()
 
         # 更新过期时间
         self._update_expire_time()
@@ -318,6 +351,7 @@ class CacheList(Generic[T]):
             self.clear()
 
         self._data.extend([CacheData(value=v) for v in values])
+        self._enforce_limit()
 
         # 更新过期时间
         self._update_expire_time()
@@ -334,6 +368,7 @@ class CacheList(Generic[T]):
             self.clear()
 
         self._data.insert(index, CacheData(value=value))
+        self._enforce_limit()
 
         # 更新过期时间
         self._update_expire_time()
@@ -389,6 +424,16 @@ class CacheList(Generic[T]):
         # 重置过期时间
         self._update_expire_time()
 
+    @classmethod
+    def clear_all(cls) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for cache in list(cls._instances):
+            size = len(cache._data)
+            if size:
+                cache.clear()
+                result[cache.name] = result.get(cache.name, 0) + size
+        return result
+
     def index(self, value: T, start: int = 0, end: int | None = None) -> int:
         """查找值的索引
 
@@ -437,6 +482,12 @@ class CacheList(Generic[T]):
     def _update_expire_time(self):
         """更新过期时间"""
         self._expire_time = time.time() + self.expire if self.expire > 0 else 0
+
+    def _enforce_limit(self) -> None:
+        if self.max_items <= 0:
+            return
+        if len(self._data) > self.max_items:
+            del self._data[: len(self._data) - self.max_items]
 
     def __str__(self) -> str:
         """字符串表示
