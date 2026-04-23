@@ -9,7 +9,9 @@
 from __future__ import annotations
 
 import importlib.metadata
+import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -101,6 +103,12 @@ def _build_worker_command() -> list[str]:
     return [sys.executable, "-m", "zhenxun.cli", "run-worker"]
 
 
+def _get_worker_creationflags() -> int:
+    if os.name == "nt":
+        return getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    return 0
+
+
 def _wait_worker_exit(proc: subprocess.Popen, timeout_seconds: float) -> bool:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
@@ -113,11 +121,27 @@ def _wait_worker_exit(proc: subprocess.Popen, timeout_seconds: float) -> bool:
 def _terminate_worker(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
-    if _wait_worker_exit(proc, 8.0):
+    soft_exit_timeout = 12.0
+    terminate_timeout = 5.0
+    if os.name == "nt":
+        ctrl_break_event = getattr(signal, "CTRL_BREAK_EVENT", None)
+        if ctrl_break_event is not None:
+            try:
+                proc.send_signal(ctrl_break_event)
+            except Exception:
+                pass
+            else:
+                if _wait_worker_exit(proc, soft_exit_timeout):
+                    return
+    if _wait_worker_exit(proc, 1.0):
         return
-    proc.terminate()
-    if _wait_worker_exit(proc, 5.0):
-        return
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    else:
+        if _wait_worker_exit(proc, terminate_timeout):
+            return
     proc.kill()
     proc.wait(timeout=5)
 
@@ -131,7 +155,11 @@ def _run_launcher() -> None:
 
     clear_launcher_restart_signal()
     while True:
-        worker = subprocess.Popen(_build_worker_command(), cwd=str(cwd))
+        worker = subprocess.Popen(
+            _build_worker_command(),
+            cwd=str(cwd),
+            creationflags=_get_worker_creationflags(),
+        )
         try:
             return_code = worker.wait()
         except KeyboardInterrupt:
