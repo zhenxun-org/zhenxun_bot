@@ -198,7 +198,7 @@ class VirtualEnvPackageManager:
 
         插件商店安装依赖需要持久化到 pyproject.toml/uv.lock，避免重建环境后丢失。
         """
-        if not requirement_file.exists():
+        if not requirement_file.exists():  # noqa: ASYNC240
             raise FileNotFoundError(f"依赖文件 {requirement_file} 不存在", LOG_COMMAND)
         cls._clean_requirements_file(requirement_file)
         try:
@@ -206,7 +206,7 @@ class VirtualEnvPackageManager:
                 "uv",
                 "add",
                 "--requirements",
-                str(requirement_file.absolute()),
+                str(requirement_file.absolute()),  # noqa: ASYNC240
             ]
             logger.info(f"执行项目依赖添加指令: {command}", LOG_COMMAND)
             result = await asyncio.to_thread(
@@ -216,6 +216,8 @@ class VirtualEnvPackageManager:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             logger.debug(
                 f"项目依赖添加指令执行完成: {result.stdout}",

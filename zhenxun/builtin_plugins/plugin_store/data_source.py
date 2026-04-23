@@ -64,9 +64,7 @@ class StoreManager:
         relative_parts = [part for part in plugin_info.module_path.split(".") if part]
         relative_path = Path(*relative_parts) if relative_parts else Path(plugin_name)
         path = BASE_PATH.parent / relative_path
-        if plugin_info.is_dir:
-            return path
-        return path.parent / f"{plugin_name}.py"
+        return path if plugin_info.is_dir else path.parent / f"{plugin_name}.py"
 
     @classmethod
     async def get_data(cls) -> tuple[list[StorePluginInfo], list[StorePluginInfo]]:
@@ -336,13 +334,12 @@ class StoreManager:
             source: 源
         """
         repo_type = RepoType.GITHUB if is_external else None
-        if source == "ali":
+        if (
+            source != "ali" and source != "git" and plugin_info.ali_url
+        ) or source == "ali":
             repo_type = RepoType.ALIYUN
         elif source == "git":
             repo_type = RepoType.GITHUB
-        else:
-            if plugin_info.ali_url:
-                repo_type = RepoType.ALIYUN
         module_path = plugin_info.module_path
         is_dir = plugin_info.is_dir
         github_url = plugin_info.github_url
