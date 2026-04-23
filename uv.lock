@@ -159,6 +159,18 @@ wheels = [
 ]
 
 [[package]]
+name = "aiomysql"
+version = "0.3.2"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+dependencies = [
+    { name = "pymysql" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/29/e0/302aeffe8d90853556f47f3106b89c16cc2ec2a4d269bdfd82e3f4ae12cc/aiomysql-0.3.2.tar.gz", hash = "sha256:72d15ef5cfc34c03468eb41e1b90adb9fd9347b0b589114bd23ead569a02ac1a" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/4c/af/aae0153c3e28712adaf462328f6c7a3c196a1c1c27b491de4377dd3e6b52/aiomysql-0.3.2-py3-none-any.whl", hash = "sha256:c82c5ba04137d7afd5c693a258bea8ead2aad77101668044143a991e04632eb2" },
+]
+
+[[package]]
 name = "aiosignal"
 version = "1.4.0"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
@@ -2599,6 +2611,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pymysql"
+version = "1.1.2"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/f5/ae/1fe3fcd9f959efa0ebe200b8de88b5a5ce3e767e38c7ac32fb179f16a388/pymysql-1.1.2.tar.gz", hash = "sha256:4961d3e165614ae65014e361811a724e2044ad3ea3739de9903ae7c21f539f03" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/7c/4c/ad33b92b9864cbde84f259d5df035a6447f91891f5be77788e2a3892bce3/pymysql-1.1.2-py3-none-any.whl", hash = "sha256:e6b1d89711dd51f8f74b1631fe08f039e7d76cf67a42a323d3178f0f25762ed9" },
+]
+
+[[package]]
 name = "pypika-tortoise"
 version = "0.1.6"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
@@ -4157,6 +4178,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiocache", extra = ["redis"] },
     { name = "aiofiles" },
+    { name = "aiomysql" },
     { name = "alibabacloud-devops20210625" },
     { name = "asyncpg" },
     { name = "beautifulsoup4" },
@@ -4212,6 +4234,7 @@ dev = [
 requires-dist = [
     { name = "aiocache", extras = ["redis"], specifier = ">=0.12.3" },
     { name = "aiofiles", specifier = ">=23.2.1" },
+    { name = "aiomysql", specifier = ">=0.3.2" },
     { name = "alibabacloud-devops20210625", specifier = ">=5.0.2,<6.0.0" },
     { name = "asyncpg", specifier = ">=0.20.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.3,<5.0.0" },

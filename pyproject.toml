@@ -45,6 +45,7 @@ dependencies = [
     "alibabacloud-devops20210625>=5.0.2,<6.0.0",
     "uvloop>=0.21.0; sys_platform != 'win32'",
     "pytest-timeout>=2.4.0",
+    "aiomysql>=0.3.2",
 ]
 
 [project.scripts]
