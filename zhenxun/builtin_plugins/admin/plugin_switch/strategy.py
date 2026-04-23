@@ -4,12 +4,11 @@ from typing import Any, cast
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.task_info import TaskInfo
-from zhenxun.services.cache import CacheRoot
 from zhenxun.services.cache.runtime_cache import (
     PluginInfoMemoryCache,
     TaskInfoMemoryCache,
 )
-from zhenxun.utils.enum import BlockType, CacheType, PluginType
+from zhenxun.utils.enum import BlockType, PluginType
 
 
 class SwitchStrategy(ABC):
@@ -135,7 +134,6 @@ class PluginStrategy(SwitchStrategy):
         await self.refresh_cache()
 
     async def refresh_cache(self) -> None:
-        await CacheRoot.invalidate_cache(CacheType.PLUGINS)
         await PluginInfoMemoryCache.refresh()
 
 

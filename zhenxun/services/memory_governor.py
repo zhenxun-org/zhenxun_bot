@@ -10,6 +10,7 @@ from typing import Any
 from aiocache import SimpleMemoryCache
 
 from zhenxun.services.cache import CacheRoot
+from zhenxun.services.cache.bounded_ttl import BoundedTTLCache
 from zhenxun.services.cache.cache_containers import CacheDict, CacheList
 from zhenxun.services.log import logger
 from zhenxun.services.message_load import idle_seconds, is_overloaded
@@ -127,8 +128,14 @@ async def _run_reclaim() -> None:
     start = time.monotonic()
     before_rss = _get_total_rss()
     cleared: dict[str, Any] = {}
+    cache_stats_before = {
+        "cache_dict": CacheDict.stats_all(),
+        "cache_list": CacheList.stats_all(),
+        "bounded_ttl": await BoundedTTLCache.stats_all(),
+    }
 
     cleared["statistics"] = await _flush_statistics_buffer()
+    cleared["bounded_ttl_clear"] = await BoundedTTLCache.clear_all()
     cleared["cache_dict_clear"] = CacheDict.clear_all()
     cleared["cache_list_clear"] = CacheList.clear_all()
     cleared["runtime_negative"] = _clear_runtime_negative_caches()
@@ -145,7 +152,8 @@ async def _run_reclaim() -> None:
         f"cost={time.monotonic() - start:.3f}s "
         f"rss_before={_format_bytes(before_rss)} "
         f"rss_after={_format_bytes(after_rss)} "
-        f"gc={collected} malloc_trim={malloc_trimmed} cleared={cleared}",
+        f"gc={collected} malloc_trim={malloc_trimmed} "
+        f"cleared={cleared} cache_stats_before={cache_stats_before}",
         LOG_COMMAND,
     )
 

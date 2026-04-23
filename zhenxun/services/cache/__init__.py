@@ -74,6 +74,7 @@ from .config import (
 )
 
 __all__ = [
+    "BoundedTTLCache",
     "Cache",
     "CacheDict",
     "CacheManager",
@@ -82,6 +83,7 @@ __all__ = [
 ]
 
 from . import runtime_cache as _runtime_cache  # noqa: F401
+from .bounded_ttl import BoundedTTLCache
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -400,9 +402,10 @@ class CacheManager:
         """清除缓存
 
         参数:
-            cache_type: 缓存类型，为None时清除所有缓存。
-                注意：受 aiocache 限制，无法按类型精确删除，
-                指定 cache_type 时仅清除整个 backend（行为与不指定相同）。
+            cache_type: 缓存类型。为 None 时清除整个 backend。
+                指定 cache_type 时不再退化为清除整个 backend，避免误删其他类型缓存。
+                需要刷新模型运行态缓存时，应调用对应
+                RuntimeCache.refresh/upsert/remove。
 
         返回:
             bool: 是否成功
@@ -413,11 +416,12 @@ class CacheManager:
 
         try:
             if cache_type:
-                logger.debug(
-                    f"清除缓存类型 {cache_type}"
-                    "（aiocache 不支持按前缀删除，清除整个 backend）",
+                logger.warning(
+                    f"拒绝清除缓存类型 {cache_type}: "
+                    "当前后端不支持可靠的按类型清理，已避免清除整个 backend",
                     LOG_COMMAND,
                 )
+                return False
             await self.cache_backend.clear()  # type: ignore
             return True
         except Exception as e:

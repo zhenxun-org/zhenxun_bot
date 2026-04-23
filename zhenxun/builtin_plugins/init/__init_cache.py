@@ -29,7 +29,6 @@ def register_cache_types():
         GroupPluginSetting,
         key_format="{group_id}_{plugin_name}_{key}",
     )
-    CacheRegistry.register(CacheType.GROUP_PLUGIN_SETTINGS_VIEW, dict)
     CacheRegistry.register(
         CacheType.LEVEL, LevelUser, key_format="{user_id}_{group_id}"
     )

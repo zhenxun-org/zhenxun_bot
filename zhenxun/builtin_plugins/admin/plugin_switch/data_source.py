@@ -1,10 +1,9 @@
 from nonebot.adapters import Bot
 
 from zhenxun.models.group_console import GroupConsole
-from zhenxun.services.cache import CacheRoot
 from zhenxun.services.cache.runtime_cache import GroupMemoryCache
 from zhenxun.utils.common_utils import CommonUtils
-from zhenxun.utils.enum import BlockType, CacheType
+from zhenxun.utils.enum import BlockType
 from zhenxun.utils.platform import PlatformUtils
 
 from .strategy import get_strategy
@@ -134,7 +133,6 @@ class PluginManager:
             await GroupConsole.bulk_update(
                 update_list, [norm_field, su_field], batch_size=500
             )
-            await CacheRoot.clear(CacheType.GROUPS)
             for group in update_list:
                 await GroupMemoryCache.upsert_from_model(group)
 
@@ -318,7 +316,6 @@ class PluginManager:
                 status=False
             )
 
-        await CacheRoot.clear(CacheType.GROUPS)
         await GroupMemoryCache.refresh()
 
         action_str = "醒来" if status else "休眠"

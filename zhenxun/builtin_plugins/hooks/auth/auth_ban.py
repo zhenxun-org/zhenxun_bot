@@ -7,7 +7,6 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.configs.config import Config
 from zhenxun.models.ban_console import BanConsole
 from zhenxun.models.plugin_info import PluginInfo
-from zhenxun.services.cache.cache_containers import CacheDict
 from zhenxun.services.cache.runtime_cache import BanMemoryCache
 from zhenxun.services.db_context import DB_TIMEOUT_SECONDS
 from zhenxun.services.log import logger
@@ -24,37 +23,6 @@ Config.add_plugin_config(
     "才不会给你发消息.",
     help="对被ban用户发送的消息",
 )
-BAN_CACHE_TTL = 2
-BAN_CACHE_TTL_POSITIVE = 30
-BAN_CACHE_TTL_NEGATIVE = 5
-
-BAN_CACHE = (
-    CacheDict("AUTH_BAN_CACHE", expire=0)
-    if max(BAN_CACHE_TTL_POSITIVE, BAN_CACHE_TTL_NEGATIVE) > 0
-    else None
-)
-
-
-def _ban_cache_key(user_id: str | None, group_id: str | None) -> str:
-    return f"{user_id or ''}:{group_id or ''}"
-
-
-def _ban_cache_get(key: str) -> int | None:
-    if not BAN_CACHE:
-        return None
-    try:
-        return BAN_CACHE[key]
-    except KeyError:
-        return None
-
-
-def _ban_cache_set(key: str, value: int) -> None:
-    if not BAN_CACHE:
-        return
-    ttl = BAN_CACHE_TTL_POSITIVE if value else BAN_CACHE_TTL_NEGATIVE
-    if ttl <= 0:
-        return
-    BAN_CACHE.set(key, value, expire=ttl)
 
 
 async def calculate_ban_time(ban_record: BanConsole | None) -> int:

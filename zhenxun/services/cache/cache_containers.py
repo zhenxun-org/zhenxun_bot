@@ -156,6 +156,21 @@ class CacheDict(Generic[T]):
         """清空字典"""
         self._data.clear()
 
+    def stats(self) -> dict[str, int]:
+        """返回当前缓存条目统计。"""
+        self._clean_expired()
+        return {"items": len(self._data), "max_items": self.max_items}
+
+    @classmethod
+    def stats_all(cls) -> dict[str, dict[str, int]]:
+        """返回所有 CacheDict 实例的条目统计。"""
+        result: dict[str, dict[str, int]] = {}
+        for cache in list(cls._instances):
+            stats = cache.stats()
+            if stats["items"]:
+                result[cache.name] = stats
+        return result
+
     @classmethod
     def clear_all(cls) -> dict[str, int]:
         """清空所有 CacheDict，返回各缓存清理的条目数。"""
@@ -423,6 +438,22 @@ class CacheList(Generic[T]):
         self._data.clear()
         # 重置过期时间
         self._update_expire_time()
+
+    def stats(self) -> dict[str, int]:
+        """返回当前缓存条目统计。"""
+        if self._is_expired():
+            self.clear()
+        return {"items": len(self._data), "max_items": self.max_items}
+
+    @classmethod
+    def stats_all(cls) -> dict[str, dict[str, int]]:
+        """返回所有 CacheList 实例的条目统计。"""
+        result: dict[str, dict[str, int]] = {}
+        for cache in list(cls._instances):
+            stats = cache.stats()
+            if stats["items"]:
+                result[cache.name] = stats
+        return result
 
     @classmethod
     def clear_all(cls) -> dict[str, int]:

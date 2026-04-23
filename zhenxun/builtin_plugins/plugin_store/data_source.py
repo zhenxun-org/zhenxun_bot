@@ -3,12 +3,12 @@ from pathlib import Path
 import random
 import shutil
 
-from aiocache import cached
 import ujson as json
 
 from zhenxun.builtin_plugins.plugin_store.models import StorePluginInfo
 from zhenxun.configs.path_config import TEMP_PATH
 from zhenxun.models.plugin_info import PluginInfo
+from zhenxun.services.cache.bounded_ttl import BoundedTTLCache
 from zhenxun.services.log import logger
 from zhenxun.services.plugin_init import PluginInitManager
 from zhenxun.utils.enum import PluginType
@@ -25,6 +25,14 @@ from .config import (
     LOG_COMMAND,
 )
 from .exceptions import PluginStoreException
+
+_PLUGIN_STORE_DATA_CACHE = BoundedTTLCache[
+    str, tuple[list[StorePluginInfo], list[StorePluginInfo]]
+](
+    "PLUGIN_STORE_DATA",
+    ttl_seconds=60,
+    max_items=1,
+)
 
 
 def row_style(column: str, text: str) -> RowStyle:
@@ -61,7 +69,6 @@ class StoreManager:
         return path.parent / f"{plugin_name}.py"
 
     @classmethod
-    @cached(60)
     async def get_data(cls) -> tuple[list[StorePluginInfo], list[StorePluginInfo]]:
         """获取插件信息数据
 
@@ -69,15 +76,22 @@ class StoreManager:
             tuple[list[StorePluginInfo], list[StorePluginInfo]]:
                 原生插件信息数据，第三方插件信息数据
         """
+        cache_key = "plugins_json"
+        if cached_data := await _PLUGIN_STORE_DATA_CACHE.get(cache_key):
+            return cached_data
+
         plugins = await RepoFileManager.get_file_content(
             DEFAULT_GITHUB_URL, "plugins.json"
         )
         extra_plugins = await RepoFileManager.get_file_content(
             EXTRA_GITHUB_URL, "plugins.json", "index"
         )
-        return [StorePluginInfo(**plugin) for plugin in json.loads(plugins)], [
-            StorePluginInfo(**plugin) for plugin in json.loads(extra_plugins)
-        ]
+        result = (
+            [StorePluginInfo(**plugin) for plugin in json.loads(plugins)],
+            [StorePluginInfo(**plugin) for plugin in json.loads(extra_plugins)],
+        )
+        await _PLUGIN_STORE_DATA_CACHE.set(cache_key, result)
+        return result
 
     @classmethod
     def version_check(cls, plugin_info: StorePluginInfo, suc_plugin: dict[str, str]):

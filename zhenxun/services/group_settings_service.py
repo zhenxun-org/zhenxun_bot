@@ -5,10 +5,9 @@ import ujson as json
 
 from zhenxun.configs.config import Config
 from zhenxun.models.group_plugin_setting import GroupPluginSetting
-from zhenxun.services.cache import Cache
+from zhenxun.services.cache import BoundedTTLCache
 from zhenxun.services.data_access import DataAccess
 from zhenxun.services.log import logger
-from zhenxun.utils.enum import CacheType
 from zhenxun.utils.pydantic_compat import model_dump, model_validate, parse_as
 
 T = TypeVar("T", bound=BaseModel)
@@ -22,7 +21,11 @@ class GroupSettingsService:
 
     def __init__(self):
         self.dao = DataAccess(GroupPluginSetting)
-        self._cache = Cache[dict[str, Any]](CacheType.GROUP_PLUGIN_SETTINGS_VIEW)
+        self._cache = BoundedTTLCache[str, dict[str, Any]](
+            "GROUP_PLUGIN_SETTINGS_VIEW",
+            ttl_seconds=600,
+            max_items=10000,
+        )
 
     @staticmethod
     def _build_cache_key(group_id: str, plugin_name: str) -> str:

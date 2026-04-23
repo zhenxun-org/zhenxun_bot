@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-from collections import OrderedDict
 import hashlib
-import time
 from typing import Any
 
+from zhenxun.services.cache.bounded_ttl import BoundedTTLCache
 from zhenxun.utils.pydantic_compat import dump_json_safely
 
 
@@ -23,9 +21,12 @@ class RenderResultMemoryCache:
             if isinstance(max_total_bytes, int) and max_total_bytes > 0
             else None
         )
-        self._cache: OrderedDict[str, tuple[float, bytes]] = OrderedDict()
-        self._total_bytes = 0
-        self._lock = asyncio.Lock()
+        self._cache = BoundedTTLCache[str, bytes](
+            "RENDER_RESULT",
+            ttl_seconds=self._ttl_seconds,
+            max_items=self._max_items,
+            max_total_bytes=self._max_total_bytes,
+        )
 
     @staticmethod
     def build_key(payload: Any) -> str:
@@ -37,55 +38,8 @@ class RenderResultMemoryCache:
         )
         return hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
 
-    def _pop_oldest(self) -> None:
-        if not self._cache:
-            return
-        _, (_, value) = self._cache.popitem(last=False)
-        self._total_bytes -= len(value)
-        if self._total_bytes < 0:
-            self._total_bytes = 0
-
-    def _cleanup(self, now: float) -> None:
-        while self._cache:
-            expire_at, _ = next(iter(self._cache.values()))
-            if expire_at > now:
-                break
-            self._pop_oldest()
-        while len(self._cache) > self._max_items:
-            self._pop_oldest()
-        if self._max_total_bytes is not None:
-            while self._total_bytes > self._max_total_bytes and self._cache:
-                self._pop_oldest()
-
     async def get(self, key: str) -> bytes | None:
-        now = time.monotonic()
-        async with self._lock:
-            self._cleanup(now)
-            item = self._cache.get(key)
-            if item is None:
-                return None
-            expire_at, value = item
-            if expire_at <= now:
-                removed = self._cache.pop(key, None)
-                if removed:
-                    self._total_bytes -= len(removed[1])
-                    if self._total_bytes < 0:
-                        self._total_bytes = 0
-                return None
-            self._cache.move_to_end(key)
-            return value
+        return await self._cache.get(key)
 
     async def set(self, key: str, value: bytes) -> None:
-        value_size = len(value)
-        if self._max_total_bytes is not None and value_size > self._max_total_bytes:
-            return
-        now = time.monotonic()
-        async with self._lock:
-            if old := self._cache.pop(key, None):
-                self._total_bytes -= len(old[1])
-                if self._total_bytes < 0:
-                    self._total_bytes = 0
-            self._cache[key] = (now + self._ttl_seconds, value)
-            self._total_bytes += value_size
-            self._cache.move_to_end(key)
-            self._cleanup(now)
+        await self._cache.set(key, value)

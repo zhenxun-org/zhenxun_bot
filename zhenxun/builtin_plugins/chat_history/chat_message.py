@@ -10,6 +10,7 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.configs.config import Config
 from zhenxun.configs.utils import PluginExtraData, RegisterConfig
 from zhenxun.models.chat_history import ChatHistory
+from zhenxun.services.db_context import with_db_timeout
 from zhenxun.services.log import logger
 from zhenxun.services.message_load import is_overloaded, should_pause_tasks
 from zhenxun.utils.enum import PluginType
@@ -47,6 +48,9 @@ _HISTORY_QUEUE: asyncio.Queue[ChatHistory] = asyncio.Queue(maxsize=5000)
 _DROP_COUNT = 0
 _LAST_DROP_LOG = 0.0
 _DROP_LOG_INTERVAL = 10.0
+_FLUSH_BATCH_SIZE = 200
+_FLUSH_MAX_PER_TICK = 1000
+_FLUSH_DB_TIMEOUT = 5.0
 
 
 @chat_history.handle()
@@ -80,19 +84,34 @@ async def _(message: UniMsg, session: Uninfo):
 @scheduler.scheduled_job(
     "interval",
     minutes=1,
+    max_instances=1,
+    coalesce=True,
 )
 async def _():
     try:
         if should_pause_tasks():
             return
-        message_list: list[ChatHistory] = []
-        while True:
-            try:
-                message_list.append(_HISTORY_QUEUE.get_nowait())
-            except asyncio.QueueEmpty:
+        flushed = 0
+        while flushed < _FLUSH_MAX_PER_TICK:
+            message_list: list[ChatHistory] = []
+            limit = min(_FLUSH_BATCH_SIZE, _FLUSH_MAX_PER_TICK - flushed)
+            for _ in range(limit):
+                try:
+                    message_list.append(_HISTORY_QUEUE.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            if not message_list:
                 break
-        if message_list:
-            await ChatHistory.bulk_create(message_list)
-            logger.debug(f"批量添加聊天记录 {len(message_list)} 条", "定时任务")
+            await with_db_timeout(
+                ChatHistory.bulk_create(message_list, _FLUSH_BATCH_SIZE),
+                timeout=_FLUSH_DB_TIMEOUT,
+                operation=f"ChatHistory.bulk_create[{len(message_list)}]",
+                source="chat_history",
+            )
+            flushed += len(message_list)
+        if flushed:
+            backlog = _HISTORY_QUEUE.qsize()
+            suffix = f"，剩余队列 {backlog} 条" if backlog else ""
+            logger.debug(f"批量添加聊天记录 {flushed} 条{suffix}", "定时任务")
     except Exception as e:
         logger.warning("存储聊天记录失败", "chat_history", e=e)

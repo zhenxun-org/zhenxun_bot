@@ -1,5 +1,4 @@
 import asyncio
-from collections import OrderedDict
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 import os
@@ -21,6 +20,7 @@ from rich.progress import (
 import ujson as json
 
 from zhenxun.configs.config import BotConfig
+from zhenxun.services.cache.bounded_ttl import BoundedTTLCache
 from zhenxun.services.log import logger
 from zhenxun.utils.decorator.retry import Retry
 from zhenxun.utils.exception import AllURIsFailedError
@@ -168,7 +168,12 @@ class AsyncHttpx:
     _CONTENT_CACHE_TTL: ClassVar[float] = 3.0
     _CONTENT_CACHE_MAX_ITEMS: ClassVar[int] = 256
     _CONTENT_CACHE_MAX_BYTES: ClassVar[int] = 2 * 1024 * 1024
-    _content_cache: ClassVar[OrderedDict[str, tuple[float, bytes]]] = OrderedDict()
+    _content_cache: ClassVar[BoundedTTLCache[str, bytes]] = BoundedTTLCache(
+        "HTTP_IMAGE_CONTENT",
+        ttl_seconds=_CONTENT_CACHE_TTL,
+        max_items=_CONTENT_CACHE_MAX_ITEMS,
+        max_total_bytes=_CONTENT_CACHE_MAX_BYTES,
+    )
     _content_inflight: ClassVar[dict[str, asyncio.Task[Response]]] = {}
     _content_cache_lock: ClassVar[asyncio.Lock] = asyncio.Lock()
 
@@ -192,29 +197,6 @@ class AsyncHttpx:
         return "qpic.cn" in lower_url or "qlogo.cn" in lower_url
 
     @classmethod
-    def _get_cached_content_nolock(cls, key: str) -> bytes | None:
-        entry = cls._content_cache.get(key)
-        if not entry:
-            return None
-        expire_at, content = entry
-        if expire_at <= time.monotonic():
-            cls._content_cache.pop(key, None)
-            return None
-        cls._content_cache.move_to_end(key)
-        return content
-
-    @classmethod
-    def _cleanup_content_cache_nolock(cls) -> None:
-        now = time.monotonic()
-        while cls._content_cache:
-            expire_at, _ = next(iter(cls._content_cache.values()))
-            if expire_at > now:
-                break
-            cls._content_cache.popitem(last=False)
-        while len(cls._content_cache) > cls._CONTENT_CACHE_MAX_ITEMS:
-            cls._content_cache.popitem(last=False)
-
-    @classmethod
     async def _try_cache_content(cls, key: str, response: Response) -> None:
         content = response.content
         if not content or len(content) > cls._CONTENT_CACHE_MAX_BYTES:
@@ -223,13 +205,7 @@ class AsyncHttpx:
         is_image = content_type.startswith("image/") or cls._is_probably_image_url(key)
         if not is_image:
             return
-        async with cls._content_cache_lock:
-            cls._content_cache[key] = (
-                time.monotonic() + cls._CONTENT_CACHE_TTL,
-                content,
-            )
-            cls._content_cache.move_to_end(key)
-            cls._cleanup_content_cache_nolock()
+        await cls._content_cache.set(key, content)
 
     @classmethod
     def _prepare_temporary_client_config(cls, client_kwargs: dict) -> dict:
@@ -450,9 +426,11 @@ class AsyncHttpx:
             return res.content
 
         cache_key = url
+        if cached := await cls._content_cache.get(cache_key):
+            return cached
+
         async with cls._content_cache_lock:
-            cached = cls._get_cached_content_nolock(cache_key)
-            if cached is not None:
+            if cached := await cls._content_cache.get(cache_key):
                 return cached
             task = cls._content_inflight.get(cache_key)
             if task is None:
