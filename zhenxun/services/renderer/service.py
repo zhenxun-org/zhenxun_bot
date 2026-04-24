@@ -475,6 +475,18 @@ class RendererService:
             raise RuntimeError("ThemeManager尚未初始化。")
         return self._theme_manager.list_available_themes()
 
+    def clear_runtime_caches(self) -> dict[str, int]:
+        cleared: dict[str, int] = {}
+        if self._theme_manager:
+            cleared.update(self._theme_manager.clear_runtime_caches())
+        if self._template_engine and self._template_engine.env.cache:
+            jinja_cache = self._template_engine.env.cache
+            cache_size = len(jinja_cache)
+            jinja_cache.clear()
+            if cache_size:
+                cleared["jinja_env"] = cache_size
+        return cleared
+
     async def switch_theme(self, theme_name: str) -> str:
         """
         切换UI主题，加载新主题并持久化配置。

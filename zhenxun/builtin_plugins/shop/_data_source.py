@@ -19,9 +19,9 @@ from zhenxun.models.friend_user import FriendUser
 from zhenxun.models.goods_info import GoodsInfo
 from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.models.user_console import UserConsole
-from zhenxun.models.user_gold_log import UserGoldLog
 from zhenxun.models.user_props_log import UserPropsLog
 from zhenxun.services import avatar_service
+from zhenxun.services.buffered_writers import append_user_gold_log
 from zhenxun.services.log import logger
 from zhenxun.ui.models import ImageCell, TextCell
 from zhenxun.utils.enum import GoldHandle, PropHandle
@@ -480,10 +480,6 @@ class ShopManage:
         ).count()
         if goods.daily_limit and count >= goods.daily_limit:
             return "今天的购买已达限制了喔!"
-        await UserGoldLog.create(user_id=user_id, gold=price, handle=GoldHandle.BUY)
-        await UserPropsLog.create(
-            user_id=user_id, uuid=goods.uuid, gold=price, num=num, handle=PropHandle.BUY
-        )
         logger.info(
             f"花费 {price} 金币购买 {goods.goods_name} ×{num} 成功！",
             "购买道具",
@@ -494,6 +490,12 @@ class ShopManage:
             user.props[goods.uuid] = 0
         user.props[goods.uuid] += num
         await user.save(update_fields=["gold", "props"])
+        await append_user_gold_log(
+            user_id=user_id, gold=int(price), handle=GoldHandle.BUY
+        )
+        await UserPropsLog.create(
+            user_id=user_id, uuid=goods.uuid, gold=price, num=num, handle=PropHandle.BUY
+        )
         return f"花费 {price} 金币购买 {goods.goods_name} ×{num} 成功！"
 
     @classmethod

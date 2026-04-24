@@ -14,8 +14,8 @@ from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.models.sign_log import SignLog
 from zhenxun.models.sign_user import SignUser
 from zhenxun.models.user_console import UserConsole
-from zhenxun.models.user_gold_log import UserGoldLog
 from zhenxun.services.avatar_service import avatar_service
+from zhenxun.services.buffered_writers import append_user_gold_log
 from zhenxun.services.log import logger
 from zhenxun.ui.models import ImageCell, TextCell
 from zhenxun.utils.enum import GoldHandle
@@ -189,7 +189,7 @@ class SignManage:
             user_console = await UserConsole.get_user(user.user_id, platform)
             user_console.gold += gold
             await user_console.save(update_fields=["gold"])
-            await UserGoldLog.create(
+            await append_user_gold_log(
                 user_id=user.user_id,
                 gold=gold,
                 handle=GoldHandle.GET,
@@ -206,7 +206,7 @@ class SignManage:
                 user_console.props[goods.uuid] = 0
             user_console.props[goods.uuid] += 1
             await user_console.save(update_fields=["gold", "props"])
-            await UserGoldLog.create(
+            await append_user_gold_log(
                 user_id=user.user_id,
                 gold=gold,
                 handle=GoldHandle.GET,

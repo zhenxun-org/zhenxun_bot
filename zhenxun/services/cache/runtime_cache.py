@@ -557,6 +557,20 @@ class RuntimeCacheSync:
 
     @classmethod
     async def stop(cls) -> None:
+        cls._ready = False
+        if cls._publish_tasks:
+            tasks = list(cls._publish_tasks)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=1.0,
+                )
+            except asyncio.TimeoutError:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+            finally:
+                cls._publish_tasks.difference_update(tasks)
         if cls._task and not cls._task.done():
             cls._task.cancel()
         cls._task = None
@@ -572,7 +586,6 @@ class RuntimeCacheSync:
         except Exception:
             pass
         cls._redis = None
-        cls._ready = False
 
     @classmethod
     def publish_event(cls, cache_type: str, action: str, data: dict[str, Any]) -> None:

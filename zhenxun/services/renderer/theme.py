@@ -51,8 +51,10 @@ class ManifestRegistry:
         self._manifest_cache: dict[str, TemplateManifest] = {}
         self._lock = asyncio.Lock()
 
-    def clear_cache(self):
+    def clear_cache(self) -> int:
+        size = len(self._manifest_cache)
         self._manifest_cache.clear()
+        return size
 
     async def get_manifest(
         self, component_path: str, skin: str | None = None
@@ -361,6 +363,21 @@ class ThemeManager:
         self._component_dependency_cache: OrderedDict[
             tuple[type, str, str | None], ComponentDependency
         ] = OrderedDict()
+
+    def clear_runtime_caches(self) -> dict[str, int]:
+        cleared = {
+            "asset_resolution": len(self._asset_resolution_cache),
+            "global_template": len(self._global_template_cache),
+            "component_dependency": len(self._component_dependency_cache),
+        }
+        self._asset_resolution_cache.clear()
+        self._global_template_cache.clear()
+        self._component_dependency_cache.clear()
+        if self.manifest_registry:
+            manifest_count = self.manifest_registry.clear_cache()
+            if manifest_count:
+                cleared["manifest"] = manifest_count
+        return {key: value for key, value in cleared.items() if value}
 
     @staticmethod
     def _get_lru_entry(cache: OrderedDict, key: Any) -> Any:

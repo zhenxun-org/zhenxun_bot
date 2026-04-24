@@ -63,6 +63,11 @@ class AvatarService:
         identifier = str(identifier)
         return self.cache_path / platform / f"{identifier}.png"
 
+    def clear_memory_cache(self) -> int:
+        size = len(self._memory_cache)
+        self._memory_cache.clear()
+        return size
+
     async def get_avatar_path(
         self, platform: str, identifier: str, force_refresh: bool = False
     ) -> Path | None:

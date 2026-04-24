@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import atexit
 import importlib.metadata
 import os
 from pathlib import Path
@@ -154,18 +155,55 @@ def _run_launcher() -> None:
     )
 
     clear_launcher_restart_signal()
+    current_worker: subprocess.Popen | None = None
+    stopping = False
+
+    def _cleanup_current_worker() -> None:
+        if current_worker is not None:
+            _terminate_worker(current_worker)
+
+    atexit.register(_cleanup_current_worker)
+
+    def _handle_launcher_signal(signum, _frame) -> None:
+        nonlocal current_worker, stopping
+        if stopping:
+            raise SystemExit(128 + int(signum))
+        stopping = True
+        clear_launcher_restart_signal()
+        if current_worker is not None:
+            _terminate_worker(current_worker)
+        raise SystemExit(128 + int(signum))
+
+    handled_signals = [signal.SIGINT]
+    if hasattr(signal, "SIGTERM"):
+        handled_signals.append(signal.SIGTERM)
+    if hasattr(signal, "SIGBREAK"):
+        handled_signals.append(signal.SIGBREAK)
+    for sig in handled_signals:
+        try:
+            signal.signal(sig, _handle_launcher_signal)
+        except Exception:
+            pass
+
     while True:
+        worker_env = os.environ.copy()
+        worker_env["ZHENXUN_LAUNCHER_PID"] = str(os.getpid())
         worker = subprocess.Popen(
             _build_worker_command(),
             cwd=str(cwd),
             creationflags=_get_worker_creationflags(),
+            env=worker_env,
         )
+        current_worker = worker
         try:
             return_code = worker.wait()
         except KeyboardInterrupt:
             clear_launcher_restart_signal()
             _terminate_worker(worker)
             return
+        finally:
+            if current_worker is worker:
+                current_worker = None
 
         should_restart = consume_launcher_restart_signal()
         if should_restart:

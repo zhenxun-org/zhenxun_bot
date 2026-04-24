@@ -5,11 +5,10 @@ from tortoise import fields
 from tortoise.exceptions import IntegrityError
 
 from zhenxun.models.goods_info import GoodsInfo
+from zhenxun.services.buffered_writers import append_user_gold_log
 from zhenxun.services.db_context import Model
 from zhenxun.utils.enum import CacheType, GoldHandle
 from zhenxun.utils.exception import GoodsNotFound, InsufficientGold
-
-from .user_gold_log import UserGoldLog
 
 
 class UserConsole(Model):
@@ -117,7 +116,7 @@ class UserConsole(Model):
         user = await cls._get_user_for_write(user_id=user_id, platform=platform)
         user.gold += gold
         await user.save(update_fields=["gold"])
-        await UserGoldLog.create(
+        await append_user_gold_log(
             user_id=user_id, gold=gold, handle=GoldHandle.GET, source=source
         )
 
@@ -147,7 +146,7 @@ class UserConsole(Model):
             raise InsufficientGold()
         user.gold -= gold
         await user.save(update_fields=["gold"])
-        await UserGoldLog.create(
+        await append_user_gold_log(
             user_id=user_id, gold=gold, handle=handle, source=plugin_module
         )
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import gc
+import inspect
 import sys
 import time
 from typing import Any
@@ -135,11 +136,15 @@ async def _run_reclaim() -> None:
     }
 
     cleared["statistics"] = await _flush_statistics_buffer()
+    cleared["user_gold_logs"] = await _flush_user_gold_log_buffer()
     cleared["bounded_ttl_clear"] = await BoundedTTLCache.clear_all()
     cleared["cache_dict_clear"] = CacheDict.clear_all()
     cleared["cache_list_clear"] = CacheList.clear_all()
     cleared["runtime_negative"] = _clear_runtime_negative_caches()
     cleared["auth_local"] = _clear_auth_local_caches()
+    cleared["avatar_l1"] = _clear_avatar_memory_cache()
+    cleared["renderer_runtime"] = await _clear_renderer_runtime_caches()
+    cleared["message_manager"] = _clear_message_manager_cache()
     cleared["aiocache_memory"] = await _clear_simple_memory_backend()
 
     collected = gc.collect(2)
@@ -163,6 +168,17 @@ async def _flush_statistics_buffer() -> int:
     if module is None:
         return 0
     flush = getattr(module, "_flush_statistics_buffer", None)
+    if flush is None:
+        return 0
+    result = await flush("内存回收")
+    return int(result or 0)
+
+
+async def _flush_user_gold_log_buffer() -> int:
+    module = sys.modules.get("zhenxun.services.buffered_writers")
+    if module is None:
+        return 0
+    flush = getattr(module, "flush_user_gold_log_buffer", None)
     if flush is None:
         return 0
     result = await flush("内存回收")
@@ -213,6 +229,50 @@ def _clear_auth_local_caches() -> dict[str, int]:
             result[name] = len(cache)
             cache.clear()
     return result
+
+
+def _clear_avatar_memory_cache() -> int:
+    module = sys.modules.get("zhenxun.services.avatar_service")
+    if module is None:
+        return 0
+    service = getattr(module, "avatar_service", None)
+    clear = getattr(service, "clear_memory_cache", None)
+    if not callable(clear):
+        return 0
+    result = clear()
+    return result if isinstance(result, int) and result > 0 else 0
+
+
+async def _clear_renderer_runtime_caches() -> dict[str, int]:
+    module = sys.modules.get("zhenxun.services.renderer.service")
+    if module is None:
+        return {}
+    service = getattr(module, "renderer_service", None)
+    clear = getattr(service, "clear_runtime_caches", None)
+    if not callable(clear):
+        return {}
+    result = clear()
+    if inspect.isawaitable(result):
+        result = await result
+    if not isinstance(result, dict):
+        return {}
+    return {
+        str(key): int(value)
+        for key, value in result.items()
+        if isinstance(value, int) and value > 0
+    }
+
+
+def _clear_message_manager_cache() -> int:
+    module = sys.modules.get("zhenxun.utils.manager.message_manager")
+    if module is None:
+        return 0
+    manager_cls = getattr(module, "MessageManager", None)
+    clear = getattr(manager_cls, "clear_all", None)
+    if not callable(clear):
+        return 0
+    result = clear()
+    return result if isinstance(result, int) and result > 0 else 0
 
 
 def _get_total_rss() -> int | None:
