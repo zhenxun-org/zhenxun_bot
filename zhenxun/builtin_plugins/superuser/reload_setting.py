@@ -96,10 +96,20 @@ def _reschedule_auto_reload_job() -> None:
     logger.debug(f"自动重载配置任务间隔已设置为 {seconds} 秒", "重载配置")
 
 
-def _reload_runtime_config() -> None:
+async def _reload_plugin_limit_config() -> None:
+    from zhenxun.builtin_plugins.hooks.auth.auth_limit import LimitManager
+    from zhenxun.builtin_plugins.init.manager import manager
+
+    manager.init()
+    await manager.load_to_db()
+    await LimitManager.update_limits()
+
+
+async def _reload_runtime_config() -> None:
     Config.reload()
     get_llm_config.cache_clear()
     clear_model_cache()
+    await _reload_plugin_limit_config()
     with contextlib.suppress(Exception):
         _reschedule_auto_reload_job()
 
@@ -111,12 +121,12 @@ def _init_auto_reload_job() -> None:
 
 @_matcher.handle()
 async def _(session: EventSession, arparma: Arparma):
-    _reload_runtime_config()
+    await _reload_runtime_config()
     logger.debug("自动重载配置文件", arparma.header_result, session=session)
     await MessageUtils.build_message("重载完成!").send(reply_to=True)
 
 
 async def _auto_reload_config() -> None:
     if Config.get_config("reload_setting", "AUTO_RELOAD"):
-        _reload_runtime_config()
+        await _reload_runtime_config()
         logger.debug("已自动重载配置文件...")

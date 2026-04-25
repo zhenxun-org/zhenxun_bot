@@ -88,7 +88,7 @@ async def _handle_setting(
         )
 
 
-@PriorityLifecycle.on_startup(priority=5)
+@PriorityLifecycle.on_startup(priority=4)
 async def _():
     """
     初始化插件数据配置

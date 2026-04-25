@@ -31,7 +31,7 @@ _LIMIT_NOTICE_LIMITER = FreqLimiter(_LIMIT_NOTICE_CD)
 _LIMIT_NOTICE_TASKS: set[asyncio.Task] = set()
 
 
-@PriorityLifecycle.on_startup(priority=5)
+@PriorityLifecycle.on_startup(priority=7)
 async def _():
     """初始化限制"""
     await LimitManager.init_limit()
@@ -117,6 +117,7 @@ class LimitManager:
             cls.cd_limit = {}
             cls.block_limit = {}
             cls.count_limit = {}
+            cls.module_limit_cache.clear()
             # 添加新数据
             for limit in limit_list:
                 cls.add_limit(limit)
@@ -137,22 +138,22 @@ class LimitManager:
         """
         if limit.module not in cls.add_module:
             cls.add_module.append(limit.module)
-            if limit.limit_type == PluginLimitType.BLOCK:
-                cls.block_limit[limit.module] = Limit(
-                    limit=limit, limiter=UserBlockLimiter()
-                )
-            elif limit.limit_type == PluginLimitType.CD:
-                cd_value = int(limit.cd or 0)
-                cls.cd_limit[limit.module] = Limit(
-                    limit=limit, limiter=FreqLimiter(cd_value)
-                )
-            elif limit.limit_type == PluginLimitType.COUNT:
-                max_count = int(limit.max_count or 0)
-                if max_count <= 0:
-                    return
-                cls.count_limit[limit.module] = Limit(
-                    limit=limit, limiter=CountLimiter(max_count)
-                )
+        if limit.limit_type == PluginLimitType.BLOCK:
+            cls.block_limit[limit.module] = Limit(
+                limit=limit, limiter=UserBlockLimiter()
+            )
+        elif limit.limit_type == PluginLimitType.CD:
+            cd_value = int(limit.cd or 0)
+            cls.cd_limit[limit.module] = Limit(
+                limit=limit, limiter=FreqLimiter(cd_value)
+            )
+        elif limit.limit_type == PluginLimitType.COUNT:
+            max_count = int(limit.max_count or 0)
+            if max_count <= 0:
+                return
+            cls.count_limit[limit.module] = Limit(
+                limit=limit, limiter=CountLimiter(max_count)
+            )
 
     @classmethod
     def unblock(
