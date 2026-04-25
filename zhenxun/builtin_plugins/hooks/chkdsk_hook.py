@@ -16,14 +16,6 @@ from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
 
-malicious_check_time = Config.get_config("hook", "MALICIOUS_CHECK_TIME")
-malicious_ban_count = Config.get_config("hook", "MALICIOUS_BAN_COUNT")
-
-if not malicious_check_time:
-    raise ValueError("模块: [hook], 配置项: [MALICIOUS_CHECK_TIME] 为空或小于0")
-if not malicious_ban_count:
-    raise ValueError("模块: [hook], 配置项: [MALICIOUS_BAN_COUNT] 为空或小于0")
-
 
 class BanCheckLimiter:
     """
@@ -35,6 +27,10 @@ class BanCheckLimiter:
         self.mtime = defaultdict(float)
         self.default_check_time = default_check_time
         self.default_count = default_count
+
+    def configure(self, check_time: float, count: int) -> None:
+        self.default_check_time = check_time
+        self.default_count = count
 
     def add(self, key: str | float):
         if self.mint[key] == 1:
@@ -59,9 +55,20 @@ class BanCheckLimiter:
 
 
 _blmt = BanCheckLimiter(
-    malicious_check_time,
-    malicious_ban_count,
+    5,
+    4,
 )
+
+
+def _get_positive_config(key: str, cast_type: type[int] | type[float]) -> int | float:
+    value = Config.get_config("hook", key)
+    try:
+        parsed_value = cast_type(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"模块: [hook], 配置项: [{key}] 不是有效数字") from e
+    if parsed_value <= 0:
+        raise ValueError(f"模块: [hook], 配置项: [{key}] 为空或小于0")
+    return parsed_value
 
 
 # 恶意触发命令检测
@@ -90,9 +97,10 @@ async def _(
 
     user_id = session.id1
     group_id = session.id3 or session.id2
-    malicious_ban_time = Config.get_config("hook", "MALICIOUS_BAN_TIME")
-    if not malicious_ban_time:
-        raise ValueError("模块: [hook], 配置项: [MALICIOUS_BAN_TIME] 为空或小于0")
+    malicious_check_time = float(_get_positive_config("MALICIOUS_CHECK_TIME", float))
+    malicious_ban_count = int(_get_positive_config("MALICIOUS_BAN_COUNT", int))
+    malicious_ban_time = int(_get_positive_config("MALICIOUS_BAN_TIME", int))
+    _blmt.configure(malicious_check_time, malicious_ban_count)
     if user_id and module:
         if _blmt.check(f"{user_id}__{module}"):
             await BanConsole.ban(

@@ -17,6 +17,8 @@ import subprocess
 import sys
 import time
 
+GRACEFUL_SHUTDOWN_TIMEOUT = 15
+
 
 def _print_version() -> None:
     try:
@@ -97,7 +99,7 @@ def _run_worker() -> None:
             nonebot.logger.info(f"加载第三方插件目录: {ext}")
             nonebot.load_plugins(ext)
 
-    nonebot.run()
+    nonebot.run(timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT)
 
 
 def _build_worker_command() -> list[str]:

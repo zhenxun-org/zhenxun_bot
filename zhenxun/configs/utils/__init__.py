@@ -4,12 +4,12 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 import cattrs
+from nonebot.log import logger as _nonebot_logger
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
 from ruamel.yaml.scanner import ScannerError
 
 from zhenxun.configs.path_config import DATA_PATH
-from zhenxun.services.log import logger
 from zhenxun.utils.pydantic_compat import (
     _dump_pydantic_obj,
     _is_pydantic_type,
@@ -38,6 +38,33 @@ _yaml.indent = 2
 _yaml.allow_unicode = True
 
 T = TypeVar("T")
+_MISSING = object()
+
+
+class _ConfigLogger:
+    @staticmethod
+    def _emit(level: str, info: str, *, e: Exception | None = None) -> None:
+        logger = _nonebot_logger.opt(exception=e) if e else _nonebot_logger
+        getattr(logger, level)(info)
+
+    @classmethod
+    def debug(cls, info: str, *_, e: Exception | None = None, **__) -> None:
+        cls._emit("debug", info, e=e)
+
+    @classmethod
+    def info(cls, info: str, *_, e: Exception | None = None, **__) -> None:
+        cls._emit("info", info, e=e)
+
+    @classmethod
+    def warning(cls, info: str, *_, e: Exception | None = None, **__) -> None:
+        cls._emit("warning", info, e=e)
+
+    @classmethod
+    def error(cls, info: str, *_, e: Exception | None = None, **__) -> None:
+        cls._emit("error", info, e=e)
+
+
+logger = _ConfigLogger()
 
 
 class NoSuchConfig(Exception):
@@ -114,21 +141,83 @@ class ConfigsManager:
         self._simple_data: dict = {}
         self._simple_file = DATA_PATH / "config.yaml"
         self.add_module = []
-        _yaml = YAML()
         if file:
             file.parent.mkdir(exist_ok=True, parents=True)
             self.file = file
             self.load_data()
         if self._simple_file.exists():
-            try:
-                with self._simple_file.open(encoding="utf8") as f:
-                    self._simple_data = _yaml.load(f)
-            except ScannerError as e:
-                raise ScannerError(
-                    f"{e}\n**********************************************\n"
-                    f"****** 可能为config.yaml配置文件填写不规范 ******\n"
-                    f"**********************************************"
-                ) from e
+            self._load_simple_data(raise_on_error=True)
+            self._apply_simple_data(warn_unknown=False)
+
+    def _load_simple_data(self, *, raise_on_error: bool = False) -> None:
+        if not self._simple_file.exists():
+            self._simple_data = {}
+            return
+        try:
+            with self._simple_file.open(encoding="utf8") as f:
+                simple_data = _yaml.load(f) or {}
+        except ScannerError as e:
+            message = (
+                f"{e}\n**********************************************\n"
+                f"****** 可能为config.yaml配置文件填写不规范 ******\n"
+                f"**********************************************"
+            )
+            if raise_on_error:
+                raise ScannerError(message) from e
+            logger.warning(f"读取config.yaml失败，已跳过本次重载: {message}", e=e)
+            return
+        except Exception as e:
+            if raise_on_error:
+                raise RuntimeError(f"读取config.yaml失败: {e}") from e
+            logger.warning(f"读取config.yaml失败，已跳过本次重载: {e}", e=e)
+            return
+        if not isinstance(simple_data, dict):
+            message = "config.yaml 顶层必须为字典，已忽略当前内容。"
+            if raise_on_error:
+                raise ValueError(message)
+            logger.warning(message)
+            self._simple_data = {}
+            return
+        self._simple_data = simple_data
+
+    @staticmethod
+    def _find_mapping_key(data: dict, key: str) -> str | None:
+        if key in data:
+            return key
+        upper_key = key.upper()
+        for raw_key in data:
+            if str(raw_key).upper() == upper_key:
+                return raw_key
+        return None
+
+    def _get_simple_config_value(self, module: str, key: str) -> Any:
+        module_data = self._simple_data.get(module)
+        if not isinstance(module_data, dict):
+            return _MISSING
+        simple_key = self._find_mapping_key(module_data, key.upper())
+        if simple_key is None:
+            return _MISSING
+        return module_data[simple_key]
+
+    def _apply_simple_data(self, *, warn_unknown: bool) -> None:
+        for module, module_data in self._simple_data.items():
+            if not isinstance(module_data, dict):
+                if warn_unknown:
+                    logger.warning(f"配置组 {module} 不是字典，已跳过。")
+                continue
+            config_group = self._data.get(module)
+            if not config_group:
+                if warn_unknown:
+                    logger.warning(f"未知配置组 {module}，已跳过。")
+                continue
+            for raw_key, value in module_data.items():
+                key = str(raw_key).upper()
+                config_key = self._find_mapping_key(config_group.configs, key)
+                if config_key is None:
+                    if warn_unknown:
+                        logger.warning(f"未知配置项 {module}.{raw_key}，已跳过。")
+                    continue
+                config_group.configs[config_key].value = value
 
     def set_name(self, module: str, name: str):
         """设置插件配置中文名出
@@ -223,7 +312,11 @@ class ConfigsManager:
         if module in self._data and (config := self._data[module].configs.get(key)):
             existing_value = config.value
 
-        processed_value = self._normalize_config_data(value, existing_value)
+        simple_value = self._get_simple_config_value(module, key)
+        if simple_value is _MISSING:
+            processed_value = self._normalize_config_data(value, existing_value)
+        else:
+            processed_value = self._normalize_config_data(value, simple_value)
         processed_default_value = self._normalize_config_data(default_value)
 
         self.add_module.append(f"{module}:{key}".lower())
@@ -231,7 +324,7 @@ class ConfigsManager:
             config.help = help
             config.arg_parser = arg_parser
             config.type = type
-            if _override:
+            if simple_value is not _MISSING or _override:
                 config.value = processed_value
                 config.default_value = processed_default_value
         else:
@@ -371,12 +464,8 @@ class ConfigsManager:
 
     def reload(self):
         """重新加载配置文件"""
-        if self._simple_file.exists():
-            with open(self._simple_file, encoding="utf8") as f:
-                self._simple_data = _yaml.load(f)
-        for key in self._simple_data.keys():
-            for k in self._simple_data[key].keys():
-                self._data[key].configs[k].value = self._simple_data[key][k]
+        self._load_simple_data()
+        self._apply_simple_data(warn_unknown=True)
         self.save()
 
     def load_data(self):

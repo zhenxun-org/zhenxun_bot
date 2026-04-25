@@ -34,6 +34,31 @@ run_time = time.time()
 
 ws_router = APIRouter()
 router = APIRouter(prefix="/main")
+_SYSTEM_STATUS_CONNECTIONS: set[WebSocket] = set()
+_SYSTEM_STATUS_STOPPING = False
+
+
+async def _close_system_status_websocket(websocket: WebSocket) -> None:
+    with contextlib.suppress(Exception):
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await asyncio.wait_for(
+                websocket.close(code=1001, reason="server shutdown"),
+                timeout=2,
+            )
+
+
+@driver.on_shutdown
+async def _close_system_status_websockets() -> None:
+    global _SYSTEM_STATUS_STOPPING
+    _SYSTEM_STATUS_STOPPING = True
+    websockets = list(_SYSTEM_STATUS_CONNECTIONS)
+    if not websockets:
+        return
+    await asyncio.gather(
+        *(_close_system_status_websocket(websocket) for websocket in websockets),
+        return_exceptions=True,
+    )
+    _SYSTEM_STATUS_CONNECTIONS.clear()
 
 
 @router.get(
@@ -243,11 +268,39 @@ async def _(param: BotManageUpdateParam):
 @ws_router.websocket("/system_status")
 async def system_logs_realtime(websocket: WebSocket, sleep: int = 5):
     await websocket.accept()
+    _SYSTEM_STATUS_CONNECTIONS.add(websocket)
     logger.debug("ws system_status is connect")
-    with contextlib.suppress(
-        WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK
-    ):
-        while websocket.client_state == WebSocketState.CONNECTED:
+
+    disconnect_event = asyncio.Event()
+
+    async def _watch_disconnect() -> None:
+        try:
+            while websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.receive()
+        except (WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK):
+            pass
+        except Exception as e:
+            logger.debug(f"ws system_status receive stopped: {type(e).__name__}")
+        finally:
+            disconnect_event.set()
+
+    receive_task = asyncio.create_task(_watch_disconnect())
+    try:
+        while (
+            websocket.client_state == WebSocketState.CONNECTED
+            and not _SYSTEM_STATUS_STOPPING
+        ):
             system_status = await get_system_status()
-            await websocket.send_text(system_status.json())
-            await asyncio.sleep(sleep)
+            await asyncio.wait_for(websocket.send_text(system_status.json()), timeout=5)
+            try:
+                await asyncio.wait_for(disconnect_event.wait(), timeout=max(sleep, 1))
+            except TimeoutError:
+                pass
+    except (WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK):
+        pass
+    finally:
+        _SYSTEM_STATUS_CONNECTIONS.discard(websocket)
+        receive_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await receive_task
+        await _close_system_status_websocket(websocket)
