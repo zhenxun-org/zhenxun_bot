@@ -7,6 +7,7 @@ from zhenxun.services.log import logger
 from zhenxun.utils.common_utils import CommonUtils
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
+from .context import PermissionContext
 from .exception import SkipPluginException
 
 
@@ -16,6 +17,8 @@ async def auth_bot(
     bot_data: BotConsole | BotSnapshot | None = None,
     skip_fetch: bool = False,
     allow_sleep_bypass: bool = False,
+    *,
+    context: PermissionContext | None = None,
 ):
     """bot层面的权限检查
 
@@ -30,6 +33,9 @@ async def auth_bot(
     start_time = time.time()
 
     try:
+        if context is not None:
+            bot_id = context.event.bot_id
+            bot_data = context.bot_data
         bot: BotConsole | BotSnapshot | None = bot_data
         if bot is None and not skip_fetch:
             bot = await BotMemoryCache.get(bot_id)

@@ -19,9 +19,10 @@ from zhenxun.utils.limiters import CountLimiter, FreqLimiter, UserBlockLimiter
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.time_utils import TimeUtils
-from zhenxun.utils.utils import get_entity_ids
+from zhenxun.utils.utils import EntityIDs, get_entity_ids
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
+from .context import PermissionContext
 from .exception import SkipPluginException
 
 driver = nonebot.get_driver()
@@ -323,14 +324,23 @@ class LimitManager:
                 limiter.increase(key_type)
 
 
-async def auth_limit(plugin: PluginInfo, session: Uninfo):
+async def auth_limit(
+    plugin: PluginInfo,
+    session: Uninfo,
+    *,
+    context: PermissionContext | None = None,
+    entity: EntityIDs | None = None,
+):
     """插件限制
 
     参数:
         plugin: PluginInfo
         session: Uninfo
     """
-    entity = get_entity_ids(session)
+    if context is not None:
+        entity = context.entity
+    if entity is None:
+        entity = get_entity_ids(session)
     try:
         await asyncio.wait_for(
             LimitManager.check(

@@ -7,13 +7,18 @@ from zhenxun.models.user_console import UserConsole
 from zhenxun.services.log import logger
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
+from .context import PermissionContext
 from .exception import SkipPluginException
 
 DEFAULT_GOLD = 100
 
 
 async def auth_cost(
-    user: UserConsole | None, plugin: PluginInfo, session: Uninfo
+    user: UserConsole | None,
+    plugin: PluginInfo,
+    session: Uninfo,
+    *,
+    context: PermissionContext | None = None,
 ) -> int:
     """检测是否满足金币条件
 
@@ -28,6 +33,8 @@ async def auth_cost(
     start_time = time.time()
 
     try:
+        if context is not None and user is None:
+            user = context.user
         user_gold = user.gold if user else DEFAULT_GOLD
         if user_gold < plugin.cost_gold:
             """插件消耗金币不足"""

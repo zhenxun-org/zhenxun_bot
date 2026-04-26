@@ -14,6 +14,7 @@ from zhenxun.utils.enum import PluginType
 from zhenxun.utils.utils import EntityIDs, get_entity_ids
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
+from .context import PermissionContext
 from .exception import SkipPluginException
 from .utils import freq
 
@@ -181,6 +182,7 @@ async def auth_ban(
     session: Uninfo,
     plugin: PluginInfo,
     *,
+    context: PermissionContext | None = None,
     entity: EntityIDs | None = None,
     is_superuser: bool = False,
 ) -> None:
@@ -196,6 +198,9 @@ async def auth_ban(
             return
         if not matcher.plugin_name:
             return
+        if context is not None:
+            entity = context.entity
+            is_superuser = context.is_superuser
         if entity is None:
             entity = get_entity_ids(session)
         if is_superuser:

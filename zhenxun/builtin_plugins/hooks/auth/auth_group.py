@@ -7,6 +7,7 @@ from zhenxun.services.cache.runtime_cache import GroupSnapshot
 from zhenxun.services.log import logger
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD, SwitchEnum
+from .context import PermissionContext
 from .exception import SkipPluginException
 
 _GROUP_WAKE_PATTERN = re.compile(r"^醒来$", re.IGNORECASE)
@@ -34,6 +35,8 @@ async def auth_group(
     group: GroupConsole | GroupSnapshot | None,
     text: str | None,
     group_id: str | None,
+    *,
+    context: PermissionContext | None = None,
 ):
     """群黑名单检测 群总开关检测
 
@@ -42,6 +45,11 @@ async def auth_group(
         group: GroupConsole
         message: UniMsg
     """
+    if context is not None:
+        group = context.group or group
+        text = context.plain_text
+        group_id = context.group_id
+
     if not group_id:
         return
 

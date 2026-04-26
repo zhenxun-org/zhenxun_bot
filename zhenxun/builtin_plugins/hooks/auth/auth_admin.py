@@ -7,9 +7,10 @@ from zhenxun.models.level_user import LevelUser
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.services.cache.runtime_cache import LevelUserMemoryCache, LevelUserSnapshot
 from zhenxun.services.log import logger
-from zhenxun.utils.utils import get_entity_ids
+from zhenxun.utils.utils import EntityIDs, get_entity_ids
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
+from .context import PermissionContext
 from .exception import SkipPluginException
 
 
@@ -20,6 +21,9 @@ async def auth_admin(
         LevelUser | LevelUserSnapshot | None, LevelUser | LevelUserSnapshot | None
     ]
     | None = None,
+    *,
+    context: PermissionContext | None = None,
+    entity: EntityIDs | None = None,
 ):
     """管理员命令 个人权限
 
@@ -33,7 +37,12 @@ async def auth_admin(
         return
 
     try:
-        entity = get_entity_ids(session)
+        if context is not None:
+            entity = context.entity
+            if cached_levels is None:
+                cached_levels = context.admin_levels
+        if entity is None:
+            entity = get_entity_ids(session)
 
         global_user: LevelUser | LevelUserSnapshot | None = None
         group_users: LevelUser | LevelUserSnapshot | None = None
@@ -42,7 +51,7 @@ async def auth_admin(
             global_user, group_users = cached_levels
         else:
             global_user, group_users = await LevelUserMemoryCache.get_levels(
-                session.user.id, entity.group_id
+                entity.user_id, entity.group_id
             )
 
         user_level = global_user.user_level if global_user else 0
@@ -53,7 +62,7 @@ async def auth_admin(
                 raise SkipPluginException(
                     f"{plugin.name}({plugin.module}) 管理员权限不足...",
                     tip_message=[
-                        At(flag="user", target=session.user.id),
+                        At(flag="user", target=entity.user_id),
                         f"你的权限不足喔，该功能需要的权限等级: {plugin.admin_level}",
                     ],
                     tip_check_tag=entity.user_id,

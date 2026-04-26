@@ -16,6 +16,8 @@ from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.message import MessageUtils
 
+from .auth.context import resolve_actor_user_id, resolve_event_group_id
+
 
 class BanCheckLimiter:
     """
@@ -95,8 +97,8 @@ async def _(
     else:
         return
 
-    user_id = session.id1
-    group_id = session.id3 or session.id2
+    user_id = resolve_actor_user_id(event, session.id1)
+    group_id = resolve_event_group_id(event, session.id3 or session.id2)
     malicious_check_time = float(_get_positive_config("MALICIOUS_CHECK_TIME", float))
     malicious_ban_count = int(_get_positive_config("MALICIOUS_BAN_COUNT", int))
     malicious_ban_time = int(_get_positive_config("MALICIOUS_BAN_TIME", int))

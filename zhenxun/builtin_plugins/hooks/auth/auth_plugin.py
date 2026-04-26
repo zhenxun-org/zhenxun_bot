@@ -10,6 +10,7 @@ from zhenxun.services.log import logger
 from zhenxun.utils.enum import BlockType
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
+from .context import PermissionContext
 from .exception import IsSuperuserException, SkipPluginException
 from .utils import freq, is_poke
 
@@ -107,11 +108,16 @@ class GroupCheck:
 
 class PluginCheck:
     def __init__(
-        self, group: GroupConsole | GroupSnapshot | None, session: Uninfo, is_poke: bool
+        self,
+        group: GroupConsole | GroupSnapshot | None,
+        session: Uninfo,
+        is_poke: bool,
+        user_id: str | None,
     ):
         self.session = session
         self.is_poke = is_poke
         self.group_data = group
+        self.user_id = user_id or session.user.id
         self.group_id = None
         if group:
             self.group_id = group.group_id
@@ -126,13 +132,11 @@ class PluginCheck:
             IgnoredException: 忽略插件
         """
         if plugin.block_type == BlockType.PRIVATE:
-            should_tip = freq.is_send_limit_message(
-                plugin, self.session.user.id, self.is_poke
-            )
+            should_tip = freq.is_send_limit_message(plugin, self.user_id, self.is_poke)
             raise SkipPluginException(
                 f"{plugin.name}({plugin.module}) 该插件在私聊中已被禁用...",
                 tip_message="该功能在私聊中已被禁用..." if should_tip else None,
-                tip_check_tag=self.session.user.id if should_tip else None,
+                tip_check_tag=self.user_id if should_tip else None,
                 tip_background=should_tip,
             )
 
@@ -153,7 +157,7 @@ class PluginCheck:
             if self.group_data and self.group_data.is_super:
                 raise IsSuperuserException()
 
-            sid = self.group_id or self.session.user.id
+            sid = self.group_id or self.user_id
             should_tip = freq.is_send_limit_message(plugin, sid, self.is_poke)
             raise SkipPluginException(
                 f"{plugin.name}({plugin.module}) 全局未开启此功能...",
@@ -176,7 +180,9 @@ async def auth_plugin(
     session: Uninfo,
     event: Event,
     *,
+    context: PermissionContext | None = None,
     skip_group_block: bool = False,
+    user_id: str | None = None,
 ):
     """插件状态
 
@@ -187,8 +193,11 @@ async def auth_plugin(
     """
     start_time = time.time()
     try:
+        if context is not None:
+            group = context.group or group
+            user_id = context.user_id
         is_poke_event = is_poke(event)
-        user_check = PluginCheck(group, session, is_poke_event)
+        user_check = PluginCheck(group, session, is_poke_event, user_id)
 
         if group:
             block_set, super_block_set = _get_group_block_sets(group)

@@ -11,7 +11,6 @@ from nonebot.adapters import Bot, Event
 from nonebot.exception import IgnoredException
 from nonebot.matcher import Matcher
 import nonebot.message as nb_message
-from nonebot_plugin_alconna import UniMsg
 from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun.configs.utils import PluginExtraData
@@ -33,7 +32,6 @@ from zhenxun.services.message_load import is_overloaded
 from zhenxun.utils.enum import BlockType, GoldHandle, PluginType
 from zhenxun.utils.exception import InsufficientGold
 from zhenxun.utils.platform import PlatformUtils
-from zhenxun.utils.utils import get_entity_ids
 
 from .auth.auth_admin import auth_admin
 from .auth.auth_ban import auth_ban
@@ -44,6 +42,16 @@ from .auth.auth_limit import LimitManager, auth_limit
 from .auth.auth_plugin import auth_plugin
 from .auth.bot_filter import bot_filter
 from .auth.config import LOGGER_COMMAND, WARNING_THRESHOLD
+from .auth.context import (
+    EVENT_CACHE,
+    STATE_PLAIN_TEXT,
+    EventContext,
+    PermissionContext,
+    get_event_context,
+    get_permission_side_effect_cache,
+    set_route_modules,
+    store_permission_context,
+)
 from .auth.exception import (
     IsSuperuserException,
     PermissionExemption,
@@ -53,7 +61,6 @@ from .auth.utils import send_message
 
 AUTH_HOOKS_CONCURRENCY_LIMIT = 5
 AUTH_DB_CONCURRENCY_LIMIT = 6
-AUTH_EVENT_CACHE_TTL = 5  # 增加到5秒，减少缓存抖动
 
 
 # 超时设置（秒）
@@ -73,13 +80,6 @@ CIRCUIT_RESET_TIME = 300  # 5分钟
 # 并发控制：限制同时进入 hooks 并行检查的协程数
 HOOKS_CONCURRENCY_LIMIT = AUTH_HOOKS_CONCURRENCY_LIMIT
 DB_CONCURRENCY_LIMIT = AUTH_DB_CONCURRENCY_LIMIT
-
-EVENT_CACHE_TTL = AUTH_EVENT_CACHE_TTL
-EVENT_CACHE = (
-    CacheDict("AUTH_EVENT_CACHE", expire=EVENT_CACHE_TTL)
-    if EVENT_CACHE_TTL > 0
-    else None
-)
 
 # 路由索引缓存
 _ROUTE_INDEX_LOCK = asyncio.Lock()
@@ -161,33 +161,6 @@ def _debug_log(message: str, *args, **kwargs) -> None:
     if is_overloaded():
         return
     logger.debug(message, *args, **kwargs)
-
-
-def _event_cache_key(event: Event, session: Uninfo, entity) -> str:
-    msg_id = getattr(event, "message_id", None)
-    if msg_id is None:
-        msg_id = getattr(event, "id", None)
-    if msg_id is None:
-        msg_id = id(event)
-    platform = PlatformUtils.get_platform(session)
-    group_id = entity.group_id or ""
-    channel_id = entity.channel_id or ""
-    return (
-        f"{platform}:{session.self_id}:{entity.user_id}:"
-        f"{group_id}:{channel_id}:{msg_id}"
-    )
-
-
-def _get_event_cache(event: Event, session: Uninfo, entity):
-    if not EVENT_CACHE:
-        return None
-    key = _event_cache_key(event, session, entity)
-    try:
-        return EVENT_CACHE[key]
-    except KeyError:
-        cache = {}
-        EVENT_CACHE[key] = cache
-        return cache
 
 
 def _normalize_command(command: str) -> str:
@@ -488,6 +461,9 @@ def _event_plain_text(event: Event) -> str:
 def _state_plain_text(state: dict | None) -> str:
     if state is None:
         return ""
+    context = get_event_context(state)
+    if context is not None:
+        return context.plain_text.strip()
     text = state.get("_zx_plain_text")
     if isinstance(text, str):
         return text.strip()
@@ -496,6 +472,9 @@ def _state_plain_text(state: dict | None) -> str:
 
 def _get_route_modules_for_event(event: Event, state: dict | None = None) -> set[str]:
     if state is not None:
+        context = get_event_context(state)
+        if context is not None and context.route_modules_loaded:
+            return context.route_modules
         route_modules = state.get("_zx_route_modules")
         if isinstance(route_modules, set):
             return route_modules
@@ -506,8 +485,48 @@ def _get_route_modules_for_event(event: Event, state: dict | None = None) -> set
         route_modules = _match_route_modules(_event_plain_text(event))
         _CHECK_MATCHER_ROUTE_CACHE[key] = route_modules
     if state is not None:
-        state["_zx_route_modules"] = route_modules
+        context = get_event_context(state)
+        if context is not None:
+            set_route_modules(state, context, route_modules)
+        else:
+            state["_zx_route_modules"] = route_modules
     return route_modules
+
+
+def _prepare_handle_event_state(event: Event, state: dict) -> None:
+    get_permission_side_effect_cache(state=state)
+    if event.get_type() != "message":
+        return
+    if _state_plain_text(state):
+        return
+    text = _event_plain_text(event)
+    if text:
+        state[STATE_PLAIN_TEXT] = text
+
+
+def _build_matcher_state(base_state: dict) -> dict:
+    get_permission_side_effect_cache(state=base_state)
+    matcher_state = base_state.copy()
+    get_permission_side_effect_cache(state=matcher_state)
+    return matcher_state
+
+
+async def _run_selected_matcher(
+    matcher: type[Matcher],
+    bot: Bot,
+    event: Event,
+    state: dict,
+    stack,
+    dependency_cache,
+) -> None:
+    await nb_message.check_and_run_matcher(
+        matcher,
+        bot,
+        event,
+        state,
+        stack,
+        dependency_cache,
+    )
 
 
 def _record_prefilter_stats(
@@ -887,6 +906,7 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
             logger_.opt(colors=True, exception=e).warning(
                 "Error while parsing command for event"
             )
+        _prepare_handle_event_state(event, state)
 
         break_flag = False
 
@@ -923,13 +943,14 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
                         _record_prefilter_stats(skip, reason, "before_task")
                         if skip:
                             continue
+                        matcher_state = _build_matcher_state(state)
                         tg.start_soon(
                             run_coro_with_shield,
-                            nb_message.check_and_run_matcher(
+                            _run_selected_matcher(
                                 matcher,
                                 bot,
                                 event,
-                                state.copy(),
+                                matcher_state,
                                 stack,
                                 dependency_cache,
                             ),
@@ -973,29 +994,6 @@ def _uninstall_handle_event_selector() -> None:
     _ORIGINAL_ADAPTER_HANDLE_EVENTS.clear()
     _HANDLE_EVENT_PATCHED = False
     _ORIGINAL_HANDLE_EVENT = None
-
-
-def _get_message_text(
-    message: UniMsg | None,
-    event_cache: dict | None,
-    event: Event | None = None,
-) -> str:
-    if event_cache is not None:
-        cached = event_cache.get("plain_text")
-        if isinstance(cached, str):
-            return cached
-
-    text = ""
-    if message is not None:
-        with contextlib.suppress(Exception):
-            text = message.extract_plain_text()
-    if not text and event is not None:
-        with contextlib.suppress(Exception):
-            text = (event.get_plaintext() or "").strip()
-
-    if event_cache is not None:
-        event_cache["plain_text"] = text
-    return text
 
 
 async def _get_route_context(text: str, event_cache: dict | None) -> set[str]:
@@ -1113,7 +1111,9 @@ def _group_has_plugin_block(group, module: str) -> bool:
     )
 
 
-def _needs_auth_plugin(plugin: PluginInfo, group, entity) -> bool:
+def _needs_auth_plugin(plugin: PluginInfo, context: PermissionContext) -> bool:
+    group = context.group
+    entity = context.entity
     if plugin.block_type == BlockType.ALL and not plugin.status:
         if group and getattr(group, "is_super", False):
             return False
@@ -1148,11 +1148,11 @@ async def _get_bot_data_cached(
 
 
 async def _get_admin_levels_cached(
-    session: Uninfo, entity, event_cache
+    entity, event_cache
 ) -> tuple[tuple[LevelUserSnapshot | None, LevelUserSnapshot | None] | None, bool]:
     if event_cache is not None and "admin_levels" in event_cache:
         return event_cache.get("admin_levels"), event_cache.get("admin_timeout", False)
-    levels = await LevelUserMemoryCache.get_levels(session.user.id, entity.group_id)
+    levels = await LevelUserMemoryCache.get_levels(entity.user_id, entity.group_id)
     if event_cache is not None:
         event_cache["admin_levels"] = levels
         event_cache["admin_timeout"] = False
@@ -1290,7 +1290,7 @@ async def get_plugin_cost(
     plugin: PluginInfo,
     session: Uninfo,
     *,
-    is_superuser: bool = False,
+    context: PermissionContext | None = None,
 ) -> int:
     """获取插件费用
 
@@ -1307,7 +1307,10 @@ async def get_plugin_cost(
     返回:
         int: 调用插件金币费用
     """
-    cost_gold = await with_timeout(auth_cost(user, plugin, session), name="auth_cost")
+    cost_gold = await with_timeout(
+        auth_cost(user, plugin, session, context=context), name="auth_cost"
+    )
+    is_superuser = context.is_superuser if context is not None else False
     if is_superuser:
         if plugin.plugin_type == PluginType.SUPERUSER:
             raise IsSuperuserException()
@@ -1399,14 +1402,7 @@ async def _leave_hooks_section():
 
 async def route_precheck(
     matcher: Matcher,
-    event: Event,
-    session: Uninfo,
-    message: UniMsg | None,
-    *,
-    entity=None,
-    event_cache: dict | None = None,
-    text: str | None = None,
-    route_modules: set[str] | None = None,
+    context: EventContext,
 ) -> bool:
     module = matcher.plugin_name or ""
     if not module:
@@ -1415,19 +1411,20 @@ async def route_precheck(
         return False
     if not _is_command_matcher_class(type(matcher)):
         return False
-    if entity is None:
-        entity = get_entity_ids(session)
-    if event_cache is None:
-        event_cache = _get_event_cache(event, session, entity)
-    if text is None:
-        text = _get_message_text(message, event_cache, event)
+
+    route_modules = context.route_modules if context.route_modules_loaded else None
     if route_modules is None:
-        route_modules = await _get_route_context(text, event_cache)
+        route_modules = await _get_route_context(
+            context.plain_text,
+            context.event_cache,
+        )
+        set_route_modules(None, context, route_modules)
+
     if module in _ROUTE_MODULES_WITH_COMMANDS and module not in route_modules:
         if _matcher_has_alconna_shortcuts(type(matcher)):
             return False
-        if event_cache is not None:
-            event_cache["route_skip"] = True
+        if context.event_cache is not None:
+            context.event_cache["route_skip"] = True
         return True
     return False
 
@@ -1437,14 +1434,10 @@ async def auth(
     event: Event,
     bot: Bot,
     session: Uninfo,
-    message: UniMsg | None,
     *,
+    context: EventContext,
     skip_ban: bool = False,
-    entity=None,
-    event_cache: dict | None = None,
-    text: str | None = None,
-    route_modules: set[str] | None = None,
-    is_superuser: bool = False,
+    state: dict | None = None,
 ):
     """权限检查
 
@@ -1453,20 +1446,28 @@ async def auth(
         event: Event
         bot: bot
         session: Uninfo
-        message: UniMsg
+        context: EventContext
     """
     start_time = time.time()
     cost_gold = 0
     ignore_flag = False
-    if entity is None:
-        entity = get_entity_ids(session)
+    entity = context.entity
+    event_cache = context.event_cache
+    text = context.plain_text
+    is_superuser = context.is_superuser
+    route_modules = context.route_modules if context.route_modules_loaded else None
     module = matcher.plugin_name or ""
     is_command_matcher = _is_command_matcher_class(type(matcher))
-    if event_cache is None:
-        event_cache = _get_event_cache(event, session, entity)
     auth_allowed = None
     auth_result_cache = None
     admin_checked_pre = False
+    permission_context: PermissionContext | None = None
+    side_effect_cache = get_permission_side_effect_cache(
+        state=state,
+        event_cache=event_cache,
+    )
+    side_effect_lock = None
+    entered_side_effect_lock = False
 
     # 仅在慢请求时记录 hook 明细，避免热路径高频构造字符串
     hook_recorder = HookTraceRecorder(start_time)
@@ -1480,14 +1481,17 @@ async def auth(
             auth_allowed = True
             return
 
-        if event_cache is not None:
-            auth_result_cache = event_cache.setdefault("auth_result", {})
-            cached_result = auth_result_cache.get(module)
-            if cached_result is not None:
-                allowed, reason = cached_result
-                if not allowed:
-                    raise SkipPluginException(reason or "auth cached skip")
-                return
+        side_effect_lock = side_effect_cache.lock_for(module)
+        await side_effect_lock.acquire()
+        entered_side_effect_lock = True
+
+        auth_result_cache = side_effect_cache.auth_results
+        cached_result = auth_result_cache.get(module)
+        if cached_result is not None:
+            allowed, reason = cached_result
+            if not allowed:
+                raise SkipPluginException(reason or "auth cached skip")
+            return
 
         if _is_hidden_plugin(matcher):
             auth_allowed = True
@@ -1495,10 +1499,9 @@ async def auth(
         if event_cache is not None and event_cache.get("ban_state") is True:
             raise SkipPluginException("user or group banned (cached)")
 
-        if text is None:
-            text = _get_message_text(message, event_cache, event)
         if route_modules is None:
             route_modules = await _get_route_context(text, event_cache)
+            set_route_modules(state, context, route_modules)
         route_skip_checks = (
             is_command_matcher
             and module in _ROUTE_MODULES_WITH_COMMANDS
@@ -1512,7 +1515,7 @@ async def auth(
             auth_allowed = True
             return
 
-        platform = PlatformUtils.get_platform(session)
+        platform = context.platform
         # 获取插件和用户数据
         plugin_user_start = time.time()
         try:
@@ -1538,6 +1541,14 @@ async def auth(
             auth_allowed = True
             return
 
+        permission_context = PermissionContext(
+            event=context,
+            module=module,
+            plugin=plugin,
+            user=user,
+        )
+        store_permission_context(state, permission_context)
+
         if not route_skip_checks and _needs_admin_check(plugin):
             if plugin.plugin_type in {
                 PluginType.SUPERUSER,
@@ -1558,13 +1569,18 @@ async def auth(
                     admin_timeout = False
                     if event_cache is not None:
                         admin_levels, admin_timeout = await _get_admin_levels_cached(
-                            session, entity, event_cache
+                            entity, event_cache
                         )
+                    permission_context.admin_levels = admin_levels
                     if admin_timeout:
                         hook_recorder.set("auth_admin", "timeout")
                     else:
                         admin_start = time.time()
-                        await auth_admin(plugin, session, cached_levels=admin_levels)
+                        await auth_admin(
+                            plugin,
+                            session,
+                            context=permission_context,
+                        )
                         hook_recorder.set(
                             "auth_admin", f"{time.time() - admin_start:.3f}s(pre)"
                         )
@@ -1588,8 +1604,7 @@ async def auth(
                         matcher,
                         session,
                         plugin,
-                        entity=entity,
-                        is_superuser=is_superuser,
+                        context=permission_context,
                     )
                     hook_recorder.set("auth_ban", f"{time.time() - ban_start:.3f}s")
                     if event_cache is not None:
@@ -1609,7 +1624,7 @@ async def auth(
                         user,
                         plugin,
                         session,
-                        is_superuser=is_superuser,
+                        context=permission_context,
                     ),
                     name="get_plugin_cost",
                 )
@@ -1623,7 +1638,7 @@ async def auth(
             hook_recorder.set("cost_gold", "skipped")
 
         # 执行 bot_filter
-        bot_filter(session)
+        bot_filter(session, context=permission_context)
 
         group = await _get_group_cached(entity, event_cache)
 
@@ -1641,8 +1656,14 @@ async def auth(
             and not route_skip_checks
         ):
             admin_levels, admin_timeout = await _get_admin_levels_cached(
-                session, entity, event_cache
+                entity, event_cache
             )
+
+        permission_context.group = group
+        permission_context.bot_data = bot_data
+        if admin_levels is not None:
+            permission_context.admin_levels = admin_levels
+        store_permission_context(state, permission_context)
 
         # 并行执行所有 hook 检查，并记录执行时间
         hooks_start = time.time()
@@ -1661,6 +1682,7 @@ async def auth(
                         plugin,
                         bot.self_id,
                         allow_sleep_bypass=allow_sleep_bypass,
+                        context=permission_context,
                     ),
                     "auth_bot",
                     hook_recorder,
@@ -1678,6 +1700,7 @@ async def auth(
                             bot_data=bot_data,
                             skip_fetch=True,
                             allow_sleep_bypass=allow_sleep_bypass,
+                            context=permission_context,
                         ),
                         "auth_bot",
                         hook_recorder,
@@ -1689,7 +1712,13 @@ async def auth(
         else:
             hook_tasks.append(
                 time_hook(
-                    auth_group(plugin, group, text, entity.group_id),
+                    auth_group(
+                        plugin,
+                        group,
+                        text,
+                        entity.group_id,
+                        context=permission_context,
+                    ),
                     "auth_group",
                     hook_recorder,
                 )
@@ -1698,7 +1727,11 @@ async def auth(
         if not route_skip_checks and plugin.admin_level and not admin_checked_pre:
             if event_cache is None:
                 hook_tasks.append(
-                    time_hook(auth_admin(plugin, session), "auth_admin", hook_recorder)
+                    time_hook(
+                        auth_admin(plugin, session, context=permission_context),
+                        "auth_admin",
+                        hook_recorder,
+                    )
                 )
             else:
                 if admin_timeout:
@@ -1706,7 +1739,11 @@ async def auth(
                 else:
                     hook_tasks.append(
                         time_hook(
-                            auth_admin(plugin, session, cached_levels=admin_levels),
+                            auth_admin(
+                                plugin,
+                                session,
+                                context=permission_context,
+                            ),
                             "auth_admin",
                             hook_recorder,
                         )
@@ -1716,7 +1753,7 @@ async def auth(
 
         if is_superuser:
             hook_recorder.set("auth_plugin", "superuser")
-        elif not route_skip_checks and _needs_auth_plugin(plugin, group, entity):
+        elif not route_skip_checks and _needs_auth_plugin(plugin, permission_context):
             hook_tasks.append(
                 time_hook(
                     auth_plugin(
@@ -1724,6 +1761,7 @@ async def auth(
                         group,
                         session,
                         event,
+                        context=permission_context,
                         skip_group_block=is_superuser,
                     ),
                     "auth_plugin",
@@ -1737,7 +1775,11 @@ async def auth(
             has_limits = await _has_limits_cached(module, event_cache)
             if has_limits:
                 hook_tasks.append(
-                    time_hook(auth_limit(plugin, session), "auth_limit", hook_recorder)
+                    time_hook(
+                        auth_limit(plugin, session, context=permission_context),
+                        "auth_limit",
+                        hook_recorder,
+                    )
                 )
             else:
                 hook_recorder.set("auth_limit", "skipped")
@@ -1800,6 +1842,9 @@ async def auth(
                 )
         if auth_result_cache is not None and auth_allowed is not None:
             auth_result_cache[module] = (auth_allowed, None)
+        if entered_side_effect_lock and side_effect_lock is not None:
+            with contextlib.suppress(Exception):
+                side_effect_lock.release()
     # 扣除金币
     if not ignore_flag and cost_gold > 0:
         gold_start = time.time()
