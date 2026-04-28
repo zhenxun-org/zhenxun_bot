@@ -18,12 +18,7 @@ from zhenxun.utils.repo_utils import RepoFileManager
 from zhenxun.utils.repo_utils.models import RepoFileInfo, RepoType
 from zhenxun.utils.utils import is_number, win_on_rm_error
 
-from .config import (
-    BASE_PATH,
-    DEFAULT_GITHUB_URL,
-    EXTRA_GITHUB_URL,
-    LOG_COMMAND,
-)
+from .config import BASE_PATH, DEFAULT_GITHUB_URL, EXTRA_GITHUB_URL, LOG_COMMAND
 from .exceptions import PluginStoreException
 
 _PLUGIN_STORE_DATA_CACHE = BoundedTTLCache[
@@ -383,7 +378,7 @@ class StoreManager:
             requirement_file = target_dir / requirement_path.path
             if requirement_file.exists():
                 is_install_req = True
-                await VirtualEnvPackageManager.add_requirement(requirement_file)
+                await VirtualEnvPackageManager.install_requirement(requirement_file)
 
         if not is_install_req:
             # 从仓库根目录查找文件
@@ -404,13 +399,13 @@ class StoreManager:
                     f"开始安装插件 {module_path} 依赖文件: {requirement_path}",
                     LOG_COMMAND,
                 )
-                await VirtualEnvPackageManager.add_requirement(requirement_path)
+                await VirtualEnvPackageManager.install_requirement(requirement_path)
             if requirements_path.exists():
                 logger.info(
                     f"开始安装插件 {module_path} 依赖文件: {requirements_path}",
                     LOG_COMMAND,
                 )
-                await VirtualEnvPackageManager.add_requirement(requirements_path)
+                await VirtualEnvPackageManager.install_requirement(requirements_path)
 
     @classmethod
     async def remove_plugin(cls, index_or_module: str) -> str:
