@@ -728,6 +728,8 @@ async def _check_matcher_prefilter(
     if ai_route_modules and module not in ai_route_modules:
         if not _matcher_matches_ai_route_heads(matcher_cls, ai_route_heads):
             return True, "route_miss"
+    elif ai_route_modules:
+        return False, None
 
     if not _ROUTE_INDEX_READY:
         await _ensure_route_index()
@@ -797,6 +799,8 @@ def _check_matcher_prefilter_before_task(
     if ai_route_modules and module not in ai_route_modules:
         if not _matcher_matches_ai_route_heads(matcher_cls, ai_route_heads):
             return True, "route_miss"
+    elif ai_route_modules:
+        return False, None
 
     if not _ROUTE_INDEX_READY:
         return False, None

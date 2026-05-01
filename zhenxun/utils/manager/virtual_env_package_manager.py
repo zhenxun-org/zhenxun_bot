@@ -8,7 +8,6 @@ from zhenxun.configs.config import Config
 from zhenxun.services.log import logger
 
 LOG_COMMAND = "VirtualEnvPackageManager"
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 Config.add_plugin_config(
     "virtualenv",
@@ -194,43 +193,8 @@ class VirtualEnvPackageManager:
 
     @classmethod
     async def add_requirement(cls, requirement_file: Path):
-        """将依赖文件写入项目依赖并同步环境
-
-        插件商店安装依赖需要持久化到 pyproject.toml/uv.lock，避免重建环境后丢失。
-        """
-        if not requirement_file.exists():
-            raise FileNotFoundError(f"依赖文件 {requirement_file} 不存在", LOG_COMMAND)
-        cls._clean_requirements_file(requirement_file)
-        try:
-            command = [
-                "uv",
-                "add",
-                "--requirements",
-                str(requirement_file.absolute()),
-            ]
-            logger.info(f"执行项目依赖添加指令: {command}", LOG_COMMAND)
-            result = await asyncio.to_thread(
-                subprocess.run,
-                command,
-                cwd=PROJECT_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            logger.debug(
-                f"项目依赖添加指令执行完成: {result.stdout}",
-                LOG_COMMAND,
-            )
-            return result.stdout
-        except (CalledProcessError, FileNotFoundError) as e:
-            stderr = e.stderr if isinstance(e, CalledProcessError) else str(e)
-            logger.error(
-                f"项目依赖添加指令执行失败: {stderr}.",
-                LOG_COMMAND,
-            )
-            return stderr
+        """兼容旧调用：安装 requirements 文件到当前虚拟环境。"""
+        return await cls.install_requirement(requirement_file)
 
     @classmethod
     async def list(cls) -> str:

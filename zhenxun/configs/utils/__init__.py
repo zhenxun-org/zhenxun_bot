@@ -256,24 +256,30 @@ class ConfigsManager:
 
         return result
 
-    def _normalize_config_data(self, value: Any, original_value: Any = None) -> Any:
+    def _normalize_config_data(
+        self,
+        value: Any,
+        original_value: Any = _MISSING,
+    ) -> Any:
         """标准化配置数据，处理BaseModel和字典的情况
 
         参数:
             value: 要标准化的值
-            original_value: 原始值，用于合并字典
+            original_value: 原始值/用户配置值，用于保留用户配置并补齐字典默认项
 
         返回:
             标准化后的值
         """
         processed_value = _dump_pydantic_obj(value)
 
-        if isinstance(processed_value, dict) and original_value is not None:
-            processed_original = _dump_pydantic_obj(original_value)
+        if original_value is _MISSING:
+            return processed_value
 
-            if isinstance(processed_original, dict):
-                return self._merge_dicts(processed_value, processed_original)
-
+        processed_original = _dump_pydantic_obj(original_value)
+        if isinstance(processed_value, dict) and isinstance(processed_original, dict):
+            return self._merge_dicts(processed_value, processed_original)
+        if processed_original is not None:
+            return processed_original
         return processed_value
 
     def add_plugin_config(
@@ -308,7 +314,7 @@ class ConfigsManager:
         if not module or not key:
             raise ValueError("add_plugin_config: module和key不能为为空")
 
-        existing_value = None
+        existing_value = _MISSING
         if module in self._data and (config := self._data[module].configs.get(key)):
             existing_value = config.value
 
