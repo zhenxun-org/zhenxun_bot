@@ -396,6 +396,7 @@ class StoreManager:
                     ("requirement.txt", requirement_path),
                     ("requirements.txt", requirements_path),
                 ],
+                branch,
                 repo_type=repo_type,
                 ignore_error=True,
             )
