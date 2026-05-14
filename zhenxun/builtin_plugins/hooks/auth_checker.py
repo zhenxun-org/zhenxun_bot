@@ -1,10 +1,12 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 import contextlib
+from dataclasses import dataclass, field
 import importlib
 import re
 import time
 from typing import cast
+import weakref
 
 from nonebot import get_loaded_plugins
 from nonebot.adapters import Bot, Event
@@ -61,6 +63,15 @@ from .auth.utils import send_message
 
 AUTH_HOOKS_CONCURRENCY_LIMIT = 5
 AUTH_DB_CONCURRENCY_LIMIT = 6
+AUTH_DISPATCH_COMMAND_EXACT_LIMIT = 96
+AUTH_DISPATCH_COMMAND_SHORTCUT_LIMIT = 32
+AUTH_DISPATCH_COMMAND_REGEX_LIMIT = 8
+AUTH_DISPATCH_SYSTEM_LIMIT = 64
+AUTH_DISPATCH_PASSIVE_LIGHT_LIMIT = 12
+AUTH_DISPATCH_PASSIVE_DB_LIMIT = 4
+AUTH_DISPATCH_PASSIVE_HTTP_LIMIT = 4
+AUTH_DISPATCH_PASSIVE_AI_LIMIT = 2
+AUTH_DISPATCH_PASSIVE_RENDER_LIMIT = 2
 
 
 # 超时设置（秒）
@@ -90,6 +101,7 @@ _ROUTE_MODULES_WITH_COMMANDS: set[str] = set()
 MATCHER_ROUTE_PREFILTER_TTL = 2
 PREFILTER_STATS_LOG_INTERVAL = 10.0
 CACHE_SWEEP_INTERVAL = 1.0
+DISPATCH_STATS_LOG_INTERVAL = 10.0
 
 # 全局信号量与计数器
 HOOKS_ACTIVE_COUNT = 0
@@ -97,6 +109,22 @@ HOOKS_SEMAPHORE = asyncio.Semaphore(HOOKS_CONCURRENCY_LIMIT)
 
 DB_SEMAPHORE = asyncio.Semaphore(DB_CONCURRENCY_LIMIT)
 DB_ACTIVE_COUNT = 0
+_DISPATCH_LANE_LIMITS: dict[str, int] = {
+    "command_exact": AUTH_DISPATCH_COMMAND_EXACT_LIMIT,
+    "command_shortcut": AUTH_DISPATCH_COMMAND_SHORTCUT_LIMIT,
+    "command_regex": AUTH_DISPATCH_COMMAND_REGEX_LIMIT,
+    "system": AUTH_DISPATCH_SYSTEM_LIMIT,
+    "passive_light": AUTH_DISPATCH_PASSIVE_LIGHT_LIMIT,
+    "passive_db": AUTH_DISPATCH_PASSIVE_DB_LIMIT,
+    "passive_http": AUTH_DISPATCH_PASSIVE_HTTP_LIMIT,
+    "passive_ai": AUTH_DISPATCH_PASSIVE_AI_LIMIT,
+    "passive_render": AUTH_DISPATCH_PASSIVE_RENDER_LIMIT,
+}
+_DISPATCH_LANE_SEMAPHORES = {
+    lane: asyncio.Semaphore(limit)
+    for lane, limit in _DISPATCH_LANE_LIMITS.items()
+    if limit > 0
+}
 _CHECK_MATCHER_PATCHED = False
 _ORIGINAL_CHECK_AND_RUN_MATCHER: Callable[..., Awaitable[None]] | None = None
 _HANDLE_EVENT_PATCHED = False
@@ -104,7 +132,7 @@ _ORIGINAL_HANDLE_EVENT: Callable[..., Awaitable[None]] | None = None
 _ORIGINAL_ADAPTER_HANDLE_EVENTS: dict[object, object] = {}
 _MATCHER_COMMAND_TYPE_CACHE: dict[type[Matcher], bool] = {}
 _MATCHER_COMMAND_LITERAL_CACHE: dict[type[Matcher], tuple[str, ...] | None] = {}
-_MATCHER_ALCONNA_SHORTCUT_CACHE: dict[type[Matcher], bool] = {}
+_MATCHER_ALCONNA_SHORTCUT_CACHE: dict[type[Matcher], tuple[str, ...] | None] = {}
 _CHECK_MATCHER_ROUTE_CACHE = CacheDict(
     "AUTH_MATCHER_ROUTE_CACHE", expire=MATCHER_ROUTE_PREFILTER_TTL
 )
@@ -121,11 +149,112 @@ _PREFILTER_STATS = {
     "empty_text": 0,
 }
 _PREFILTER_LAST_LOG = 0.0
+_DISPATCH_SELECTED = 0
+_DISPATCH_SKIPPED = 0
+_DISPATCH_SELECTED_BY_LANE: dict[str, int] = {
+    "command_exact": 0,
+    "command_shortcut": 0,
+    "command_regex": 0,
+    "system": 0,
+    "passive_light": 0,
+    "passive_db": 0,
+    "passive_http": 0,
+    "passive_ai": 0,
+    "passive_render": 0,
+}
+_DISPATCH_SKIPPED_BY_LANE: dict[str, int] = {
+    "command_exact": 0,
+    "command_shortcut": 0,
+    "command_regex": 0,
+    "system": 0,
+    "passive_light": 0,
+    "passive_db": 0,
+    "passive_http": 0,
+    "passive_ai": 0,
+    "passive_render": 0,
+}
+_DISPATCH_LANE_WAIT_MS: dict[str, float] = {
+    "command_exact": 0.0,
+    "command_shortcut": 0.0,
+    "command_regex": 0.0,
+    "system": 0.0,
+    "passive_light": 0.0,
+    "passive_db": 0.0,
+    "passive_http": 0.0,
+    "passive_ai": 0.0,
+    "passive_render": 0.0,
+}
+_DISPATCH_LAST_LOG = 0.0
 _CACHE_SWEEP_TASK: asyncio.Task | None = None
 _BOT_WAKE_COMMAND_PATTERN = re.compile(r"^bot醒来(?:\s+\S+)?$", re.IGNORECASE)
 _BOT_WAKE_CANONICAL_PATTERN = re.compile(
     r"^bot_manage\s+bot_switch\s+enable(?:\s+\S+)?$", re.IGNORECASE
 )
+_URL_PATTERN = re.compile(r"(?:https?://|www\.|b23\.tv|t\.cn/)", re.IGNORECASE)
+_PASSIVE_DB_HINTS = (
+    "word_bank",
+    "black_word",
+    "history",
+    "statistics",
+    "sign",
+    "gold",
+    "redbag",
+    "mute",
+    "group",
+    "user",
+    "admin",
+    "ban",
+    "limit",
+    "check",
+)
+_PASSIVE_HTTP_HINTS = (
+    "http",
+    "translate",
+    "bilibili",
+    "music",
+    "comment",
+    "nbnhhsh",
+    "quote",
+    "search",
+    "jitang",
+    "poetry",
+    "anime",
+    "cover",
+)
+_PASSIVE_AI_HINTS = (
+    "chatinter",
+    "dialogue",
+    "ai",
+    "llm",
+    "fudu",
+    "bym_ai",
+)
+_PASSIVE_RENDER_HINTS = (
+    "render",
+    "image",
+    "meme",
+    "memes",
+    "word_cloud",
+    "wordcloud",
+    "pic",
+    "picture",
+    "coser",
+    "luxun",
+)
+
+
+@dataclass(slots=True)
+class EventDispatchContext:
+    event_type: str
+    plain_text: str = ""
+    raw_text: str = ""
+    to_me: bool = False
+    has_url: bool = False
+    has_image: bool = False
+    is_command_like: bool = False
+    route_modules: set[str] = field(default_factory=set)
+    ai_route_modules: set[str] = field(default_factory=set)
+    ai_route_heads: set[str] = field(default_factory=set)
 
 
 class HookTraceRecorder:
@@ -290,6 +419,33 @@ def _command_matches(text: str, command: str) -> bool:
     return False
 
 
+def _matcher_command_matches(text: str, command: str) -> bool:
+    normalized = command.strip()
+    if not normalized:
+        return False
+    if normalized.startswith("re:"):
+        pattern = normalized.removeprefix("re:").strip()
+        if not pattern:
+            return False
+        try:
+            return re.search(pattern, text) is not None
+        except re.error:
+            return False
+    if _command_matches(text, normalized):
+        return True
+    # CJK command heads often accept compact arguments, e.g. "鲁迅说测试".
+    return text.startswith(normalized) and not normalized[-1].isascii()
+
+
+def _is_regex_like_command_literal(command: str) -> bool:
+    text = command.strip()
+    if not text:
+        return False
+    if text.startswith("re:"):
+        return True
+    return any(token in text for token in ("\\", "(", ")", "[", "]", "|", "^", "$"))
+
+
 def _match_route_modules(text: str) -> set[str]:
     text = text.strip()
     if not text:
@@ -373,18 +529,21 @@ def _matcher_matches_ai_route_heads(
     if not ai_route_heads:
         return False
     matcher_commands = _extract_matcher_command_literals(matcher_cls)
-    if not matcher_commands:
-        return False
-    for command in matcher_commands:
+    for command in matcher_commands or ():
         normalized_command = command.strip().casefold()
         if not normalized_command:
             continue
         for head in ai_route_heads:
             if not head:
                 continue
-            if _command_matches(head, normalized_command) or _command_matches(
+            if _matcher_command_matches(head, normalized_command) or _command_matches(
                 normalized_command, head
             ):
+                return True
+    shortcuts = _extract_matcher_alconna_shortcuts(matcher_cls) or ()
+    for shortcut in shortcuts:
+        for head in ai_route_heads:
+            if head and _shortcut_matches_text(head, shortcut):
                 return True
     return False
 
@@ -470,6 +629,259 @@ def _state_plain_text(state: dict | None) -> str:
     return ""
 
 
+def _event_raw_message_text(event: Event) -> str:
+    with contextlib.suppress(Exception):
+        message = getattr(event, "message", None)
+        if message is not None:
+            return str(message)
+    return ""
+
+
+def _event_has_image(event: Event) -> bool:
+    text = _event_raw_message_text(event)
+    lowered = text.casefold()
+    return "[cq:image" in lowered or "[image:" in lowered
+
+
+def _event_has_url(text: str) -> bool:
+    return bool(_URL_PATTERN.search(text))
+
+
+def _event_to_me(event: Event) -> bool:
+    with contextlib.suppress(Exception):
+        getter = getattr(event, "is_tome", None)
+        if callable(getter):
+            return bool(getter())
+    return bool(getattr(event, "to_me", False))
+
+
+def _context_from_state(state: dict | None) -> EventDispatchContext | None:
+    if state is None:
+        return None
+    context = state.get("_zx_dispatch_context")
+    return context if isinstance(context, EventDispatchContext) else None
+
+
+def _build_dispatch_context_sync(
+    event: Event, state: dict | None = None
+) -> EventDispatchContext:
+    context = _context_from_state(state)
+    if context is not None:
+        return context
+
+    event_type = event.get_type()
+    plain_text = _state_plain_text(state)
+    if not plain_text:
+        plain_text = _event_plain_text(event)
+        if state is not None and plain_text:
+            state["_zx_plain_text"] = plain_text
+
+    route_modules = (
+        _get_route_modules_for_event(event, state) if _ROUTE_INDEX_READY else set()
+    )
+    ai_route_modules = _collect_ai_route_modules(event, state)
+    ai_route_heads = _collect_ai_route_heads(event, state)
+    raw_text = _event_raw_message_text(event)
+    to_me = _event_to_me(event)
+    has_url = _event_has_url(raw_text) or _event_has_url(plain_text)
+    has_image = _event_has_image(event)
+    is_command_like = bool(
+        route_modules
+        or ai_route_modules
+        or plain_text.startswith("/")
+        or plain_text.startswith("!")
+        or plain_text.startswith(".")
+    )
+    context = EventDispatchContext(
+        event_type=event_type,
+        plain_text=plain_text,
+        raw_text=raw_text,
+        to_me=to_me,
+        has_url=has_url,
+        has_image=has_image,
+        is_command_like=is_command_like,
+        route_modules=route_modules,
+        ai_route_modules=ai_route_modules,
+        ai_route_heads=ai_route_heads,
+    )
+    if state is not None:
+        state["_zx_dispatch_context"] = context
+    return context
+
+
+async def _build_dispatch_context(
+    event: Event, state: dict | None = None
+) -> EventDispatchContext:
+    context = _build_dispatch_context_sync(event, state)
+    await _ensure_route_index()
+    if not context.route_modules:
+        route_modules = _get_route_modules_for_event(event, state)
+        context.route_modules = route_modules
+        context.is_command_like = bool(
+            route_modules
+            or context.ai_route_modules
+            or context.plain_text.startswith("/")
+            or context.plain_text.startswith("!")
+            or context.plain_text.startswith(".")
+        )
+    return context
+
+
+def _dispatch_lane_for_matcher(
+    matcher_cls: type[Matcher], context: EventDispatchContext
+) -> str:
+    event_type = context.event_type
+    if getattr(matcher_cls, "temp", False):
+        return "system"
+    matcher_type = getattr(matcher_cls, "type", "") or ""
+    if isinstance(matcher_type, str) and matcher_type and matcher_type != event_type:
+        return "system"
+    if _is_command_matcher_class(matcher_cls):
+        return _dispatch_command_lane_for_matcher(matcher_cls)
+
+    module = _matcher_module_name(matcher_cls).casefold()
+    if not module:
+        return "passive_light"
+    if any(
+        module == route_module.casefold() for route_module in context.ai_route_modules
+    ):
+        return "passive_ai"
+    if any(hint in module for hint in _PASSIVE_AI_HINTS):
+        return "passive_ai"
+    if any(hint in module for hint in _PASSIVE_RENDER_HINTS):
+        return "passive_render"
+    if any(hint in module for hint in _PASSIVE_HTTP_HINTS):
+        return "passive_http"
+    if any(hint in module for hint in _PASSIVE_DB_HINTS):
+        return "passive_db"
+    return "passive_light"
+
+
+def _dispatch_command_lane_for_matcher(matcher_cls: type[Matcher]) -> str:
+    if _matcher_has_alconna_shortcuts(matcher_cls):
+        return "command_shortcut"
+    commands = _extract_matcher_command_literals(matcher_cls) or ()
+    if any(_is_regex_like_command_literal(command) for command in commands):
+        return "command_regex"
+    return "command_exact"
+
+
+def _dispatch_budget_for_context(context: EventDispatchContext) -> dict[str, int]:
+    budget = {
+        "passive_light": AUTH_DISPATCH_PASSIVE_LIGHT_LIMIT,
+        "passive_db": AUTH_DISPATCH_PASSIVE_DB_LIMIT,
+        "passive_http": AUTH_DISPATCH_PASSIVE_HTTP_LIMIT if context.has_url else 0,
+        "passive_ai": AUTH_DISPATCH_PASSIVE_AI_LIMIT
+        if (context.to_me or context.is_command_like)
+        else int(bool(context.plain_text)),
+        "passive_render": AUTH_DISPATCH_PASSIVE_RENDER_LIMIT
+        if (context.to_me or context.has_image or context.is_command_like)
+        else 0,
+    }
+    return budget
+
+
+def _record_dispatch_selection(lane: str, selected: bool, wait_ms: float = 0.0) -> None:
+    global _DISPATCH_LAST_LOG, _DISPATCH_SELECTED, _DISPATCH_SKIPPED
+    if lane == "command":
+        lane = "command_exact"
+    lane = lane if lane in _DISPATCH_SELECTED_BY_LANE else "passive_light"
+    if selected:
+        _DISPATCH_SELECTED += 1
+        _DISPATCH_SELECTED_BY_LANE[lane] += 1
+        _DISPATCH_LANE_WAIT_MS[lane] += wait_ms
+    else:
+        _DISPATCH_SKIPPED += 1
+        _DISPATCH_SKIPPED_BY_LANE[lane] += 1
+
+    now = time.monotonic()
+    if now - _DISPATCH_LAST_LOG < DISPATCH_STATS_LOG_INTERVAL or is_overloaded():
+        return
+    _DISPATCH_LAST_LOG = now
+    wait_snapshot = {
+        lane: round(wait, 2) for lane, wait in _DISPATCH_LANE_WAIT_MS.items()
+    }
+    lane_snapshot = " ".join(
+        f"{lane}={count}" for lane, count in _DISPATCH_SELECTED_BY_LANE.items()
+    )
+    _debug_log(
+        (
+            "dispatch stats: "
+            f"selected={_DISPATCH_SELECTED} "
+            f"skipped={_DISPATCH_SKIPPED} "
+            f"{lane_snapshot} "
+            f"wait_ms={wait_snapshot}"
+        ),
+        LOGGER_COMMAND,
+    )
+
+
+def _passive_signal_skip_reason(lane: str, context: EventDispatchContext) -> str | None:
+    if context.event_type != "message":
+        return None
+    if lane == "passive_ai" and not (
+        context.to_me or context.is_command_like or context.plain_text
+    ):
+        return "passive_ai_no_signal"
+    if lane == "passive_http" and not (context.has_url or context.is_command_like):
+        return "passive_http_no_signal"
+    if lane == "passive_render" and not (
+        context.to_me or context.has_image or context.is_command_like
+    ):
+        return "passive_render_no_signal"
+    if lane in {"passive_light", "passive_db"} and not context.plain_text:
+        return "empty_text"
+    return None
+
+
+def _consume_dispatch_budget(
+    lane: str,
+    budget: dict[str, int],
+    *,
+    ignore: bool = False,
+) -> bool:
+    if ignore or lane not in budget:
+        return True
+    if budget[lane] <= 0:
+        return False
+    budget[lane] -= 1
+    return True
+
+
+@contextlib.asynccontextmanager
+async def _dispatch_lane_section(lane: str):
+    semaphore = _DISPATCH_LANE_SEMAPHORES.get(lane)
+    if semaphore is None:
+        yield
+        return
+    started = time.perf_counter()
+    await semaphore.acquire()
+    wait_ms = (time.perf_counter() - started) * 1000
+    _record_dispatch_selection(lane, True, wait_ms=wait_ms)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(Exception):
+            semaphore.release()
+
+
+def get_dispatch_snapshot() -> dict[str, object]:
+    lane_active = {}
+    for lane, semaphore in _DISPATCH_LANE_SEMAPHORES.items():
+        limit = _DISPATCH_LANE_LIMITS.get(lane, 0)
+        value = getattr(semaphore, "_value", limit)
+        lane_active[lane] = max(limit - int(value), 0)
+    return {
+        "selected": _DISPATCH_SELECTED,
+        "skipped": _DISPATCH_SKIPPED,
+        "selected_by_lane": dict(_DISPATCH_SELECTED_BY_LANE),
+        "skipped_by_lane": dict(_DISPATCH_SKIPPED_BY_LANE),
+        "lane_wait_ms": dict(_DISPATCH_LANE_WAIT_MS),
+        "lane_active": lane_active,
+        "lane_limits": dict(_DISPATCH_LANE_LIMITS),
+    }
+
+
 def _get_route_modules_for_event(event: Event, state: dict | None = None) -> set[str]:
     if state is not None:
         context = get_event_context(state)
@@ -518,15 +930,17 @@ async def _run_selected_matcher(
     state: dict,
     stack,
     dependency_cache,
+    lane: str = "command_exact",
 ) -> None:
-    await nb_message.check_and_run_matcher(
-        matcher,
-        bot,
-        event,
-        state,
-        stack,
-        dependency_cache,
-    )
+    async with _dispatch_lane_section(lane):
+        await nb_message.check_and_run_matcher(
+            matcher,
+            bot,
+            event,
+            state,
+            stack,
+            dependency_cache,
+        )
 
 
 def _record_prefilter_stats(
@@ -589,11 +1003,31 @@ def _collect_command_literals(value, target: set[str], depth: int = 0) -> None:
         if text:
             target.add(text)
         return
+    if isinstance(value, weakref.ReferenceType):
+        resolved = value()
+        if resolved is not None and resolved is not value:
+            _collect_command_literals(resolved, target, depth + 1)
+        return
     if isinstance(value, list | tuple | set | frozenset):
         for item in value:
             _collect_command_literals(item, target, depth + 1)
         return
-    for attr in ("command", "commands", "cmd", "cmds"):
+    if callable(value) and getattr(value, "__self__", None) is not None:
+        with contextlib.suppress(TypeError, RuntimeError, ReferenceError):
+            resolved = value()
+            if resolved is not None and resolved is not value:
+                _collect_command_literals(resolved, target, depth + 1)
+                return
+    for attr in (
+        "name",
+        "path",
+        "aliases",
+        "header_display",
+        "command",
+        "commands",
+        "cmd",
+        "cmds",
+    ):
         nested = getattr(value, attr, None)
         if nested is not None and nested is not value:
             _collect_command_literals(nested, target, depth + 1)
@@ -626,12 +1060,40 @@ def _extract_matcher_command_literals(
     return sorted_commands
 
 
-def _matcher_has_alconna_shortcuts(matcher_cls: type[Matcher]) -> bool:
-    cached = _MATCHER_ALCONNA_SHORTCUT_CACHE.get(matcher_cls)
-    if cached is not None:
-        return cached
+def _collect_alconna_shortcut_strings(command) -> set[str]:
+    shortcuts: set[str] = set()
+    if command is None:
+        return shortcuts
 
-    has_shortcuts = False
+    get_shortcuts = getattr(command, "get_shortcuts", None)
+    if callable(get_shortcuts):
+        with contextlib.suppress(Exception):
+            raw_shortcuts = get_shortcuts()
+            if isinstance(raw_shortcuts, list | tuple | set | frozenset):
+                for shortcut in raw_shortcuts:
+                    if isinstance(shortcut, str) and shortcut.strip():
+                        shortcuts.add(shortcut.strip())
+
+    formatter = getattr(command, "formatter", None)
+    data = getattr(formatter, "data", None)
+    if isinstance(data, dict):
+        for trace in data.values():
+            trace_shortcuts = getattr(trace, "shortcuts", None)
+            if not isinstance(trace_shortcuts, dict):
+                continue
+            for shortcut in trace_shortcuts:
+                if isinstance(shortcut, str) and shortcut.strip():
+                    shortcuts.add(shortcut.strip())
+    return shortcuts
+
+
+def _extract_matcher_alconna_shortcuts(
+    matcher_cls: type[Matcher],
+) -> tuple[str, ...] | None:
+    if matcher_cls in _MATCHER_ALCONNA_SHORTCUT_CACHE:
+        return _MATCHER_ALCONNA_SHORTCUT_CACHE[matcher_cls]
+
+    shortcuts: set[str] = set()
     rule = getattr(matcher_cls, "rule", None)
     checkers = getattr(rule, "checkers", ()) or ()
     for checker in checkers:
@@ -647,40 +1109,90 @@ def _matcher_has_alconna_shortcuts(matcher_cls: type[Matcher]) -> bool:
         ):
             continue
 
-        # Alconna matcher supports shortcut-based parsing (regex/fuzzy expansion).
-        # Route prefilter only knows literal command heads, so shortcut matchers
-        # must bypass strict route miss to avoid false negative skips.
         command_ref = getattr(call, "command", None)
         command = None
         if callable(command_ref):
             with contextlib.suppress(Exception):
                 command = command_ref()
-                if command is not None:
-                    get_shortcuts = getattr(command, "get_shortcuts", None)
-                    if callable(get_shortcuts):
-                        shortcuts = get_shortcuts()
-                        if shortcuts:
-                            has_shortcuts = True
-                            break
-        formatter = getattr(command, "formatter", None)
-        if formatter is not None:
-            with contextlib.suppress(Exception):
-                data = getattr(formatter, "data", None)
-                if isinstance(data, dict):
-                    for trace in data.values():
-                        if getattr(trace, "shortcuts", None):
-                            has_shortcuts = True
-                            break
-        if has_shortcuts:
-            break
+        shortcuts.update(_collect_alconna_shortcut_strings(command))
 
-    _MATCHER_ALCONNA_SHORTCUT_CACHE[matcher_cls] = has_shortcuts
-    return has_shortcuts
+    if not shortcuts:
+        _MATCHER_ALCONNA_SHORTCUT_CACHE[matcher_cls] = None
+        return None
+
+    result = tuple(sorted(shortcuts, key=len, reverse=True))
+    _MATCHER_ALCONNA_SHORTCUT_CACHE[matcher_cls] = result
+    return result
+
+
+def _matcher_has_alconna_shortcuts(matcher_cls: type[Matcher]) -> bool:
+    return bool(_extract_matcher_alconna_shortcuts(matcher_cls))
+
+
+def _normalize_shortcut_pattern(shortcut: str) -> str:
+    text = shortcut.strip()
+    if not text:
+        return ""
+    text = re.sub(r"^\[\]\s*", "", text)
+    text = re.sub(r"\s*\.\.\.args?$", "", text).strip()
+    text = re.sub(r"\s*\.\.\.$", "", text).strip()
+    return text
+
+
+def _is_regex_like_shortcut(pattern: str) -> bool:
+    return any(token in pattern for token in ("\\", "(", ")", "[", "]", "|", "^", "$"))
+
+
+def _placeholder_shortcut_matches(text: str, pattern: str) -> bool:
+    if "{" not in pattern or "}" not in pattern:
+        return False
+    pieces: list[str] = []
+    last = 0
+    for match in re.finditer(r"\{[^{}]+\}", pattern):
+        pieces.append(re.escape(pattern[last : match.start()]))
+        pieces.append(r"\S+")
+        last = match.end()
+    if not pieces:
+        return False
+    pieces.append(re.escape(pattern[last:]))
+    try:
+        return re.match(rf"^{''.join(pieces)}(?:\s|$)", text) is not None
+    except re.error:
+        return False
+
+
+def _shortcut_matches_text(text: str, shortcut: str) -> bool:
+    pattern = _normalize_shortcut_pattern(shortcut)
+    if not pattern:
+        return False
+    if _placeholder_shortcut_matches(text, pattern):
+        return True
+    if _is_regex_like_shortcut(pattern):
+        try:
+            return re.match(pattern, text) is not None
+        except re.error:
+            return False
+    return _matcher_command_matches(text, pattern)
+
+
+def _matcher_alconna_shortcut_matches(
+    matcher_cls: type[Matcher], text: str
+) -> bool | None:
+    shortcuts = _extract_matcher_alconna_shortcuts(matcher_cls)
+    if shortcuts is None:
+        return None
+    for shortcut in shortcuts:
+        if _shortcut_matches_text(text, shortcut):
+            return True
+    return False
 
 
 async def _check_matcher_prefilter(
     matcher_cls: type[Matcher], event: Event, state: dict | None = None
 ) -> tuple[bool, str | None]:
+    dispatch_context = _context_from_state(state) or _build_dispatch_context_sync(
+        event, state
+    )
     event_type = event.get_type()
     matcher_type = getattr(matcher_cls, "type", "") or ""
     if isinstance(matcher_type, str) and matcher_type and matcher_type != event_type:
@@ -700,9 +1212,12 @@ async def _check_matcher_prefilter(
 
     is_command_matcher = _is_command_matcher_class(matcher_cls)
     if not is_command_matcher:
+        lane = _dispatch_lane_for_matcher(matcher_cls, dispatch_context)
+        if reason := _passive_signal_skip_reason(lane, dispatch_context):
+            return True, reason
         return False, None
 
-    text = _state_plain_text(state)
+    text = dispatch_context.plain_text or _state_plain_text(state)
     if is_command_matcher and not text:
         text = _event_plain_text(event)
         if state is not None and text:
@@ -716,17 +1231,28 @@ async def _check_matcher_prefilter(
 
     command_matched = False
     matcher_commands = _extract_matcher_command_literals(matcher_cls)
+    shortcut_match = _matcher_alconna_shortcut_matches(matcher_cls, text)
     if matcher_commands:
         for command in matcher_commands:
-            if _command_matches(text, command):
+            if _matcher_command_matches(text, command):
                 command_matched = True
                 break
         else:
-            if not _matcher_has_alconna_shortcuts(matcher_cls):
+            if shortcut_match:
+                command_matched = True
+            else:
                 return True, "command_miss"
+    elif shortcut_match is False:
+        return True, "command_miss"
+    elif shortcut_match is True:
+        command_matched = True
 
-    ai_route_modules = _collect_ai_route_modules(event, state)
-    ai_route_heads = _collect_ai_route_heads(event, state)
+    ai_route_modules = dispatch_context.ai_route_modules or _collect_ai_route_modules(
+        event, state
+    )
+    ai_route_heads = dispatch_context.ai_route_heads or _collect_ai_route_heads(
+        event, state
+    )
     if ai_route_modules and module not in ai_route_modules:
         if not _matcher_matches_ai_route_heads(matcher_cls, ai_route_heads):
             return True, "route_miss"
@@ -739,18 +1265,21 @@ async def _check_matcher_prefilter(
     if module not in _ROUTE_MODULES_WITH_COMMANDS:
         return False, None
 
-    route_modules = _get_route_modules_for_event(event, state)
+    route_modules = dispatch_context.route_modules or _get_route_modules_for_event(
+        event, state
+    )
     if module not in route_modules:
         if command_matched:
-            return False, None
-        if _matcher_has_alconna_shortcuts(matcher_cls):
             return False, None
         return True, "route_miss"
     return False, None
 
 
 def _check_matcher_prefilter_before_task(
-    matcher_cls: type[Matcher], event: Event, state: dict | None = None
+    matcher_cls: type[Matcher],
+    event: Event,
+    state: dict | None = None,
+    dispatch_context: EventDispatchContext | None = None,
 ) -> tuple[bool, str | None]:
     """Conservative selector before creating matcher task.
 
@@ -758,6 +1287,11 @@ def _check_matcher_prefilter_before_task(
     rebuild. If anything is uncertain, let the existing check_and_run_matcher
     patch handle it inside the task.
     """
+    if dispatch_context is None:
+        dispatch_context = _context_from_state(state) or _build_dispatch_context_sync(
+            event, state
+        )
+
     event_type = event.get_type()
     matcher_type = getattr(matcher_cls, "type", "") or ""
     if isinstance(matcher_type, str) and matcher_type and matcher_type != event_type:
@@ -772,9 +1306,12 @@ def _check_matcher_prefilter_before_task(
         return False, None
 
     if not _is_command_matcher_class(matcher_cls):
+        lane = _dispatch_lane_for_matcher(matcher_cls, dispatch_context)
+        if reason := _passive_signal_skip_reason(lane, dispatch_context):
+            return True, reason
         return False, None
 
-    text = _state_plain_text(state)
+    text = dispatch_context.plain_text or _state_plain_text(state)
     if not text:
         text = _event_plain_text(event)
         if state is not None and text:
@@ -788,18 +1325,28 @@ def _check_matcher_prefilter_before_task(
 
     command_matched = False
     matcher_commands = _extract_matcher_command_literals(matcher_cls)
-    has_alconna_shortcuts = _matcher_has_alconna_shortcuts(matcher_cls)
+    shortcut_match = _matcher_alconna_shortcut_matches(matcher_cls, text)
     if matcher_commands:
         for command in matcher_commands:
-            if _command_matches(text, command):
+            if _matcher_command_matches(text, command):
                 command_matched = True
                 break
         else:
-            if not has_alconna_shortcuts:
+            if shortcut_match:
+                command_matched = True
+            else:
                 return True, "command_miss"
+    elif shortcut_match is False:
+        return True, "command_miss"
+    elif shortcut_match is True:
+        command_matched = True
 
-    ai_route_modules = _collect_ai_route_modules(event, state)
-    ai_route_heads = _collect_ai_route_heads(event, state)
+    ai_route_modules = dispatch_context.ai_route_modules or _collect_ai_route_modules(
+        event, state
+    )
+    ai_route_heads = dispatch_context.ai_route_heads or _collect_ai_route_heads(
+        event, state
+    )
     if ai_route_modules and module not in ai_route_modules:
         if not _matcher_matches_ai_route_heads(matcher_cls, ai_route_heads):
             return True, "route_miss"
@@ -812,9 +1359,11 @@ def _check_matcher_prefilter_before_task(
     if module not in _ROUTE_MODULES_WITH_COMMANDS:
         return False, None
 
-    route_modules = _get_route_modules_for_event(event, state)
+    route_modules = dispatch_context.route_modules or _get_route_modules_for_event(
+        event, state
+    )
     if module not in route_modules:
-        if command_matched or has_alconna_shortcuts:
+        if command_matched:
             return False, None
         return True, "route_miss"
     return False, None
@@ -915,6 +1464,8 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
                 "Error while parsing command for event"
             )
         _prepare_handle_event_state(event, state)
+        dispatch_context = await _build_dispatch_context(event, state)
+        dispatch_budget = _dispatch_budget_for_context(dispatch_context)
 
         break_flag = False
 
@@ -947,9 +1498,19 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
                             matcher,
                             event,
                             state,
+                            dispatch_context,
                         )
                         _record_prefilter_stats(skip, reason, "before_task")
                         if skip:
+                            lane = _dispatch_lane_for_matcher(matcher, dispatch_context)
+                            _record_dispatch_selection(lane, False)
+                            continue
+                        lane = _dispatch_lane_for_matcher(matcher, dispatch_context)
+                        if lane.startswith("passive_") and not _consume_dispatch_budget(
+                            lane,
+                            dispatch_budget,
+                        ):
+                            _record_dispatch_selection(lane, False)
                             continue
                         matcher_state = _build_matcher_state(state)
                         tg.start_soon(
@@ -961,6 +1522,7 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
                                 matcher_state,
                                 stack,
                                 dependency_cache,
+                                lane,
                             ),
                         )
 
