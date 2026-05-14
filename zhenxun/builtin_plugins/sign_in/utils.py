@@ -327,7 +327,7 @@ async def _generate_html_card(
         "pages/builtin/sign",
         data=card_data,
         clip_selector=".wrapper",
-        clip_padding=8,
+        clip_padding=0,
         disable_animations=True,
         screenshot_scale="css",
     )
