@@ -19,6 +19,7 @@ from zhenxun import ui
 from zhenxun.configs.config import Config
 from zhenxun.configs.utils import Command, PluginExtraData, RegisterConfig
 from zhenxun.models.chat_history import ChatHistory
+from zhenxun.models.friend_user import FriendUser
 from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.services import avatar_service
 from zhenxun.services.log import logger
@@ -118,7 +119,8 @@ async def _(
     show_quit_member = Config.get_config("chat_history", "SHOW_QUIT_MEMBER", True)
 
     fetch_count = count.result
-    if not show_quit_member:
+    has_group_context = bool(group_id)
+    if has_group_context and not show_quit_member:
         fetch_count = count.result * 2
 
     raw_rank_data = await ChatHistory.get_group_msg_rank(
@@ -128,27 +130,42 @@ async def _(
     if raw_rank_data:
         rank_data = cast(list[tuple[str, int]], raw_rank_data)
         rows_data = []
-        platform = "qq"
+        platform = getattr(session, "platform", None) or "qq"
 
         user_ids_in_rank = [str(uid) for uid, _ in rank_data]
-        users_in_group_query = GroupInfoUser.filter(
-            user_id__in=user_ids_in_rank, group_id=group_id
-        )
-        users_in_group = {u.user_id: u for u in await users_in_group_query}
+        users_in_group: dict[str, GroupInfoUser] = {}
+        user_names: dict[str, str] = {}
+        if has_group_context:
+            users_in_group_query = GroupInfoUser.filter(
+                user_id__in=user_ids_in_rank, group_id=group_id
+            )
+            users_in_group = {u.user_id: u for u in await users_in_group_query}
+        else:
+            friend_users = await FriendUser.filter(
+                user_id__in=user_ids_in_rank
+            ).values_list("user_id", "user_name")
+            user_names.update(dict(friend_users))
+            group_users = await GroupInfoUser.filter(
+                user_id__in=user_ids_in_rank
+            ).values_list("user_id", "user_name")
+            for user_id, user_name in group_users:
+                if user_name and user_id not in user_names:
+                    user_names[user_id] = user_name
 
         for idx, (uid, num) in enumerate(rank_data):
             if len(rows_data) >= count.result:
                 break
 
             uid_str = str(uid)
-            user_in_group = users_in_group.get(uid_str)
-
-            if not user_in_group and not show_quit_member:
-                continue
-
-            user_name = (
-                user_in_group.user_name if user_in_group else f"{uid_str}(已退群)"
-            )
+            if has_group_context:
+                user_in_group = users_in_group.get(uid_str)
+                if not user_in_group and not show_quit_member:
+                    continue
+                user_name = (
+                    user_in_group.user_name if user_in_group else f"{uid_str}(已退群)"
+                )
+            else:
+                user_name = user_names.get(uid_str) or uid_str
 
             avatar_path = await avatar_service.get_avatar_path(platform, uid_str)
 
