@@ -133,6 +133,7 @@ _ORIGINAL_ADAPTER_HANDLE_EVENTS: dict[object, object] = {}
 _MATCHER_COMMAND_TYPE_CACHE: dict[type[Matcher], bool] = {}
 _MATCHER_COMMAND_LITERAL_CACHE: dict[type[Matcher], tuple[str, ...] | None] = {}
 _MATCHER_ALCONNA_SHORTCUT_CACHE: dict[type[Matcher], tuple[str, ...] | None] = {}
+_MATCHER_RULE_DESCRIPTOR_CACHE: dict[type[Matcher], tuple["RuleDescriptor", ...]] = {}
 _CHECK_MATCHER_ROUTE_CACHE = CacheDict(
     "AUTH_MATCHER_ROUTE_CACHE", expire=MATCHER_ROUTE_PREFILTER_TTL
 )
@@ -255,6 +256,16 @@ class EventDispatchContext:
     route_modules: set[str] = field(default_factory=set)
     ai_route_modules: set[str] = field(default_factory=set)
     ai_route_heads: set[str] = field(default_factory=set)
+
+
+@dataclass(frozen=True, slots=True)
+class RuleDescriptor:
+    kind: str
+    value: object | None = None
+    flags: int = 0
+    ignorecase: bool = False
+    deterministic_text: bool = False
+    command_like: bool = False
 
 
 class HookTraceRecorder:
@@ -548,37 +559,247 @@ def _matcher_matches_ai_route_heads(
     return False
 
 
-def _is_command_matcher_class(matcher_cls: type[Matcher]) -> bool:
-    if matcher_cls in _MATCHER_COMMAND_TYPE_CACHE:
-        return _MATCHER_COMMAND_TYPE_CACHE[matcher_cls]
-    if hasattr(matcher_cls, "command"):
-        _MATCHER_COMMAND_TYPE_CACHE[matcher_cls] = True
-        return True
+def _rule_call_name(call) -> str:
+    call_type = call.__class__
+    return getattr(call_type, "__name__", "")
+
+
+def _rule_call_module(call) -> str:
+    call_type = call.__class__
+    return getattr(call_type, "__module__", "")
+
+
+def _normalize_rule_string_tuple(value) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, list | tuple | set | frozenset):
+        result = tuple(str(item) for item in value if str(item))
+        return result
+    return ()
+
+
+def _iter_matcher_rule_calls(matcher_cls: type[Matcher]):
     rule = getattr(matcher_cls, "rule", None)
     checkers = getattr(rule, "checkers", ()) or ()
     for checker in checkers:
         call = getattr(checker, "call", None)
-        if call is None:
-            continue
-        call_type = call.__class__
-        call_module = getattr(call_type, "__module__", "")
-        call_name = getattr(call_type, "__name__", "")
-        if call_module.startswith("nonebot.rule") and call_name in {
-            "CommandRule",
-            "ShellCommandRule",
-            "Command",
-            "ShellCommand",
-        }:
-            _MATCHER_COMMAND_TYPE_CACHE[matcher_cls] = True
-            return True
-        if (
+        if call is not None:
+            yield call
+
+
+def _extract_matcher_rule_descriptors(
+    matcher_cls: type[Matcher],
+) -> tuple[RuleDescriptor, ...]:
+    if matcher_cls in _MATCHER_RULE_DESCRIPTOR_CACHE:
+        return _MATCHER_RULE_DESCRIPTOR_CACHE[matcher_cls]
+
+    descriptors: list[RuleDescriptor] = []
+    if hasattr(matcher_cls, "command"):
+        descriptors.append(RuleDescriptor("matcher_command", command_like=True))
+
+    for call in _iter_matcher_rule_calls(matcher_cls):
+        call_module = _rule_call_module(call)
+        call_name = _rule_call_name(call)
+        if call_module.startswith("nonebot.rule"):
+            if call_name == "CommandRule":
+                descriptors.append(
+                    RuleDescriptor(
+                        "command",
+                        getattr(call, "cmds", ()),
+                        command_like=True,
+                    )
+                )
+            elif call_name == "ShellCommandRule":
+                descriptors.append(
+                    RuleDescriptor(
+                        "shell_command",
+                        getattr(call, "cmds", ()),
+                        command_like=True,
+                    )
+                )
+            elif call_name == "RegexRule":
+                descriptors.append(
+                    RuleDescriptor(
+                        "regex",
+                        getattr(call, "regex", ""),
+                        flags=int(getattr(call, "flags", 0) or 0),
+                        deterministic_text=True,
+                        command_like=True,
+                    )
+                )
+            elif call_name == "StartswithRule":
+                descriptors.append(
+                    RuleDescriptor(
+                        "startswith",
+                        _normalize_rule_string_tuple(getattr(call, "msg", ())),
+                        ignorecase=bool(getattr(call, "ignorecase", False)),
+                        deterministic_text=True,
+                        command_like=True,
+                    )
+                )
+            elif call_name == "EndswithRule":
+                descriptors.append(
+                    RuleDescriptor(
+                        "endswith",
+                        _normalize_rule_string_tuple(getattr(call, "msg", ())),
+                        ignorecase=bool(getattr(call, "ignorecase", False)),
+                        deterministic_text=True,
+                        command_like=True,
+                    )
+                )
+            elif call_name == "FullmatchRule":
+                descriptors.append(
+                    RuleDescriptor(
+                        "fullmatch",
+                        _normalize_rule_string_tuple(getattr(call, "msg", ())),
+                        ignorecase=bool(getattr(call, "ignorecase", False)),
+                        deterministic_text=True,
+                        command_like=True,
+                    )
+                )
+            elif call_name == "KeywordsRule":
+                descriptors.append(
+                    RuleDescriptor(
+                        "keywords",
+                        _normalize_rule_string_tuple(getattr(call, "keywords", ())),
+                        deterministic_text=True,
+                        command_like=True,
+                    )
+                )
+            elif call_name == "IsTypeRule":
+                descriptors.append(
+                    RuleDescriptor("is_type", getattr(call, "types", ()))
+                )
+            elif call_name == "ToMeRule":
+                descriptors.append(RuleDescriptor("to_me"))
+            else:
+                descriptors.append(RuleDescriptor("custom"))
+        elif (
             call_module.startswith("nonebot_plugin_alconna.rule")
             and call_name == "AlconnaRule"
         ):
-            _MATCHER_COMMAND_TYPE_CACHE[matcher_cls] = True
-            return True
-    _MATCHER_COMMAND_TYPE_CACHE[matcher_cls] = False
-    return False
+            descriptors.append(RuleDescriptor("alconna", command_like=True))
+        else:
+            descriptors.append(RuleDescriptor("custom"))
+
+    result = tuple(descriptors)
+    _MATCHER_RULE_DESCRIPTOR_CACHE[matcher_cls] = result
+    return result
+
+
+def _matcher_has_command_like_rule(matcher_cls: type[Matcher]) -> bool:
+    return any(
+        descriptor.command_like
+        for descriptor in _extract_matcher_rule_descriptors(matcher_cls)
+    )
+
+
+def _matcher_has_deterministic_text_rule(matcher_cls: type[Matcher]) -> bool:
+    return any(
+        descriptor.deterministic_text
+        for descriptor in _extract_matcher_rule_descriptors(matcher_cls)
+    )
+
+
+def _matcher_rule_matches_text(
+    matcher_cls: type[Matcher],
+    event: Event,
+    plain_text: str,
+) -> bool | None:
+    matched_any = False
+    saw_deterministic = False
+    message_text: str | None = None
+
+    for descriptor in _extract_matcher_rule_descriptors(matcher_cls):
+        kind = descriptor.kind
+        if kind == "regex":
+            saw_deterministic = True
+            pattern = str(descriptor.value or "")
+            if not pattern:
+                continue
+            if message_text is None:
+                with contextlib.suppress(Exception):
+                    message_text = str(event.get_message())
+                if message_text is None:
+                    message_text = plain_text
+            try:
+                if re.search(pattern, message_text, descriptor.flags):
+                    matched_any = True
+                else:
+                    return False
+            except re.error:
+                return False
+        elif kind == "startswith":
+            saw_deterministic = True
+            text = plain_text.casefold() if descriptor.ignorecase else plain_text
+            prefixes = descriptor.value if isinstance(descriptor.value, tuple) else ()
+            candidates = (
+                tuple(item.casefold() for item in prefixes)
+                if descriptor.ignorecase
+                else prefixes
+            )
+            if any(text.startswith(prefix) for prefix in candidates if prefix):
+                matched_any = True
+            else:
+                return False
+        elif kind == "endswith":
+            saw_deterministic = True
+            text = plain_text.casefold() if descriptor.ignorecase else plain_text
+            suffixes = descriptor.value if isinstance(descriptor.value, tuple) else ()
+            candidates = (
+                tuple(item.casefold() for item in suffixes)
+                if descriptor.ignorecase
+                else suffixes
+            )
+            if any(text.endswith(suffix) for suffix in candidates if suffix):
+                matched_any = True
+            else:
+                return False
+        elif kind == "fullmatch":
+            saw_deterministic = True
+            text = plain_text.casefold() if descriptor.ignorecase else plain_text
+            values = descriptor.value if isinstance(descriptor.value, tuple) else ()
+            candidates = (
+                tuple(item.casefold() for item in values)
+                if descriptor.ignorecase
+                else values
+            )
+            if text in candidates:
+                matched_any = True
+            else:
+                return False
+        elif kind == "keywords":
+            saw_deterministic = True
+            keywords = descriptor.value if isinstance(descriptor.value, tuple) else ()
+            if any(keyword and keyword in plain_text for keyword in keywords):
+                matched_any = True
+            else:
+                return False
+        elif kind == "is_type":
+            types = descriptor.value
+            if isinstance(types, type):
+                if not isinstance(event, types):
+                    return False
+            elif isinstance(types, tuple) and types:
+                if not isinstance(event, types):
+                    return False
+        elif kind == "to_me":
+            if not getattr(event, "to_me", False):
+                return False
+
+    if matched_any:
+        return True
+    if saw_deterministic:
+        return False
+    return None
+
+
+def _is_command_matcher_class(matcher_cls: type[Matcher]) -> bool:
+    if matcher_cls in _MATCHER_COMMAND_TYPE_CACHE:
+        return _MATCHER_COMMAND_TYPE_CACHE[matcher_cls]
+    result = _matcher_has_command_like_rule(matcher_cls)
+    _MATCHER_COMMAND_TYPE_CACHE[matcher_cls] = result
+    return result
 
 
 def _matcher_route_cache_key(event: Event) -> str:
@@ -760,6 +981,8 @@ def _dispatch_lane_for_matcher(
 def _dispatch_command_lane_for_matcher(matcher_cls: type[Matcher]) -> str:
     if _matcher_has_alconna_shortcuts(matcher_cls):
         return "command_shortcut"
+    if _matcher_has_deterministic_text_rule(matcher_cls):
+        return "command_regex"
     commands = _extract_matcher_command_literals(matcher_cls) or ()
     if any(_is_regex_like_command_literal(command) for command in commands):
         return "command_regex"
@@ -1246,6 +1469,13 @@ async def _check_matcher_prefilter(
         return True, "command_miss"
     elif shortcut_match is True:
         command_matched = True
+    rule_match = _matcher_rule_matches_text(matcher_cls, event, text)
+    if rule_match is True:
+        command_matched = True
+    elif rule_match is False and not command_matched:
+        return True, "command_miss"
+    elif not (matcher_commands or shortcut_match is not None) and not command_matched:
+        return True, "command_miss"
 
     ai_route_modules = dispatch_context.ai_route_modules or _collect_ai_route_modules(
         event, state
@@ -1340,6 +1570,13 @@ def _check_matcher_prefilter_before_task(
         return True, "command_miss"
     elif shortcut_match is True:
         command_matched = True
+    rule_match = _matcher_rule_matches_text(matcher_cls, event, text)
+    if rule_match is True:
+        command_matched = True
+    elif rule_match is False and not command_matched:
+        return True, "command_miss"
+    elif not (matcher_commands or shortcut_match is not None) and not command_matched:
+        return True, "command_miss"
 
     ai_route_modules = dispatch_context.ai_route_modules or _collect_ai_route_modules(
         event, state
@@ -1589,6 +1826,7 @@ async def _cache_sweep_loop() -> None:
                 _MATCHER_COMMAND_TYPE_CACHE,
                 _MATCHER_COMMAND_LITERAL_CACHE,
                 _MATCHER_ALCONNA_SHORTCUT_CACHE,
+                _MATCHER_RULE_DESCRIPTOR_CACHE,
             ):
                 if len(_mc) > _MAX_MATCHER_CACHE:
                     _mc.clear()
