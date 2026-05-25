@@ -4,9 +4,11 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 import time
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from nonebot.adapters import Bot
+from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
+from nonebot.adapters.onebot.v11 import Bot as OneBotV11Bot
 
 from zhenxun.services.log import logger
 
@@ -23,7 +25,7 @@ _QUEUE: asyncio.Queue[
 _SEND_LOCK = asyncio.Lock()
 _LAST_SEND_TS = 0.0
 _API_SEMAPHORE = asyncio.Semaphore(3)
-_ORIG_CALL_API = Bot.call_api
+_ORIG_CALL_API = OneBotV11Adapter._call_api
 _PATCHED = False
 _WORKER_TASKS: list[asyncio.Task] = []
 _QUEUE_TIMEOUT_COUNT = 0
@@ -36,6 +38,24 @@ _CURRENT_SEND_TRACE_ID: ContextVar[str | None] = ContextVar(
 )
 _MAX_OBSERVED_RECORDS_PER_TRACE = 12
 _MAX_OBSERVED_TEXT_LEN = 900
+
+
+def _send_platform_scope(adapter: Any) -> str:
+    if adapter is None:
+        return "unknown"
+    if isinstance(adapter, OneBotV11Adapter):
+        return "qq_client"
+    get_name = getattr(adapter, "get_name", None)
+    if callable(get_name):
+        try:
+            name = str(get_name()).lower()
+        except Exception:
+            name = ""
+    else:
+        name = adapter.__class__.__name__.lower()
+    if name == "qq" or "qq" in name:
+        return "qq_api"
+    return name or "unknown"
 
 
 @dataclass(frozen=True)
@@ -125,6 +145,7 @@ def _log_queue_pressure(reason: str) -> None:
 
 
 async def _direct_call_api(
+    adapter: OneBotV11Adapter,
     bot: Bot,
     api: str,
     data: dict[str, Any],
@@ -133,7 +154,12 @@ async def _direct_call_api(
     await _rate_limit()
     async with _API_SEMAPHORE:
         try:
-            result = await _ORIG_CALL_API(bot, api, **data)
+            result = await _ORIG_CALL_API(
+                adapter,
+                cast(OneBotV11Bot, bot),
+                api,
+                **data,
+            )
         except Exception as exc:
             SendObserver.record(
                 trace_id=trace_id,
@@ -150,7 +176,13 @@ async def _worker(worker_id: int):
     while True:
         bot, api, data, future, trace_id = await _QUEUE.get()
         try:
-            result = await _direct_call_api(bot, api, data, trace_id=trace_id)
+            result = await _direct_call_api(
+                cast(OneBotV11Adapter, bot.adapter),
+                bot,
+                api,
+                data,
+                trace_id=trace_id,
+            )
             if not future.done():
                 future.set_result(result)
         except asyncio.CancelledError:
@@ -170,12 +202,20 @@ async def _worker(worker_id: int):
             _QUEUE.task_done()
 
 
-async def _queued_call_api(self: Bot, api: str, **data: Any):
+async def _queued_call_api(
+    adapter: OneBotV11Adapter,
+    bot: Bot,
+    api: str,
+    **data: Any,
+):
+    if _send_platform_scope(adapter) != "qq_client":
+        return await _ORIG_CALL_API(adapter, cast(OneBotV11Bot, bot), api, **data)
     if api not in _SEND_APIS:
-        return await _ORIG_CALL_API(self, api, **data)
+        return await _ORIG_CALL_API(adapter, cast(OneBotV11Bot, bot), api, **data)
     if _STOPPING:
         return await _direct_call_api(
-            self,
+            adapter,
+            bot,
             api,
             data,
             trace_id=_CURRENT_SEND_TRACE_ID.get(),
@@ -183,7 +223,7 @@ async def _queued_call_api(self: Bot, api: str, **data: Any):
 
     loop = asyncio.get_running_loop()
     future: asyncio.Future[Any] = loop.create_future()
-    queue_item = (self, api, data, future, _CURRENT_SEND_TRACE_ID.get())
+    queue_item = (bot, api, data, future, _CURRENT_SEND_TRACE_ID.get())
     try:
         _QUEUE.put_nowait(queue_item)
     except asyncio.QueueFull:
@@ -196,7 +236,8 @@ async def _queued_call_api(self: Bot, api: str, **data: Any):
         _QUEUE_TIMEOUT_COUNT += 1
         _log_queue_pressure(f"{api} fallback to direct send because queue is full")
         return await _direct_call_api(
-            self,
+            adapter,
+            bot,
             api,
             data,
             trace_id=_CURRENT_SEND_TRACE_ID.get(),
@@ -222,7 +263,7 @@ def patch_send_queue() -> None:
     global _PATCHED
     if _PATCHED:
         return
-    Bot.call_api = _queued_call_api  # type: ignore[assignment]
+    OneBotV11Adapter._call_api = _queued_call_api  # type: ignore[assignment]
     _PATCHED = True
 
 
@@ -230,7 +271,7 @@ def unpatch_send_queue() -> None:
     global _PATCHED
     if not _PATCHED:
         return
-    Bot.call_api = _ORIG_CALL_API  # type: ignore[assignment]
+    OneBotV11Adapter._call_api = _ORIG_CALL_API  # type: ignore[assignment]
     _PATCHED = False
 
 

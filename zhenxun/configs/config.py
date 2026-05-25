@@ -21,6 +21,8 @@ class BotSetting(BaseModel):
     """官bot id:账号id"""
     ext_path: list[str] = Field(default_factory=list)
     """第三方插件路径"""
+    qq_adapter_load: bool = False
+    """是否加载 QQ 官方适配器"""
 
     def get_qbot_uid(self, qbot_id: str) -> str | None:
         """获取官bot账号id

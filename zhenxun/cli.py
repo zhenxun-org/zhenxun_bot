@@ -23,6 +23,121 @@ RESTART_POLL_INTERVAL = 0.5
 WORKER_SOFT_EXIT_TIMEOUT = 15.0
 WORKER_TERMINATE_TIMEOUT = 5.0
 WORKER_KILL_TIMEOUT = 5.0
+ENV_EXAMPLE_FILE = ".env.example"
+ENV_DEV_FILE = ".env.dev"
+
+
+def _env_assignment_key(line: str, *, include_commented: bool = False) -> str | None:
+    stripped = line.strip()
+    if include_commented and stripped.startswith("#"):
+        stripped = stripped[1:].lstrip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        return None
+    key = stripped.split("=", 1)[0].strip()
+    return key if key.replace("_", "").isalnum() else None
+
+
+def _env_key(line: str) -> str | None:
+    return _env_assignment_key(line)
+
+
+def _env_block_key(block: list[str]) -> str | None:
+    for line in block:
+        if key := _env_key(line):
+            return key
+    return None
+
+
+def _env_block_anchor_key(block: list[str]) -> str | None:
+    for line in block:
+        if key := _env_assignment_key(line, include_commented=True):
+            return key
+    return None
+
+
+def _split_env_blocks(lines: list[str]) -> list[tuple[int, list[str]]]:
+    blocks: list[tuple[int, list[str]]] = []
+    current: list[str] = []
+    start_index = 0
+    for index, line in enumerate(lines):
+        if line.strip():
+            if not current:
+                start_index = index
+            current.append(line)
+        elif current:
+            blocks.append((start_index, current))
+            current = []
+
+    if current:
+        blocks.append((start_index, current))
+    return blocks
+
+
+def _find_env_block_start(lines: list[str], key: str) -> int | None:
+    for start_index, block in _split_env_blocks(lines):
+        if _env_block_anchor_key(block) == key:
+            return start_index
+    return None
+
+
+def _insert_env_block_before(
+    lines: list[str],
+    index: int,
+    block: list[str],
+) -> list[str]:
+    insert_block = block.copy()
+    if index > 0 and lines[index - 1].strip():
+        insert_block.insert(0, "\n")
+    if index < len(lines) and insert_block and insert_block[-1].strip():
+        insert_block.append("\n")
+    return lines[:index] + insert_block + lines[index:]
+
+
+def _sync_env_missing_items(project_root: Path) -> None:
+    """Copy missing .env keys from .env.example without touching existing values."""
+    example_path = project_root / ENV_EXAMPLE_FILE
+    env_path = project_root / ENV_DEV_FILE
+    if not example_path.exists():
+        return
+    if not env_path.exists():
+        env_path.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
+        _launcher_log("已根据 .env.example 生成 .env.dev")
+        return
+
+    example_lines = example_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    env_lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    example_blocks = _split_env_blocks(example_lines)
+    existing_keys = {key for line in env_lines if (key := _env_key(line))}
+    missing_blocks: list[tuple[int, list[str]]] = []
+
+    for block_index, (_, block) in enumerate(example_blocks):
+        key = _env_block_key(block)
+        if key and key not in existing_keys:
+            missing_blocks.append((block_index, block))
+
+    if not missing_blocks:
+        return
+
+    updated_lines = env_lines
+    added_keys: list[str] = []
+    for block_index, block in missing_blocks:
+        key = _env_block_key(block)
+        if not key:
+            continue
+        anchor_index = len(updated_lines)
+        for _, next_block in example_blocks[block_index + 1 :]:
+            next_key = _env_block_anchor_key(next_block)
+            if not next_key:
+                continue
+            if (found := _find_env_block_start(updated_lines, next_key)) is not None:
+                anchor_index = found
+                break
+        updated_lines = _insert_env_block_before(updated_lines, anchor_index, block)
+        existing_keys.add(key)
+        added_keys.append(key)
+
+    env_path.write_text("".join(updated_lines), encoding="utf-8")
+    _launcher_log(f"已补齐 .env.dev 缺失配置: {', '.join(added_keys)}")
 
 
 def _launcher_log(message: str) -> None:
@@ -53,7 +168,8 @@ def _ensure_project_root() -> Path:
 
 def _run_worker() -> None:
     """启动 Bot worker（必须在项目目录下执行）"""
-    _ensure_project_root()
+    project_root = _ensure_project_root()
+    _sync_env_missing_items(project_root)
 
     import contextlib
     import platform
@@ -91,17 +207,31 @@ def _run_worker() -> None:
             f"使用 {htmlrender_browser_channel} 作为 htmlrender 驱动启动..."
         )
 
+    nonebot.init(htmlrender_browser_channel=htmlrender_browser_channel)
+
     from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
-    nonebot.init(htmlrender_browser_channel=htmlrender_browser_channel)
+    from zhenxun.configs.config import BotConfig
 
     driver = nonebot.get_driver()
     driver.register_adapter(OneBotV11Adapter)
+    enabled_adapters = ["OneBot V11"]
+
+    if BotConfig.qq_adapter_load:
+        try:
+            from nonebot.adapters.qq import Adapter as QQAdapter  # type: ignore
+        except ImportError as e:
+            raise RuntimeError(
+                "QQ_ADAPTER_LOAD=True 但未安装 nonebot-adapter-qq，"
+                "请安装后再开启 QQ 官方适配器。"
+            ) from e
+        driver.register_adapter(QQAdapter)
+        enabled_adapters.append("QQ")
+
+    nonebot.logger.info(f"已启用适配器: {', '.join(enabled_adapters)}")
 
     nonebot.load_plugins("zhenxun/builtin_plugins")
     nonebot.load_plugins("zhenxun/plugins")
-
-    from zhenxun.configs.config import BotConfig
 
     for ext in BotConfig.ext_path:
         ext = ext.strip()

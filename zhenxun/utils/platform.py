@@ -24,6 +24,19 @@ from zhenxun.utils.message import MessageUtils
 driver = nonebot.get_driver()
 
 
+def _adapter_name(bot: Bot) -> str:
+    adapter = getattr(bot, "adapter", None)
+    if adapter is None:
+        return ""
+    get_name = getattr(adapter, "get_name", None)
+    if callable(get_name):
+        try:
+            return str(get_name()).lower()
+        except Exception:
+            return ""
+    return adapter.__class__.__name__.lower()
+
+
 class UserData(BaseModel):
     name: str
     """昵称"""
@@ -379,6 +392,47 @@ class PlatformUtils:
             platform = t.basic["scope"].lower()
             return "qq" if platform.startswith("qq") else platform
         return "unknown"
+
+    @classmethod
+    def get_platform_scope(cls, t: Bot | Uninfo | object) -> str:
+        """获取细粒度平台作用域，不改变旧 get_platform 返回值。"""
+        if isinstance(t, Bot):
+            adapter_name = _adapter_name(t)
+            if "onebot" in adapter_name:
+                return "qq_client"
+            if adapter_name == "qq" or "qq" in adapter_name:
+                return "qq_api"
+            if BotConfig.get_qbot_uid(t.self_id):
+                return "qq_api"
+            return adapter_name or cls.get_platform(t)
+
+        scope = str(getattr(t, "scope", "") or "").lower()
+        if not scope:
+            basic = getattr(t, "basic", None)
+            if isinstance(basic, dict):
+                scope = str(basic.get("scope") or "").lower()
+        if "qq_client" in scope:
+            return "qq_client"
+        if "qq_api" in scope:
+            return "qq_api"
+        if scope.startswith("qq"):
+            return "qq"
+
+        adapter = getattr(t, "adapter", None)
+        if adapter is not None:
+            name = (
+                adapter.get_name().lower()
+                if callable(getattr(adapter, "get_name", None))
+                else adapter.__class__.__name__.lower()
+            )
+            if "onebot" in name:
+                return "qq_client"
+            if name == "qq" or "qq" in name:
+                return "qq_api"
+            return name
+
+        platform = str(getattr(t, "platform", "") or "").lower()
+        return "qq_client" if platform == "qq" else platform or "unknown"
 
     @classmethod
     def is_forward_merge_supported(cls, t: Bot | Uninfo) -> bool:
