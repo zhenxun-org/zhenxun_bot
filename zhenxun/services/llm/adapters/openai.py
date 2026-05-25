@@ -440,6 +440,14 @@ class DeepSeekAdapter(OpenAIAdapter):
 class OpenAIImageAdapter(BaseAdapter):
     """OpenAI 图像生成/编辑适配器"""
 
+    @staticmethod
+    def _mime_type_to_extension(mime_type: str) -> str:
+        if mime_type == "image/jpeg":
+            return "jpg"
+        if "/" in mime_type:
+            return mime_type.split("/", 1)[1]
+        return "png"
+
     @property
     def api_type(self) -> str:
         return "openai_image"
@@ -466,7 +474,7 @@ class OpenAIImageAdapter(BaseAdapter):
         headers = self.get_base_headers(api_key, model)
 
         prompt = ""
-        images_bytes_list: list[bytes] = []
+        images_for_edit: list[tuple[bytes, str]] = []
 
         for msg in reversed(messages):
             if msg.role != "user":
@@ -480,16 +488,21 @@ class OpenAIImageAdapter(BaseAdapter):
                     elif part.type == "image":
                         if part.is_image_base64():
                             if b64_data := part.get_base64_data():
-                                _, b64_str = b64_data
-                                images_bytes_list.append(base64.b64decode(b64_str))
+                                mime_type, b64_str = b64_data
+                                images_for_edit.append(
+                                    (base64.b64decode(b64_str), mime_type)
+                                )
                         elif part.is_image_url() and part.image_source:
-                            images_bytes_list.append(
-                                await AsyncHttpx.get_content(part.image_source)
+                            images_for_edit.append(
+                                (
+                                    await AsyncHttpx.get_content(part.image_source),
+                                    "image/png",
+                                )
                             )
             if prompt:
                 break
 
-        if not prompt and not images_bytes_list:
+        if not prompt and not images_for_edit:
             raise LLMException(
                 "图像生成需要提供 Prompt",
                 code=LLMErrorCode.CONFIGURATION_ERROR,
@@ -528,16 +541,24 @@ class OpenAIImageAdapter(BaseAdapter):
             if effective_config.custom_params:
                 body.update(effective_config.custom_params)
 
-        if images_bytes_list:
-            b64_images = []
-            for img_bytes in images_bytes_list:
-                b64_str = base64.b64encode(img_bytes).decode("utf-8")
-                b64_images.append(b64_str)
-            body["image"] = b64_images
-
+        files: list[tuple[str, Any]] | None = None
         endpoint = "/v1/images/generations"
+
+        if images_for_edit:
+            endpoint = "/v1/images/edits"
+            headers.pop("Content-Type", None)
+            files = []
+            for index, (img_bytes, mime_type) in enumerate(images_for_edit):
+                extension = self._mime_type_to_extension(mime_type)
+                files.append(
+                    (
+                        "image[]",
+                        (f"image_{index}.{extension}", img_bytes, mime_type),
+                    )
+                )
+
         url = self.get_api_url(model, endpoint)
-        return RequestData(url=url, headers=headers, body=body)
+        return RequestData(url=url, headers=headers, body=body, files=files)
 
     def parse_response(
         self,
