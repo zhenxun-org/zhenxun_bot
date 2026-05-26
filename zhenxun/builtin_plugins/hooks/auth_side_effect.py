@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 from nonebot_plugin_uninfo import Uninfo
 
@@ -21,6 +22,8 @@ class SideEffectCommit:
 
     session: Uninfo
     module: str
+    _reserved_limit: Callable[[], Awaitable[None]] | None = None
+    _reserved_gold: Callable[[], Awaitable[None]] | None = None
 
     async def send_permission_tip(
         self,
@@ -48,7 +51,45 @@ class SideEffectCommit:
         self,
         func: Callable[[], Awaitable[None]],
     ) -> None:
-        await func()
+        await self.reserve_gold(func)
+        await self.commit_gold()
 
-    async def commit_limit(self, func: Callable[[], Awaitable[None]]) -> None:
-        await func()
+    async def reserve_limit(self, func: Callable[[], Awaitable[None]]) -> None:
+        self._reserved_limit = func
+
+    async def commit_limit(
+        self,
+        func: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        if func is not None:
+            await self.reserve_limit(func)
+        if self._reserved_limit is None:
+            return
+        action = self._reserved_limit
+        self._reserved_limit = None
+        await action()
+
+    async def release_limit(self, reason: str | None = None) -> None:
+        del reason
+        self._reserved_limit = None
+
+    async def reserve_gold(
+        self,
+        func: Callable[[], Awaitable[None]],
+        *,
+        amount: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        del amount, metadata
+        self._reserved_gold = func
+
+    async def commit_gold(self) -> None:
+        if self._reserved_gold is None:
+            return
+        action = self._reserved_gold
+        self._reserved_gold = None
+        await action()
+
+    async def rollback_gold(self, reason: str | None = None) -> None:
+        del reason
+        self._reserved_gold = None

@@ -43,7 +43,7 @@ from .auth.auth_admin import auth_admin
 from .auth.auth_ban import auth_ban
 from .auth.auth_bot import auth_bot
 from .auth.auth_cost import auth_cost
-from .auth.auth_group import auth_group
+from .auth.auth_group import _is_group_wake_command, auth_group
 from .auth.auth_limit import LimitManager, auth_limit
 from .auth.auth_plugin import auth_plugin
 from .auth.bot_filter import bot_filter
@@ -67,6 +67,11 @@ from .auth_activation import (
     ActivationContext,
     HandlerActivationIndex,
 )
+from .auth_patch_guard import (
+    validate_check_and_run_matcher_patch,
+    validate_handle_event_patch,
+)
+from .auth_pipeline import AuthPipeline, AuthPipelineContext, AuthPipelineStage
 from .auth_policy import (
     PolicyContext,
     PolicyDecisionPoint,
@@ -76,28 +81,37 @@ from .auth_policy import (
     resource_from_snapshot,
 )
 from .auth_profile import PluginAuthProfile, get_plugin_auth_profile
+from .auth_runtime_config import AUTH_DISPATCH_RUNTIME_CONFIG
 from .auth_side_effect import SideEffectCommit
 from .auth_snapshot import AuthSnapshot, build_auth_snapshot
 
-AUTH_HOOKS_CONCURRENCY_LIMIT = 5
-AUTH_DB_CONCURRENCY_LIMIT = 6
-AUTH_DISPATCH_COMMAND_EXACT_LIMIT = 96
-AUTH_DISPATCH_COMMAND_SHORTCUT_LIMIT = 32
-AUTH_DISPATCH_COMMAND_REGEX_LIMIT = 8
-AUTH_DISPATCH_SYSTEM_LIMIT = 64
-AUTH_DISPATCH_PASSIVE_LIGHT_LIMIT = 12
-AUTH_DISPATCH_PASSIVE_DB_LIMIT = 4
-AUTH_DISPATCH_PASSIVE_HTTP_LIMIT = 4
-AUTH_DISPATCH_PASSIVE_AI_LIMIT = 2
-AUTH_DISPATCH_PASSIVE_RENDER_LIMIT = 2
-AUTH_DISPATCH_PLAIN_PASSIVE_LIGHT_LIMIT = 3
-AUTH_DISPATCH_PLAIN_PASSIVE_DB_LIMIT = 1
-AUTH_OVERLOAD_SELECTED_THRESHOLD = 48
-AUTH_OVERLOAD_LANE_WAIT_MS = 200.0
+AUTH_HOOKS_CONCURRENCY_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.hooks_concurrency_limit
+AUTH_DB_CONCURRENCY_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.db_concurrency_limit
+AUTH_DISPATCH_COMMAND_EXACT_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.command_exact_limit
+AUTH_DISPATCH_COMMAND_SHORTCUT_LIMIT = (
+    AUTH_DISPATCH_RUNTIME_CONFIG.command_shortcut_limit
+)
+AUTH_DISPATCH_COMMAND_REGEX_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.command_regex_limit
+AUTH_DISPATCH_SYSTEM_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.system_limit
+AUTH_DISPATCH_PASSIVE_LIGHT_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.passive_light_limit
+AUTH_DISPATCH_PASSIVE_DB_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.passive_db_limit
+AUTH_DISPATCH_PASSIVE_HTTP_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.passive_http_limit
+AUTH_DISPATCH_PASSIVE_AI_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.passive_ai_limit
+AUTH_DISPATCH_PASSIVE_RENDER_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.passive_render_limit
+AUTH_DISPATCH_PLAIN_PASSIVE_LIGHT_LIMIT = (
+    AUTH_DISPATCH_RUNTIME_CONFIG.plain_passive_light_limit
+)
+AUTH_DISPATCH_PLAIN_PASSIVE_DB_LIMIT = (
+    AUTH_DISPATCH_RUNTIME_CONFIG.plain_passive_db_limit
+)
+AUTH_OVERLOAD_SELECTED_THRESHOLD = (
+    AUTH_DISPATCH_RUNTIME_CONFIG.overload_selected_threshold
+)
+AUTH_OVERLOAD_LANE_WAIT_MS = AUTH_DISPATCH_RUNTIME_CONFIG.overload_lane_wait_ms
 
 
 # 超时设置（秒）
-TIMEOUT_SECONDS = 5.0
+TIMEOUT_SECONDS = AUTH_DISPATCH_RUNTIME_CONFIG.timeout_seconds
 # 熔断计数器
 CIRCUIT_BREAKERS = {
     "auth_ban": {"failures": 0, "threshold": 3, "active": False, "reset_time": 0},
@@ -108,7 +122,7 @@ CIRCUIT_BREAKERS = {
     "auth_limit": {"failures": 0, "threshold": 3, "active": False, "reset_time": 0},
 }
 # 熔断重置时间（秒）
-CIRCUIT_RESET_TIME = 300  # 5分钟
+CIRCUIT_RESET_TIME = AUTH_DISPATCH_RUNTIME_CONFIG.circuit_reset_time
 
 # 并发控制：限制同时进入 hooks 并行检查的协程数
 HOOKS_CONCURRENCY_LIMIT = AUTH_HOOKS_CONCURRENCY_LIMIT
@@ -120,10 +134,10 @@ _ROUTE_INDEX_READY = False
 _ROUTE_COMMAND_MAP: dict[str, set[str]] = {}
 _ROUTE_PREFIX_MAP: dict[str, set[str]] = {}
 _ROUTE_MODULES_WITH_COMMANDS: set[str] = set()
-MATCHER_ROUTE_PREFILTER_TTL = 2
-PREFILTER_STATS_LOG_INTERVAL = 10.0
-CACHE_SWEEP_INTERVAL = 1.0
-DISPATCH_STATS_LOG_INTERVAL = 10.0
+MATCHER_ROUTE_PREFILTER_TTL = AUTH_DISPATCH_RUNTIME_CONFIG.matcher_route_prefilter_ttl
+PREFILTER_STATS_LOG_INTERVAL = AUTH_DISPATCH_RUNTIME_CONFIG.prefilter_stats_log_interval
+CACHE_SWEEP_INTERVAL = AUTH_DISPATCH_RUNTIME_CONFIG.cache_sweep_interval
+DISPATCH_STATS_LOG_INTERVAL = AUTH_DISPATCH_RUNTIME_CONFIG.dispatch_stats_log_interval
 
 # 全局信号量与计数器
 HOOKS_ACTIVE_COUNT = 0
@@ -1787,6 +1801,14 @@ def _install_matcher_prefilter() -> None:
     global _CHECK_MATCHER_PATCHED, _ORIGINAL_CHECK_AND_RUN_MATCHER
     if _CHECK_MATCHER_PATCHED:
         return
+    guard = validate_check_and_run_matcher_patch()
+    if not guard.ok:
+        logger.warning(
+            "权限 matcher 预筛选 patch 未安装，回退 NoneBot 原生分发: "
+            f"{guard.reason}",
+            LOGGER_COMMAND,
+        )
+        return
     _ORIGINAL_CHECK_AND_RUN_MATCHER = nb_message.check_and_run_matcher
     nb_message.check_and_run_matcher = _patched_check_and_run_matcher  # type: ignore[assignment]
     _CHECK_MATCHER_PATCHED = True
@@ -1975,6 +1997,14 @@ def _install_handle_event_selector() -> None:
     global _HANDLE_EVENT_PATCHED, _ORIGINAL_HANDLE_EVENT
     if _HANDLE_EVENT_PATCHED:
         return
+    guard = validate_handle_event_patch()
+    if not guard.ok:
+        logger.warning(
+            "权限事件分发选择器 patch 未安装，回退 NoneBot 原生分发: "
+            f"{guard.reason}",
+            LOGGER_COMMAND,
+        )
+        return
     _ORIGINAL_HANDLE_EVENT = nb_message.handle_event
     nb_message.handle_event = _patched_handle_event  # type: ignore[assignment]
     for module_name in (
@@ -2162,6 +2192,7 @@ def _policy_skip_message(reason: str) -> str:
         "bot_plugin_blocked": "Bot插件权限检查结果为关闭...",
         "group_not_found": "群组信息不存在...",
         "group_blacklisted": "群组黑名单, 目标群组群权限权限-1...",
+        "group_sleeping": "群组休眠状态...",
         "group_level_low": "群等级限制...",
         "admin_level_low": "管理员权限不足...",
         "plugin_disabled_in_group": "该插件在群组中已被禁用...",
@@ -2566,6 +2597,7 @@ async def _prepare_auth_state(
         snapshot=snapshot,
         route_skip_checks=route_skip_checks,
         allow_sleep_bypass=_is_bot_wake_command(module, context.plain_text),
+        allow_group_sleep_bypass=_is_group_wake_command(plugin, context.plain_text),
     )
     return AuthPreparation(
         plugin=plugin,
@@ -2969,6 +3001,179 @@ async def _run_auth_hooks(
     return time.time() - hooks_start
 
 
+async def _auth_pipeline_route_gate(ctx: AuthPipelineContext) -> None:
+    if not ctx.module:
+        ctx.stop(allowed=True, effect="allow", reason="empty_module")
+        return
+
+    ctx.side_effect_lock = ctx.side_effect_cache.lock_for(ctx.module)
+    await ctx.side_effect_lock.acquire()
+    ctx.entered_side_effect_lock = True
+
+    ctx.auth_result_cache = ctx.side_effect_cache.auth_results
+    cached_result = ctx.auth_result_cache.get(ctx.module)
+    if cached_result is not None:
+        allowed, reason = cached_result
+        if not allowed:
+            ctx.decision_effect = "skip"
+            ctx.decision_reason = reason or "auth_cached_skip"
+            raise SkipPluginException(reason or "auth cached skip")
+        ctx.stop(allowed=True, effect="allow", reason="auth_cached_allow")
+        return
+
+    if _is_hidden_plugin(ctx.matcher):
+        ctx.stop(allowed=True, effect="allow", reason="hidden_plugin")
+        return
+    if ctx.event_cache is not None and ctx.event_cache.get("ban_state") is True:
+        ctx.decision_effect = "skip"
+        ctx.decision_reason = "ban_cached"
+        raise SkipPluginException("user or group banned (cached)")
+
+    if ctx.route_modules is None:
+        ctx.route_modules = await _get_route_context(ctx.text, ctx.event_cache)
+        set_route_modules(ctx.state, ctx.event_context, ctx.route_modules)
+    ctx.route_skip_checks = (
+        ctx.is_command_matcher
+        and ctx.module in _ROUTE_MODULES_WITH_COMMANDS
+        and ctx.module not in ctx.route_modules
+        and not _matcher_has_alconna_shortcuts(type(ctx.matcher))
+    )
+    if ctx.route_skip_checks:
+        if ctx.event_cache is not None:
+            ctx.event_cache["route_skip"] = True
+        ctx.hook_recorder.set("route", "miss")
+        ctx.stop(allowed=True, effect="allow", reason="route_miss_skip_checks")
+
+
+async def _auth_pipeline_prepare_snapshot(ctx: AuthPipelineContext) -> None:
+    ctx.prep = await _prepare_auth_state(
+        module=ctx.module,
+        context=ctx.event_context,
+        bot=ctx.bot,
+        event_cache=ctx.event_cache,
+        route_skip_checks=ctx.route_skip_checks,
+        skip_ban=ctx.skip_ban,
+        hook_recorder=ctx.hook_recorder,
+        state=ctx.state,
+        session=ctx.session,
+    )
+    if ctx.prep is None:
+        ctx.stop(allowed=True, effect="allow", reason="prepare_timeout_allow")
+
+
+async def _auth_pipeline_policy_precheck(ctx: AuthPipelineContext) -> None:
+    ctx.flags = _apply_policy_precheck(ctx.prep, ctx.hook_recorder)
+    if ctx.flags.should_return_allowed:
+        ctx.stop(allowed=True, effect="allow", reason="policy_precheck_allow")
+        return
+    await _precheck_admin_policy(
+        prep=ctx.prep,
+        flags=ctx.flags,
+        event_cache=ctx.event_cache,
+        route_skip_checks=ctx.route_skip_checks,
+        hook_recorder=ctx.hook_recorder,
+        session=ctx.session,
+    )
+    await _check_ban_from_snapshot(
+        prep=ctx.prep,
+        matcher=ctx.matcher,
+        event_cache=ctx.event_cache,
+        skip_ban=ctx.skip_ban,
+        hook_recorder=ctx.hook_recorder,
+        session=ctx.session,
+    )
+    ctx.cost_gold = await _resolve_cost_gold(
+        prep=ctx.prep,
+        route_skip_checks=ctx.route_skip_checks,
+        hook_recorder=ctx.hook_recorder,
+        session=ctx.session,
+    )
+
+
+async def _auth_pipeline_legacy_hook_adapter(ctx: AuthPipelineContext) -> None:
+    bot_filter(ctx.session, context=ctx.prep.permission_context)
+    ctx.hooks_time = await _run_auth_hooks(
+        prep=ctx.prep,
+        matcher=ctx.matcher,
+        event=ctx.event,
+        bot=ctx.bot,
+        session=ctx.session,
+        event_cache=ctx.event_cache,
+        route_skip_checks=ctx.route_skip_checks,
+        flags=ctx.flags,
+        lane_context=ctx.lane_context,
+        hook_recorder=ctx.hook_recorder,
+        state=ctx.state,
+    )
+    ctx.auth_allowed = True
+    ctx.decision_effect = "allow"
+    ctx.decision_reason = "auth_passed"
+
+
+async def _auth_pipeline_side_effect_commit(ctx: AuthPipelineContext) -> None:
+    if ctx.ignore_flag or ctx.cost_gold <= 0:
+        if ctx.ignore_flag:
+            await ctx.side_effect_commit.rollback_gold("auth_ignored")
+        return
+    gold_start = time.time()
+    try:
+        await ctx.side_effect_commit.reserve_gold(
+            lambda: reduce_gold(
+                ctx.entity.user_id,
+                ctx.module,
+                ctx.cost_gold,
+                ctx.session,
+            ),
+            amount=ctx.cost_gold,
+            metadata={"module": ctx.module},
+        )
+        await with_timeout(
+            ctx.side_effect_commit.commit_gold(),
+            name="reduce_gold",
+        )
+        ctx.hook_recorder.set("reduce_gold", f"{time.time() - gold_start:.3f}s")
+    except asyncio.TimeoutError:
+        logger.error(
+            f"扣除金币超时，模块: {ctx.module}",
+            LOGGER_COMMAND,
+            session=ctx.session,
+        )
+
+
+async def _auth_pipeline_decision_log(ctx: AuthPipelineContext) -> None:
+    if ctx.auth_result_cache is not None and ctx.auth_allowed is not None:
+        ctx.auth_result_cache[ctx.module] = (
+            ctx.auth_allowed,
+            None if ctx.auth_allowed else ctx.decision_reason,
+        )
+    if ctx.entered_side_effect_lock and ctx.side_effect_lock is not None:
+        with contextlib.suppress(Exception):
+            ctx.side_effect_lock.release()
+        ctx.entered_side_effect_lock = False
+    latency_ms = (time.time() - ctx.start_time) * 1000
+    await append_auth_decision_log(
+        bot_id=ctx.event_context.bot_id,
+        platform=ctx.event_context.platform,
+        group_id=ctx.entity.group_id,
+        user_id=ctx.entity.user_id,
+        module=ctx.module,
+        effect=ctx.decision_effect or "error",
+        reason=ctx.decision_reason,
+        latency_ms=latency_ms,
+        overloaded=is_overloaded(),
+    )
+
+
+_AUTH_PIPELINE = AuthPipeline(
+    [
+        AuthPipelineStage("route_gate", _auth_pipeline_route_gate),
+        AuthPipelineStage("prepare_snapshot", _auth_pipeline_prepare_snapshot),
+        AuthPipelineStage("policy_precheck", _auth_pipeline_policy_precheck),
+        AuthPipelineStage("legacy_hook_adapter", _auth_pipeline_legacy_hook_adapter),
+    ]
+)
+
+
 async def auth(
     matcher: Matcher,
     event: Event,
@@ -2989,8 +3194,6 @@ async def auth(
         context: EventContext
     """
     start_time = time.time()
-    cost_gold = 0
-    ignore_flag = False
     entity = context.entity
     event_cache = context.event_cache
     text = context.plain_text
@@ -2998,137 +3201,37 @@ async def auth(
     module = matcher.plugin_name or ""
     is_command_matcher = _is_command_matcher_class(type(matcher))
     lane_context = _auth_lane_context_from_state(type(matcher), context, state)
-    auth_allowed = None
-    auth_result_cache = None
-    decision_effect: str | None = None
-    decision_reason: str | None = None
     side_effect_cache = get_permission_side_effect_cache(
         state=state,
         event_cache=event_cache,
     )
     side_effect_commit = SideEffectCommit(session=session, module=module)
-    side_effect_lock = None
-    entered_side_effect_lock = False
 
     # 仅在慢请求时记录 hook 明细，避免热路径高频构造字符串
     hook_recorder = HookTraceRecorder(start_time)
-    hooks_time = 0  # 初始化 hooks_time 变量
+    pipeline_context = AuthPipelineContext(
+        matcher=matcher,
+        event=event,
+        bot=bot,
+        session=session,
+        event_context=context,
+        skip_ban=skip_ban,
+        state=state,
+        start_time=start_time,
+        module=module,
+        entity=entity,
+        event_cache=event_cache,
+        text=text,
+        route_modules=route_modules,
+        is_command_matcher=is_command_matcher,
+        lane_context=lane_context,
+        side_effect_cache=side_effect_cache,
+        side_effect_commit=side_effect_commit,
+        hook_recorder=hook_recorder,
+    )
 
     try:
-        if not module:
-            auth_allowed = True
-            decision_effect = "allow"
-            decision_reason = "empty_module"
-            return
-
-        side_effect_lock = side_effect_cache.lock_for(module)
-        await side_effect_lock.acquire()
-        entered_side_effect_lock = True
-
-        auth_result_cache = side_effect_cache.auth_results
-        cached_result = auth_result_cache.get(module)
-        if cached_result is not None:
-            allowed, reason = cached_result
-            if not allowed:
-                decision_effect = "skip"
-                decision_reason = reason or "auth_cached_skip"
-                raise SkipPluginException(reason or "auth cached skip")
-            decision_effect = "allow"
-            decision_reason = "auth_cached_allow"
-            return
-
-        if _is_hidden_plugin(matcher):
-            auth_allowed = True
-            decision_effect = "allow"
-            decision_reason = "hidden_plugin"
-            return
-        if event_cache is not None and event_cache.get("ban_state") is True:
-            decision_effect = "skip"
-            decision_reason = "ban_cached"
-            raise SkipPluginException("user or group banned (cached)")
-
-        if route_modules is None:
-            route_modules = await _get_route_context(text, event_cache)
-            set_route_modules(state, context, route_modules)
-        route_skip_checks = (
-            is_command_matcher
-            and module in _ROUTE_MODULES_WITH_COMMANDS
-            and module not in route_modules
-            and not _matcher_has_alconna_shortcuts(type(matcher))
-        )
-        if route_skip_checks:
-            if event_cache is not None:
-                event_cache["route_skip"] = True
-            hook_recorder.set("route", "miss")
-            auth_allowed = True
-            decision_effect = "allow"
-            decision_reason = "route_miss_skip_checks"
-            return
-
-        prep = await _prepare_auth_state(
-            module=module,
-            context=context,
-            bot=bot,
-            event_cache=event_cache,
-            route_skip_checks=route_skip_checks,
-            skip_ban=skip_ban,
-            hook_recorder=hook_recorder,
-            state=state,
-            session=session,
-        )
-        if prep is None:
-            auth_allowed = True
-            decision_effect = "allow"
-            decision_reason = "prepare_timeout_allow"
-            return
-        flags = _apply_policy_precheck(prep, hook_recorder)
-        if flags.should_return_allowed:
-            auth_allowed = True
-            decision_effect = "allow"
-            decision_reason = "policy_precheck_allow"
-            return
-
-        await _precheck_admin_policy(
-            prep=prep,
-            flags=flags,
-            event_cache=event_cache,
-            route_skip_checks=route_skip_checks,
-            hook_recorder=hook_recorder,
-            session=session,
-        )
-        await _check_ban_from_snapshot(
-            prep=prep,
-            matcher=matcher,
-            event_cache=event_cache,
-            skip_ban=skip_ban,
-            hook_recorder=hook_recorder,
-            session=session,
-        )
-        cost_gold = await _resolve_cost_gold(
-            prep=prep,
-            route_skip_checks=route_skip_checks,
-            hook_recorder=hook_recorder,
-            session=session,
-        )
-
-        # 执行 bot_filter
-        bot_filter(session, context=prep.permission_context)
-        hooks_time = await _run_auth_hooks(
-            prep=prep,
-            matcher=matcher,
-            event=event,
-            bot=bot,
-            session=session,
-            event_cache=event_cache,
-            route_skip_checks=route_skip_checks,
-            flags=flags,
-            lane_context=lane_context,
-            hook_recorder=hook_recorder,
-            state=state,
-        )
-        auth_allowed = True
-        decision_effect = "allow"
-        decision_reason = "auth_passed"
+        await _AUTH_PIPELINE.run(pipeline_context)
 
     except SkipPluginException as e:
         LimitManager.unblock(module, entity.user_id, entity.group_id, entity.channel_id)
@@ -3140,67 +3243,35 @@ async def auth(
                 timeout=e.tip_timeout,
             )
         logger.info(str(e), LOGGER_COMMAND, session=session)
-        ignore_flag = True
-        auth_allowed = False
-        decision_effect = "defer" if "deferred" in str(e) else "skip"
-        decision_reason = str(e) or "skip_plugin"
+        pipeline_context.ignore_flag = True
+        pipeline_context.auth_allowed = False
+        pipeline_context.decision_effect = "defer" if "deferred" in str(e) else "skip"
+        pipeline_context.decision_reason = str(e) or "skip_plugin"
     except IsSuperuserException:
         logger.debug("超级用户跳过权限检测...", LOGGER_COMMAND, session=session)
-        auth_allowed = True
-        decision_effect = "allow"
-        decision_reason = "superuser"
+        pipeline_context.auth_allowed = True
+        pipeline_context.decision_effect = "allow"
+        pipeline_context.decision_reason = "superuser"
     except PermissionExemption as e:
         logger.info(str(e), LOGGER_COMMAND, session=session)
-        auth_allowed = True
-        decision_effect = "allow"
-        decision_reason = str(e) or "permission_exemption"
+        pipeline_context.auth_allowed = True
+        pipeline_context.decision_effect = "allow"
+        pipeline_context.decision_reason = str(e) or "permission_exemption"
     finally:
-        if auth_result_cache is not None and auth_allowed is not None:
-            auth_result_cache[module] = (
-                auth_allowed,
-                None if auth_allowed else decision_reason,
-            )
-        if entered_side_effect_lock and side_effect_lock is not None:
-            with contextlib.suppress(Exception):
-                side_effect_lock.release()
-        latency_ms = (time.time() - start_time) * 1000
-        await append_auth_decision_log(
-            bot_id=context.bot_id,
-            platform=context.platform,
-            group_id=entity.group_id,
-            user_id=entity.user_id,
-            module=module,
-            effect=decision_effect or "error",
-            reason=decision_reason,
-            latency_ms=latency_ms,
-            overloaded=is_overloaded(),
-        )
-    # 扣除金币
-    if not ignore_flag and cost_gold > 0:
-        gold_start = time.time()
-        try:
-            await with_timeout(
-                side_effect_commit.reduce_gold(
-                    lambda: reduce_gold(entity.user_id, module, cost_gold, session)
-                ),
-                name="reduce_gold",
-            )
-            hook_recorder.set("reduce_gold", f"{time.time() - gold_start:.3f}s")
-        except asyncio.TimeoutError:
-            logger.error(
-                f"扣除金币超时，模块: {module}", LOGGER_COMMAND, session=session
-            )
+        await _auth_pipeline_decision_log(pipeline_context)
+
+    await _auth_pipeline_side_effect_commit(pipeline_context)
 
     # 记录总执行时间
     total_time = time.time() - start_time
     if total_time > WARNING_THRESHOLD:  # 如果总时间超过500ms，记录详细信息
         logger.warning(
             f"权限检查耗时过长: {total_time:.3f}s, 模块: {module}, "
-            f"hooks时间: {hooks_time:.3f}s, "
+            f"hooks时间: {pipeline_context.hooks_time:.3f}s, "
             f"详情: {hook_recorder.snapshot()}",
             LOGGER_COMMAND,
             session=session,
         )
 
-    if ignore_flag:
+    if pipeline_context.ignore_flag:
         raise IgnoredException("权限检测 ignore")

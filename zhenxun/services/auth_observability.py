@@ -8,6 +8,9 @@ import random
 import time
 from typing import TypeVar
 
+from zhenxun.builtin_plugins.hooks.auth_runtime_config import (
+    AUTH_OBSERVABILITY_RUNTIME_CONFIG,
+)
 from zhenxun.models.auth_decision_log import AuthDecisionLog
 from zhenxun.models.runtime_backpressure_log import RuntimeBackpressureLog
 from zhenxun.services.log import logger
@@ -15,16 +18,20 @@ from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
 LOG_COMMAND = "AuthObservability"
 
-_BUFFER_MAX_RETAIN = 20_000
-_FLUSH_TRIGGER_SIZE = 256
-_FLUSH_BATCH_SIZE = 500
-_FLUSH_INTERVAL_SECONDS = 30.0
-_DROP_LOG_INTERVAL_SECONDS = 10.0
-_ALLOW_SAMPLE_RATE = 0.005
-_OVERLOADED_ALLOW_SAMPLE_RATE = 0.02
-_NON_ALLOW_SAMPLE_RATE = 1.0
-_BACKPRESSURE_SAMPLE_RATE = 0.2
-_BACKPRESSURE_SEVERE_ACTIVE_THRESHOLD = 5
+_BUFFER_MAX_RETAIN = AUTH_OBSERVABILITY_RUNTIME_CONFIG.buffer_max_retain
+_FLUSH_TRIGGER_SIZE = AUTH_OBSERVABILITY_RUNTIME_CONFIG.flush_trigger_size
+_FLUSH_BATCH_SIZE = AUTH_OBSERVABILITY_RUNTIME_CONFIG.flush_batch_size
+_FLUSH_INTERVAL_SECONDS = AUTH_OBSERVABILITY_RUNTIME_CONFIG.flush_interval_seconds
+_DROP_LOG_INTERVAL_SECONDS = AUTH_OBSERVABILITY_RUNTIME_CONFIG.drop_log_interval_seconds
+_ALLOW_SAMPLE_RATE = AUTH_OBSERVABILITY_RUNTIME_CONFIG.allow_sample_rate
+_OVERLOADED_ALLOW_SAMPLE_RATE = (
+    AUTH_OBSERVABILITY_RUNTIME_CONFIG.overloaded_allow_sample_rate
+)
+_NON_ALLOW_SAMPLE_RATE = AUTH_OBSERVABILITY_RUNTIME_CONFIG.non_allow_sample_rate
+_BACKPRESSURE_SAMPLE_RATE = AUTH_OBSERVABILITY_RUNTIME_CONFIG.backpressure_sample_rate
+_BACKPRESSURE_SEVERE_ACTIVE_THRESHOLD = (
+    AUTH_OBSERVABILITY_RUNTIME_CONFIG.backpressure_severe_active_threshold
+)
 
 
 @dataclass(slots=True)

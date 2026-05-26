@@ -60,6 +60,7 @@ class PolicyContext:
     snapshot: AuthSnapshot
     route_skip_checks: bool = False
     allow_sleep_bypass: bool = False
+    allow_group_sleep_bypass: bool = False
 
 
 class PolicyDecisionPoint:
@@ -112,8 +113,8 @@ class PolicyDecisionPoint:
             return PolicyDecision("deny", "group_not_found")
         if group.level < 0:
             return PolicyDecision("deny", "group_blacklisted")
-        if not group.status:
-            return PolicyDecision("defer", "group_sleep_check_needs_wake_rule")
+        if not group.status and not context.allow_group_sleep_bypass:
+            return PolicyDecision("deny", "group_sleeping")
         if profile.level > group.level:
             return PolicyDecision("deny", "group_level_low")
         return PolicyDecision("allow", "group_allowed")
@@ -149,12 +150,17 @@ class PolicyDecisionPoint:
         if snapshot.group_id:
             if group is None:
                 return PolicyDecision("deny", "group_not_found")
-            if profile.block_type == BlockType.GROUP:
-                return PolicyDecision("deny", "plugin_disabled_in_group")
+            if profile.status and profile.block_type != BlockType.GROUP:
+                block_set = getattr(group, "block_plugin_set", ())
+                super_block_set = getattr(group, "superuser_block_plugin_set", ())
+                if not block_set and not super_block_set:
+                    return PolicyDecision("allow", "plugin_group_fast_allow")
             if profile.module in getattr(group, "superuser_block_plugin_set", ()):
                 return PolicyDecision("deny", "plugin_superuser_blocked_in_group")
             if profile.module in getattr(group, "block_plugin_set", ()):
                 return PolicyDecision("deny", "plugin_blocked_in_group")
+            if profile.block_type == BlockType.GROUP:
+                return PolicyDecision("deny", "plugin_disabled_in_group")
         elif profile.block_type == BlockType.PRIVATE:
             return PolicyDecision("deny", "plugin_disabled_in_private")
         if profile.block_type == BlockType.ALL and not profile.status:
