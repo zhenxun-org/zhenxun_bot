@@ -18,6 +18,10 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.configs.utils import PluginExtraData
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.user_console import UserConsole
+from zhenxun.services.auth_observability import (
+    append_auth_decision_log,
+    append_runtime_backpressure_log,
+)
 from zhenxun.services.cache.cache_containers import CacheDict
 from zhenxun.services.cache.runtime_cache import (
     BotMemoryCache,
@@ -30,7 +34,7 @@ from zhenxun.services.cache.runtime_cache import (
 )
 from zhenxun.services.data_access import DataAccess
 from zhenxun.services.log import logger
-from zhenxun.services.message_load import is_overloaded
+from zhenxun.services.message_load import is_overloaded, signal_overload
 from zhenxun.utils.enum import BlockType, GoldHandle, PluginType
 from zhenxun.utils.exception import InsufficientGold
 from zhenxun.utils.platform import PlatformUtils
@@ -59,7 +63,21 @@ from .auth.exception import (
     PermissionExemption,
     SkipPluginException,
 )
-from .auth.utils import send_message
+from .auth_activation import (
+    ActivationContext,
+    HandlerActivationIndex,
+)
+from .auth_policy import (
+    PolicyContext,
+    PolicyDecisionPoint,
+    action_from_snapshot,
+    principal_from_snapshot,
+    raise_for_policy,
+    resource_from_snapshot,
+)
+from .auth_profile import PluginAuthProfile, get_plugin_auth_profile
+from .auth_side_effect import SideEffectCommit
+from .auth_snapshot import AuthSnapshot, build_auth_snapshot
 
 AUTH_HOOKS_CONCURRENCY_LIMIT = 5
 AUTH_DB_CONCURRENCY_LIMIT = 6
@@ -72,6 +90,10 @@ AUTH_DISPATCH_PASSIVE_DB_LIMIT = 4
 AUTH_DISPATCH_PASSIVE_HTTP_LIMIT = 4
 AUTH_DISPATCH_PASSIVE_AI_LIMIT = 2
 AUTH_DISPATCH_PASSIVE_RENDER_LIMIT = 2
+AUTH_DISPATCH_PLAIN_PASSIVE_LIGHT_LIMIT = 3
+AUTH_DISPATCH_PLAIN_PASSIVE_DB_LIMIT = 1
+AUTH_OVERLOAD_SELECTED_THRESHOLD = 48
+AUTH_OVERLOAD_LANE_WAIT_MS = 200.0
 
 
 # 超时设置（秒）
@@ -130,6 +152,8 @@ _ORIGINAL_CHECK_AND_RUN_MATCHER: Callable[..., Awaitable[None]] | None = None
 _HANDLE_EVENT_PATCHED = False
 _ORIGINAL_HANDLE_EVENT: Callable[..., Awaitable[None]] | None = None
 _ORIGINAL_ADAPTER_HANDLE_EVENTS: dict[object, object] = {}
+_HANDLER_ACTIVATION_INDEX = HandlerActivationIndex()
+_AUTH_PDP = PolicyDecisionPoint()
 _MATCHER_COMMAND_TYPE_CACHE: dict[type[Matcher], bool] = {}
 _MATCHER_COMMAND_LITERAL_CACHE: dict[type[Matcher], tuple[str, ...] | None] = {}
 _MATCHER_ALCONNA_SHORTCUT_CACHE: dict[type[Matcher], tuple[str, ...] | None] = {}
@@ -137,6 +161,39 @@ _MATCHER_RULE_DESCRIPTOR_CACHE: dict[type[Matcher], tuple["RuleDescriptor", ...]
 _CHECK_MATCHER_ROUTE_CACHE = CacheDict(
     "AUTH_MATCHER_ROUTE_CACHE", expire=MATCHER_ROUTE_PREFILTER_TTL
 )
+
+
+@dataclass(slots=True)
+class AuthPreparation:
+    plugin: PluginInfo
+    user: UserConsole | None
+    profile: PluginAuthProfile
+    snapshot: AuthSnapshot
+    permission_context: PermissionContext
+    policy_context: PolicyContext
+
+
+@dataclass(slots=True)
+class AuthPolicyFlags:
+    bot_policy_done: bool = False
+    group_policy_done: bool = False
+    admin_policy_done: bool = False
+    admin_checked_pre: bool = False
+    plugin_policy_done: bool = False
+    should_return_allowed: bool = False
+
+
+@dataclass(slots=True)
+class AuthLaneContext:
+    lane: str = "passive_light"
+    scope_key: str = ""
+    queue_size: int = 0
+
+    @property
+    def is_guaranteed(self) -> bool:
+        return self.lane.startswith("command_") or self.lane == "system"
+
+
 _PREFILTER_STATS = {
     "checked": 0,
     "skipped": 0,
@@ -990,9 +1047,22 @@ def _dispatch_command_lane_for_matcher(matcher_cls: type[Matcher]) -> str:
 
 
 def _dispatch_budget_for_context(context: EventDispatchContext) -> dict[str, int]:
+    high_signal = (
+        context.to_me or context.is_command_like or context.has_url or context.has_image
+    )
+    passive_light = (
+        AUTH_DISPATCH_PASSIVE_LIGHT_LIMIT
+        if high_signal
+        else AUTH_DISPATCH_PLAIN_PASSIVE_LIGHT_LIMIT
+    )
+    passive_db = (
+        AUTH_DISPATCH_PASSIVE_DB_LIMIT
+        if high_signal
+        else AUTH_DISPATCH_PLAIN_PASSIVE_DB_LIMIT
+    )
     budget = {
-        "passive_light": AUTH_DISPATCH_PASSIVE_LIGHT_LIMIT,
-        "passive_db": AUTH_DISPATCH_PASSIVE_DB_LIMIT,
+        "passive_light": passive_light,
+        "passive_db": passive_db,
         "passive_http": AUTH_DISPATCH_PASSIVE_HTTP_LIMIT if context.has_url else 0,
         "passive_ai": AUTH_DISPATCH_PASSIVE_AI_LIMIT
         if (context.to_me or context.is_command_like)
@@ -1002,6 +1072,25 @@ def _dispatch_budget_for_context(context: EventDispatchContext) -> dict[str, int
         else 0,
     }
     return budget
+
+
+def _activation_context_from_dispatch(
+    context: EventDispatchContext,
+    event: Event,
+) -> ActivationContext:
+    return ActivationContext(
+        event=event,
+        event_type=context.event_type,
+        plain_text=context.plain_text,
+        raw_text=context.raw_text,
+        to_me=context.to_me,
+        has_url=context.has_url,
+        has_image=context.has_image,
+        is_command_like=context.is_command_like,
+        route_modules=set(context.route_modules),
+        ai_route_modules=set(context.ai_route_modules),
+        ai_route_heads=set(context.ai_route_heads),
+    )
 
 
 def _record_dispatch_selection(lane: str, selected: bool, wait_ms: float = 0.0) -> None:
@@ -1071,6 +1160,47 @@ def _consume_dispatch_budget(
     return True
 
 
+def _auth_scope_key(context: EventContext) -> str:
+    group_id = context.group_id or ""
+    channel_id = context.channel_id or ""
+    message_id = context.message_id if context.message_id is not None else ""
+    return (
+        f"{context.platform}:{context.bot_id}:"
+        f"{context.user_id}:{group_id}:{channel_id}:{message_id}"
+    )
+
+
+def _auth_lane_context_from_state(
+    matcher_cls: type[Matcher],
+    auth_context: EventContext,
+    state: dict | None,
+) -> AuthLaneContext:
+    dispatch_context = None
+    if state is not None:
+        value = state.get("_zx_dispatch_context")
+        if isinstance(value, EventDispatchContext):
+            dispatch_context = value
+    if dispatch_context is None:
+        dispatch_context = EventDispatchContext(
+            event_type=auth_context.event_type,
+            plain_text=auth_context.plain_text,
+            is_command_like=bool(auth_context.route_modules),
+            route_modules=set(auth_context.route_modules),
+        )
+    lane = _dispatch_lane_for_matcher(matcher_cls, dispatch_context)
+    semaphore = _DISPATCH_LANE_SEMAPHORES.get(lane)
+    queue_size = 0
+    if semaphore is not None:
+        limit = _DISPATCH_LANE_LIMITS.get(lane, 0)
+        value = getattr(semaphore, "_value", limit)
+        queue_size = max(limit - int(value), 0)
+    return AuthLaneContext(
+        lane=lane,
+        scope_key=_auth_scope_key(auth_context),
+        queue_size=queue_size,
+    )
+
+
 @contextlib.asynccontextmanager
 async def _dispatch_lane_section(lane: str):
     semaphore = _DISPATCH_LANE_SEMAPHORES.get(lane)
@@ -1080,6 +1210,8 @@ async def _dispatch_lane_section(lane: str):
     started = time.perf_counter()
     await semaphore.acquire()
     wait_ms = (time.perf_counter() - started) * 1000
+    if wait_ms >= AUTH_OVERLOAD_LANE_WAIT_MS:
+        signal_overload(2.0)
     _record_dispatch_selection(lane, True, wait_ms=wait_ms)
     try:
         yield
@@ -1283,11 +1415,10 @@ def _extract_matcher_command_literals(
     return sorted_commands
 
 
-def _collect_alconna_shortcut_strings(command) -> set[str]:
+def _collect_alconna_shortcut_strings(command, depth: int = 0) -> set[str]:
     shortcuts: set[str] = set()
-    if command is None:
+    if command is None or depth > 4:
         return shortcuts
-
     get_shortcuts = getattr(command, "get_shortcuts", None)
     if callable(get_shortcuts):
         with contextlib.suppress(Exception):
@@ -1296,6 +1427,12 @@ def _collect_alconna_shortcut_strings(command) -> set[str]:
                 for shortcut in raw_shortcuts:
                     if isinstance(shortcut, str) and shortcut.strip():
                         shortcuts.add(shortcut.strip())
+    elif callable(command):
+        with contextlib.suppress(Exception):
+            resolved = command()
+            if resolved is not None and resolved is not command:
+                shortcuts.update(_collect_alconna_shortcut_strings(resolved, depth + 1))
+                return shortcuts
 
     formatter = getattr(command, "formatter", None)
     data = getattr(formatter, "data", None)
@@ -1307,6 +1444,10 @@ def _collect_alconna_shortcut_strings(command) -> set[str]:
             for shortcut in trace_shortcuts:
                 if isinstance(shortcut, str) and shortcut.strip():
                     shortcuts.add(shortcut.strip())
+    for attr in ("command", "commands", "base", "formatter", "source"):
+        nested = getattr(command, attr, None)
+        if nested is not None and nested is not command:
+            shortcuts.update(_collect_alconna_shortcut_strings(nested, depth + 1))
     return shortcuts
 
 
@@ -1317,6 +1458,10 @@ def _extract_matcher_alconna_shortcuts(
         return _MATCHER_ALCONNA_SHORTCUT_CACHE[matcher_cls]
 
     shortcuts: set[str] = set()
+    for attr in ("command", "_rule", "rule"):
+        shortcuts.update(
+            _collect_alconna_shortcut_strings(getattr(matcher_cls, attr, None))
+        )
     rule = getattr(matcher_cls, "rule", None)
     checkers = getattr(rule, "checkers", ()) or ()
     for checker in checkers:
@@ -1356,7 +1501,7 @@ def _normalize_shortcut_pattern(shortcut: str) -> str:
     text = shortcut.strip()
     if not text:
         return ""
-    text = re.sub(r"^\[\]\s*", "", text)
+    text = re.sub(r"^\[(?:[^\]]*)\]\s*", "", text)
     text = re.sub(r"\s*\.\.\.args?$", "", text).strip()
     text = re.sub(r"\s*\.\.\.$", "", text).strip()
     return text
@@ -1703,6 +1848,20 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
         _prepare_handle_event_state(event, state)
         dispatch_context = await _build_dispatch_context(event, state)
         dispatch_budget = _dispatch_budget_for_context(dispatch_context)
+        activation_context = _activation_context_from_dispatch(
+            dispatch_context,
+            event,
+        )
+        activation_available = True
+        try:
+            _HANDLER_ACTIVATION_INDEX.ensure_fresh(matchers)
+        except Exception as exc:
+            activation_available = False
+            logger.warning(
+                "HandlerActivationIndex 构建失败，回退到旧 matcher 选择逻辑",
+                LOGGER_COMMAND,
+                e=exc,
+            )
 
         break_flag = False
 
@@ -1729,8 +1888,41 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
                     ),
                 }
             ):
+                if activation_available:
+                    try:
+                        activation_result = _HANDLER_ACTIVATION_INDEX.select_priority(
+                            priority,
+                            priority_matchers,
+                            activation_context,
+                            dispatch_budget.copy(),
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "HandlerActivationIndex 选择失败，当前 priority 回退",
+                            LOGGER_COMMAND,
+                            e=exc,
+                        )
+                        activation_result = None
+                else:
+                    activation_result = None
+
+                if activation_result is not None:
+                    selected_matchers = activation_result.selected
+                    deterministic_selected = activation_result.deterministic_selected
+                    for lane, count in activation_result.skipped_by_lane.items():
+                        for _ in range(count):
+                            _record_dispatch_selection(lane, False)
+                    if (
+                        activation_result.candidate_count
+                        > AUTH_OVERLOAD_SELECTED_THRESHOLD
+                    ):
+                        signal_overload(3.0)
+                else:
+                    selected_matchers = priority_matchers
+                    deterministic_selected = set()
+
                 async with anyio_mod.create_task_group() as tg:
-                    for matcher in priority_matchers:
+                    for matcher in selected_matchers:
                         skip, reason = _check_matcher_prefilter_before_task(
                             matcher,
                             event,
@@ -1743,11 +1935,21 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
                             _record_dispatch_selection(lane, False)
                             continue
                         lane = _dispatch_lane_for_matcher(matcher, dispatch_context)
-                        if lane.startswith("passive_") and not _consume_dispatch_budget(
-                            lane,
-                            dispatch_budget,
+                        ignore_budget = matcher in deterministic_selected
+                        if (
+                            lane.startswith("passive_")
+                            and not ignore_budget
+                            and not _consume_dispatch_budget(lane, dispatch_budget)
                         ):
                             _record_dispatch_selection(lane, False)
+                            await append_runtime_backpressure_log(
+                                scope_key=f"{bot.type}:{bot.self_id}",
+                                reason="dispatch_passive_budget_exhausted",
+                                lane=lane,
+                                action="skip",
+                                queue_size=len(selected_matchers),
+                                active_count=HOOKS_ACTIVE_COUNT,
+                            )
                             continue
                         matcher_state = _build_matcher_state(state)
                         tg.start_soon(
@@ -1853,12 +2055,20 @@ async def stop_auth_runtime_tasks() -> None:
             await task
 
 
-async def _has_limits_cached(module: str, event_cache: dict | None) -> bool:
+async def _has_limits_cached(
+    module: str,
+    event_cache: dict | None,
+    *,
+    known: bool | None = None,
+) -> bool:
     module_limit_cache: dict[str, bool] = {}
     if event_cache is not None:
         module_limit_cache = event_cache.setdefault("module_limits", {})
     if module in module_limit_cache:
         return module_limit_cache[module]
+    if known is not None:
+        module_limit_cache[module] = known
+        return known
     limits = await LimitManager.get_module_limits(module)
     has_limits = bool(limits)
     module_limit_cache[module] = has_limits
@@ -1941,6 +2151,25 @@ def _needs_admin_check(plugin: PluginInfo) -> bool:
         PluginType.SUPERUSER,
         PluginType.SUPER_AND_ADMIN,
     }
+
+
+def _policy_skip_message(reason: str) -> str:
+    return {
+        "user_or_group_banned": "user or group banned (cached)",
+        "superuser_required": "超级管理员权限不足...",
+        "bot_not_found": "Bot不存在，阻断权限检测...",
+        "bot_sleeping": "Bot休眠中阻断权限检测...",
+        "bot_plugin_blocked": "Bot插件权限检查结果为关闭...",
+        "group_not_found": "群组信息不存在...",
+        "group_blacklisted": "群组黑名单, 目标群组群权限权限-1...",
+        "group_level_low": "群等级限制...",
+        "admin_level_low": "管理员权限不足...",
+        "plugin_disabled_in_group": "该插件在群组中已被禁用...",
+        "plugin_superuser_blocked_in_group": "超级管理员禁用了该群此功能...",
+        "plugin_blocked_in_group": "该群未开启此功能...",
+        "plugin_disabled_in_private": "该插件在私聊中已被禁用...",
+        "plugin_global_disabled": "全局未开启此功能...",
+    }.get(reason, reason or "permission denied")
 
 
 async def _get_bot_data_cached(
@@ -2187,16 +2416,56 @@ async def time_hook(coro, name, recorder: HookTraceRecorder | None = None):
             recorder.set(name, f"{time.time() - start:.3f}s")
 
 
-async def _enter_hooks_section():
-    """尝试获取全局信号量并更新计数器，饱和时快速放行。"""
+async def _record_backpressure(
+    *,
+    lane_context: AuthLaneContext,
+    reason: str,
+    action: str,
+    duration_ms: float = 0.0,
+) -> None:
+    await append_runtime_backpressure_log(
+        scope_key=lane_context.scope_key,
+        reason=reason,
+        lane=lane_context.lane,
+        action=action,
+        queue_size=lane_context.queue_size,
+        active_count=HOOKS_ACTIVE_COUNT,
+        duration_ms=duration_ms,
+    )
+
+
+async def _enter_hooks_section(lane_context: AuthLaneContext):
+    """尝试获取全局信号量；过载时保命令、降级被动 matcher。"""
     global HOOKS_ACTIVE_COUNT
     if HOOKS_SEMAPHORE.locked():
+        signal_overload(3.0)
+        action = "execute" if lane_context.is_guaranteed else "defer"
+        await _record_backpressure(
+            lane_context=lane_context,
+            reason="hooks_semaphore_saturated",
+            action=action,
+        )
+        if not lane_context.is_guaranteed:
+            logger.warning(
+                "hooks semaphore saturated, passive matcher deferred",
+                LOGGER_COMMAND,
+            )
+            raise SkipPluginException("hooks saturated passive deferred")
         logger.warning(
-            "hooks semaphore saturated, allowing pass",
+            "hooks semaphore saturated, guaranteed lane waiting",
             LOGGER_COMMAND,
         )
-        raise PermissionExemption("hooks semaphore saturated, allow pass")
+    started = time.perf_counter()
     await HOOKS_SEMAPHORE.acquire()
+    wait_ms = (time.perf_counter() - started) * 1000
+    if wait_ms >= AUTH_OVERLOAD_LANE_WAIT_MS:
+        signal_overload(2.0)
+        await _record_backpressure(
+            lane_context=lane_context,
+            reason="hooks_wait_slow",
+            action="execute",
+            duration_ms=wait_ms,
+        )
     HOOKS_ACTIVE_COUNT += 1
 
 
@@ -2237,6 +2506,469 @@ async def route_precheck(
     return False
 
 
+async def _prepare_auth_state(
+    *,
+    module: str,
+    context: EventContext,
+    bot: Bot,
+    event_cache: dict | None,
+    route_skip_checks: bool,
+    skip_ban: bool,
+    hook_recorder: HookTraceRecorder,
+    state: dict | None,
+    session: Uninfo,
+) -> AuthPreparation | None:
+    entity = context.entity
+    plugin_user_start = time.time()
+    try:
+        plugin, user = await with_timeout(
+            get_plugin_and_user(
+                module,
+                entity.user_id,
+                context.platform,
+                event_cache=event_cache,
+                need_user=not route_skip_checks,
+            ),
+            name="get_plugin_and_user",
+        )
+        hook_recorder.set("get_plugin_user", f"{time.time() - plugin_user_start:.3f}s")
+    except asyncio.TimeoutError:
+        logger.error(
+            f"获取插件和用户数据超时，模块: {module}",
+            LOGGER_COMMAND,
+            session=session,
+        )
+        return None
+
+    permission_context = PermissionContext(
+        event=context,
+        module=module,
+        plugin=plugin,
+        user=user,
+    )
+    store_permission_context(state, permission_context)
+
+    profile = await get_plugin_auth_profile(plugin, event_cache=event_cache)
+    snapshot = await build_auth_snapshot(
+        context=context,
+        plugin=plugin,
+        profile=profile,
+        bot=bot,
+        skip_ban=skip_ban,
+    )
+    permission_context.group = snapshot.group
+    permission_context.bot_data = snapshot.bot_data
+    if snapshot.admin_levels is not None:
+        permission_context.admin_levels = snapshot.admin_levels
+    store_permission_context(state, permission_context)
+
+    policy_context = PolicyContext(
+        snapshot=snapshot,
+        route_skip_checks=route_skip_checks,
+        allow_sleep_bypass=_is_bot_wake_command(module, context.plain_text),
+    )
+    return AuthPreparation(
+        plugin=plugin,
+        user=user,
+        profile=profile,
+        snapshot=snapshot,
+        permission_context=permission_context,
+        policy_context=policy_context,
+    )
+
+
+def _apply_policy_precheck(
+    prep: AuthPreparation,
+    hook_recorder: HookTraceRecorder,
+) -> AuthPolicyFlags:
+    flags = AuthPolicyFlags()
+    snapshot = prep.snapshot
+    decision = _AUTH_PDP.decide(
+        principal_from_snapshot(snapshot),
+        action_from_snapshot(snapshot),
+        resource_from_snapshot(snapshot),
+        prep.policy_context,
+    )
+    if decision.denied:
+        raise_for_policy(decision, _policy_skip_message(decision.reason))
+    if decision.allowed and decision.reason in {
+        "hidden_plugin_skip_auth",
+        "route_miss_skip_checks",
+    }:
+        flags.should_return_allowed = True
+        return flags
+
+    bot_decision = _AUTH_PDP.decide_bot(prep.policy_context)
+    if bot_decision.allowed:
+        flags.bot_policy_done = True
+        hook_recorder.set("auth_bot", "policy")
+    elif bot_decision.denied:
+        raise_for_policy(bot_decision, _policy_skip_message(bot_decision.reason))
+
+    group_decision = _AUTH_PDP.decide_group(prep.policy_context)
+    if group_decision.allowed or group_decision.skipped:
+        flags.group_policy_done = True
+        hook_recorder.set("auth_group", f"policy:{group_decision.reason}")
+    elif group_decision.denied:
+        raise_for_policy(group_decision, _policy_skip_message(group_decision.reason))
+
+    plugin_decision = _AUTH_PDP.decide_plugin(prep.policy_context)
+    if plugin_decision.allowed or plugin_decision.skipped:
+        flags.plugin_policy_done = True
+        hook_recorder.set("auth_plugin", f"policy:{plugin_decision.reason}")
+    elif plugin_decision.denied:
+        raise_for_policy(plugin_decision, _policy_skip_message(plugin_decision.reason))
+
+    return flags
+
+
+async def _precheck_admin_policy(
+    *,
+    prep: AuthPreparation,
+    flags: AuthPolicyFlags,
+    event_cache: dict | None,
+    route_skip_checks: bool,
+    hook_recorder: HookTraceRecorder,
+    session: Uninfo,
+) -> None:
+    plugin = prep.plugin
+    permission_context = prep.permission_context
+    entity = prep.permission_context.entity
+    if route_skip_checks or not _needs_admin_check(plugin):
+        return
+    if plugin.plugin_type in {PluginType.SUPERUSER, PluginType.SUPER_AND_ADMIN}:
+        if prep.snapshot.is_superuser:
+            hook_recorder.set("auth_admin", "superuser")
+            flags.admin_checked_pre = True
+        elif plugin.plugin_type == PluginType.SUPERUSER:
+            raise SkipPluginException("超级管理员权限不足...")
+
+    admin_decision = _AUTH_PDP.decide_admin(prep.policy_context)
+    if admin_decision.allowed or admin_decision.skipped:
+        flags.admin_checked_pre = True
+        flags.admin_policy_done = True
+        hook_recorder.set("auth_admin", f"policy:{admin_decision.reason}")
+    elif admin_decision.denied:
+        raise_for_policy(admin_decision, _policy_skip_message(admin_decision.reason))
+    if flags.admin_checked_pre:
+        return
+
+    if event_cache is not None and event_cache.get("admin_precheck_done"):
+        hook_recorder.set("auth_admin", "precheck")
+        flags.admin_checked_pre = True
+        return
+
+    await LevelUserMemoryCache.ensure_fresh()
+    admin_levels = None
+    admin_timeout = False
+    if event_cache is not None:
+        admin_levels, admin_timeout = await _get_admin_levels_cached(
+            entity, event_cache
+        )
+    permission_context.admin_levels = admin_levels
+    if admin_timeout:
+        hook_recorder.set("auth_admin", "timeout")
+    else:
+        admin_start = time.time()
+        await auth_admin(plugin, session, context=permission_context)
+        hook_recorder.set("auth_admin", f"{time.time() - admin_start:.3f}s(pre)")
+    flags.admin_checked_pre = True
+
+
+async def _check_ban_from_snapshot(
+    *,
+    prep: AuthPreparation,
+    matcher: Matcher,
+    event_cache: dict | None,
+    skip_ban: bool,
+    hook_recorder: HookTraceRecorder,
+    session: Uninfo,
+) -> None:
+    ban_cache_state = prep.snapshot.ban_state
+    if event_cache is not None:
+        ban_cache_state = event_cache.get("ban_state")
+    if ban_cache_state is True:
+        hook_recorder.set("auth_ban", "cached")
+        raise SkipPluginException("user or group banned (cached)")
+    if ban_cache_state is False:
+        hook_recorder.set("auth_ban", "cached")
+        return
+    if skip_ban:
+        hook_recorder.set("auth_ban", "skipped")
+        return
+
+    ban_start = time.time()
+    try:
+        await auth_ban(
+            matcher,
+            session,
+            prep.plugin,
+            context=prep.permission_context,
+        )
+        hook_recorder.set("auth_ban", f"{time.time() - ban_start:.3f}s")
+        if event_cache is not None:
+            event_cache["ban_state"] = False
+    except SkipPluginException:
+        hook_recorder.set("auth_ban", f"{time.time() - ban_start:.3f}s")
+        if event_cache is not None:
+            event_cache["ban_state"] = True
+        raise
+
+
+async def _resolve_cost_gold(
+    *,
+    prep: AuthPreparation,
+    route_skip_checks: bool,
+    hook_recorder: HookTraceRecorder,
+    session: Uninfo,
+) -> int:
+    plugin = prep.plugin
+    if route_skip_checks or prep.profile.cost_gold <= 0:
+        hook_recorder.set("cost_gold", "skipped")
+        return 0
+    cost_start = time.time()
+    try:
+        cost_gold = await with_timeout(
+            get_plugin_cost(
+                prep.user,
+                plugin,
+                session,
+                context=prep.permission_context,
+            ),
+            name="get_plugin_cost",
+        )
+        hook_recorder.set("cost_gold", f"{time.time() - cost_start:.3f}s")
+        return cost_gold
+    except asyncio.TimeoutError:
+        logger.error(
+            f"获取插件费用超时，模块: {prep.profile.module}",
+            LOGGER_COMMAND,
+            session=session,
+        )
+        return 0
+
+
+async def _refresh_permission_context_from_snapshot(
+    *,
+    prep: AuthPreparation,
+    event_cache: dict | None,
+    bot: Bot,
+    flags: AuthPolicyFlags,
+    route_skip_checks: bool,
+    state: dict | None,
+) -> tuple[
+    GroupSnapshot | None,
+    BotSnapshot | None,
+    bool,
+    tuple[LevelUserSnapshot | None, LevelUserSnapshot | None] | None,
+    bool,
+]:
+    entity = prep.permission_context.entity
+    group: GroupSnapshot | None = prep.snapshot.group
+    if group is None:
+        group = await _get_group_cached(entity, event_cache)
+
+    bot_data: BotSnapshot | None = prep.snapshot.bot_data
+    bot_timeout = bool(event_cache.get("bot_timeout", False)) if event_cache else False
+    if event_cache is not None and bot_data is None and "bot_data" not in event_cache:
+        bot_data, bot_timeout = await _get_bot_data_cached(bot.self_id, event_cache)
+
+    admin_levels = prep.snapshot.admin_levels
+    admin_timeout = False
+    if (
+        not flags.admin_checked_pre
+        and prep.profile.admin_level
+        and event_cache is not None
+        and not route_skip_checks
+        and admin_levels is None
+    ):
+        admin_levels, admin_timeout = await _get_admin_levels_cached(
+            entity, event_cache
+        )
+
+    prep.permission_context.group = group
+    prep.permission_context.bot_data = bot_data
+    if admin_levels is not None:
+        prep.permission_context.admin_levels = admin_levels
+    store_permission_context(state, prep.permission_context)
+    return group, bot_data, bot_timeout, admin_levels, admin_timeout
+
+
+async def _run_auth_hooks(
+    *,
+    prep: AuthPreparation,
+    matcher: Matcher,
+    event: Event,
+    bot: Bot,
+    session: Uninfo,
+    event_cache: dict | None,
+    route_skip_checks: bool,
+    flags: AuthPolicyFlags,
+    lane_context: AuthLaneContext,
+    hook_recorder: HookTraceRecorder,
+    state: dict | None,
+) -> float:
+    plugin = prep.plugin
+    profile = prep.profile
+    context = prep.permission_context
+    side_effect_commit = SideEffectCommit(session=session, module=profile.module)
+    entity = context.entity
+    is_superuser = prep.snapshot.is_superuser
+    text = prep.policy_context.snapshot.context.plain_text
+    hooks_start = time.time()
+    (
+        group,
+        bot_data,
+        bot_timeout,
+        _,
+        admin_timeout,
+    ) = await _refresh_permission_context_from_snapshot(
+        prep=prep,
+        event_cache=event_cache,
+        bot=bot,
+        flags=flags,
+        route_skip_checks=route_skip_checks,
+        state=state,
+    )
+
+    await _enter_hooks_section(lane_context)
+    hook_tasks = []
+    try:
+        if not flags.bot_policy_done:
+            if event_cache is None:
+                hook_tasks.append(
+                    time_hook(
+                        auth_bot(
+                            plugin,
+                            bot.self_id,
+                            allow_sleep_bypass=prep.policy_context.allow_sleep_bypass,
+                            context=context,
+                        ),
+                        "auth_bot",
+                        hook_recorder,
+                    )
+                )
+            elif bot_timeout:
+                hook_recorder.set("auth_bot", "timeout")
+            else:
+                hook_tasks.append(
+                    time_hook(
+                        auth_bot(
+                            plugin,
+                            bot.self_id,
+                            bot_data=bot_data,
+                            skip_fetch=True,
+                            allow_sleep_bypass=prep.policy_context.allow_sleep_bypass,
+                            context=context,
+                        ),
+                        "auth_bot",
+                        hook_recorder,
+                    )
+                )
+
+        if not flags.group_policy_done:
+            if is_superuser:
+                hook_recorder.set("auth_group", "superuser")
+            else:
+                hook_tasks.append(
+                    time_hook(
+                        auth_group(
+                            plugin,
+                            group,
+                            text,
+                            entity.group_id,
+                            context=context,
+                        ),
+                        "auth_group",
+                        hook_recorder,
+                    )
+                )
+
+        if flags.admin_policy_done:
+            pass
+        elif (
+            not route_skip_checks and plugin.admin_level and not flags.admin_checked_pre
+        ):
+            if event_cache is None:
+                hook_tasks.append(
+                    time_hook(
+                        auth_admin(plugin, session, context=context),
+                        "auth_admin",
+                        hook_recorder,
+                    )
+                )
+            elif admin_timeout:
+                hook_recorder.set("auth_admin", "timeout")
+            else:
+                hook_tasks.append(
+                    time_hook(
+                        auth_admin(plugin, session, context=context),
+                        "auth_admin",
+                        hook_recorder,
+                    )
+                )
+        else:
+            hook_recorder.setdefault("auth_admin", "skipped")
+
+        if not flags.plugin_policy_done:
+            if is_superuser:
+                hook_recorder.set("auth_plugin", "superuser")
+            elif not route_skip_checks and _needs_auth_plugin(plugin, context):
+                hook_tasks.append(
+                    time_hook(
+                        auth_plugin(
+                            plugin,
+                            group,
+                            session,
+                            event,
+                            context=context,
+                            skip_group_block=is_superuser,
+                        ),
+                        "auth_plugin",
+                        hook_recorder,
+                    )
+                )
+            else:
+                hook_recorder.set("auth_plugin", "skipped")
+
+        if not route_skip_checks:
+            has_limits = await _has_limits_cached(
+                profile.module,
+                event_cache,
+                known=profile.has_limit,
+            )
+            if has_limits:
+                hook_tasks.append(
+                    time_hook(
+                        side_effect_commit.commit_limit(
+                            lambda: auth_limit(plugin, session, context=context)
+                        ),
+                        "auth_limit",
+                        hook_recorder,
+                    )
+                )
+            else:
+                hook_recorder.set("auth_limit", "skipped")
+        else:
+            hook_recorder.set("auth_limit", "skipped")
+
+        try:
+            await with_timeout(
+                asyncio.gather(*hook_tasks),
+                timeout=TIMEOUT_SECONDS * 2,
+                name="auth_hooks_gather",
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"权限检查 hooks 总体执行超时，模块: {profile.module}",
+                LOGGER_COMMAND,
+                session=session,
+            )
+    finally:
+        await _leave_hooks_section()
+    return time.time() - hooks_start
+
+
 async def auth(
     matcher: Matcher,
     event: Event,
@@ -2262,18 +2994,19 @@ async def auth(
     entity = context.entity
     event_cache = context.event_cache
     text = context.plain_text
-    is_superuser = context.is_superuser
     route_modules = context.route_modules if context.route_modules_loaded else None
     module = matcher.plugin_name or ""
     is_command_matcher = _is_command_matcher_class(type(matcher))
+    lane_context = _auth_lane_context_from_state(type(matcher), context, state)
     auth_allowed = None
     auth_result_cache = None
-    admin_checked_pre = False
-    permission_context: PermissionContext | None = None
+    decision_effect: str | None = None
+    decision_reason: str | None = None
     side_effect_cache = get_permission_side_effect_cache(
         state=state,
         event_cache=event_cache,
     )
+    side_effect_commit = SideEffectCommit(session=session, module=module)
     side_effect_lock = None
     entered_side_effect_lock = False
 
@@ -2281,12 +3014,11 @@ async def auth(
     hook_recorder = HookTraceRecorder(start_time)
     hooks_time = 0  # 初始化 hooks_time 变量
 
-    # 记录是否已进入 hooks 区域（用于 finally 中释放）
-    entered_hooks = False
-
     try:
         if not module:
             auth_allowed = True
+            decision_effect = "allow"
+            decision_reason = "empty_module"
             return
 
         side_effect_lock = side_effect_cache.lock_for(module)
@@ -2298,13 +3030,21 @@ async def auth(
         if cached_result is not None:
             allowed, reason = cached_result
             if not allowed:
+                decision_effect = "skip"
+                decision_reason = reason or "auth_cached_skip"
                 raise SkipPluginException(reason or "auth cached skip")
+            decision_effect = "allow"
+            decision_reason = "auth_cached_allow"
             return
 
         if _is_hidden_plugin(matcher):
             auth_allowed = True
+            decision_effect = "allow"
+            decision_reason = "hidden_plugin"
             return
         if event_cache is not None and event_cache.get("ban_state") is True:
+            decision_effect = "skip"
+            decision_reason = "ban_cached"
             raise SkipPluginException("user or group banned (cached)")
 
         if route_modules is None:
@@ -2321,344 +3061,128 @@ async def auth(
                 event_cache["route_skip"] = True
             hook_recorder.set("route", "miss")
             auth_allowed = True
+            decision_effect = "allow"
+            decision_reason = "route_miss_skip_checks"
             return
 
-        platform = context.platform
-        # 获取插件和用户数据
-        plugin_user_start = time.time()
-        try:
-            plugin, user = await with_timeout(
-                get_plugin_and_user(
-                    module,
-                    entity.user_id,
-                    platform,
-                    event_cache=event_cache,
-                    need_user=not route_skip_checks,
-                ),
-                name="get_plugin_and_user",
-            )
-            hook_recorder.set(
-                "get_plugin_user", f"{time.time() - plugin_user_start:.3f}s"
-            )
-        except asyncio.TimeoutError:
-            logger.error(
-                f"获取插件和用户数据超时，模块: {module}",
-                LOGGER_COMMAND,
-                session=session,
-            )
-            auth_allowed = True
-            return
-
-        permission_context = PermissionContext(
-            event=context,
+        prep = await _prepare_auth_state(
             module=module,
-            plugin=plugin,
-            user=user,
+            context=context,
+            bot=bot,
+            event_cache=event_cache,
+            route_skip_checks=route_skip_checks,
+            skip_ban=skip_ban,
+            hook_recorder=hook_recorder,
+            state=state,
+            session=session,
         )
-        store_permission_context(state, permission_context)
+        if prep is None:
+            auth_allowed = True
+            decision_effect = "allow"
+            decision_reason = "prepare_timeout_allow"
+            return
+        flags = _apply_policy_precheck(prep, hook_recorder)
+        if flags.should_return_allowed:
+            auth_allowed = True
+            decision_effect = "allow"
+            decision_reason = "policy_precheck_allow"
+            return
 
-        if not route_skip_checks and _needs_admin_check(plugin):
-            if plugin.plugin_type in {
-                PluginType.SUPERUSER,
-                PluginType.SUPER_AND_ADMIN,
-            }:
-                if is_superuser:
-                    hook_recorder.set("auth_admin", "superuser")
-                    admin_checked_pre = True
-                elif plugin.plugin_type == PluginType.SUPERUSER:
-                    raise SkipPluginException("超级管理员权限不足...")
-            if not admin_checked_pre:
-                if event_cache is not None and event_cache.get("admin_precheck_done"):
-                    hook_recorder.set("auth_admin", "precheck")
-                    admin_checked_pre = True
-                else:
-                    await LevelUserMemoryCache.ensure_fresh()
-                    admin_levels = None
-                    admin_timeout = False
-                    if event_cache is not None:
-                        admin_levels, admin_timeout = await _get_admin_levels_cached(
-                            entity, event_cache
-                        )
-                    permission_context.admin_levels = admin_levels
-                    if admin_timeout:
-                        hook_recorder.set("auth_admin", "timeout")
-                    else:
-                        admin_start = time.time()
-                        await auth_admin(
-                            plugin,
-                            session,
-                            context=permission_context,
-                        )
-                        hook_recorder.set(
-                            "auth_admin", f"{time.time() - admin_start:.3f}s(pre)"
-                        )
-                admin_checked_pre = True
-
-        ban_cache_state = None
-        if event_cache is not None:
-            ban_cache_state = event_cache.get("ban_state")
-        if ban_cache_state is True:
-            hook_recorder.set("auth_ban", "cached")
-            raise SkipPluginException("user or group banned (cached)")
-        if ban_cache_state is False:
-            hook_recorder.set("auth_ban", "cached")
-        elif ban_cache_state is None:
-            if skip_ban:
-                hook_recorder.set("auth_ban", "skipped")
-            else:
-                ban_start = time.time()
-                try:
-                    await auth_ban(
-                        matcher,
-                        session,
-                        plugin,
-                        context=permission_context,
-                    )
-                    hook_recorder.set("auth_ban", f"{time.time() - ban_start:.3f}s")
-                    if event_cache is not None:
-                        event_cache["ban_state"] = False
-                except SkipPluginException:
-                    hook_recorder.set("auth_ban", f"{time.time() - ban_start:.3f}s")
-                    if event_cache is not None:
-                        event_cache["ban_state"] = True
-                    raise
-
-        # 获取插件费用
-        if not route_skip_checks and plugin.cost_gold > 0:
-            cost_start = time.time()
-            try:
-                cost_gold = await with_timeout(
-                    get_plugin_cost(
-                        user,
-                        plugin,
-                        session,
-                        context=permission_context,
-                    ),
-                    name="get_plugin_cost",
-                )
-                hook_recorder.set("cost_gold", f"{time.time() - cost_start:.3f}s")
-            except asyncio.TimeoutError:
-                logger.error(
-                    f"获取插件费用超时，模块: {module}", LOGGER_COMMAND, session=session
-                )
-                # 继续执行，不阻止权限检查
-        else:
-            hook_recorder.set("cost_gold", "skipped")
+        await _precheck_admin_policy(
+            prep=prep,
+            flags=flags,
+            event_cache=event_cache,
+            route_skip_checks=route_skip_checks,
+            hook_recorder=hook_recorder,
+            session=session,
+        )
+        await _check_ban_from_snapshot(
+            prep=prep,
+            matcher=matcher,
+            event_cache=event_cache,
+            skip_ban=skip_ban,
+            hook_recorder=hook_recorder,
+            session=session,
+        )
+        cost_gold = await _resolve_cost_gold(
+            prep=prep,
+            route_skip_checks=route_skip_checks,
+            hook_recorder=hook_recorder,
+            session=session,
+        )
 
         # 执行 bot_filter
-        bot_filter(session, context=permission_context)
-
-        group = await _get_group_cached(entity, event_cache)
-
-        bot_data = None
-        bot_timeout = False
-        if event_cache is not None:
-            bot_data, bot_timeout = await _get_bot_data_cached(bot.self_id, event_cache)
-
-        admin_levels = None
-        admin_timeout = False
-        if (
-            not admin_checked_pre
-            and plugin.admin_level
-            and event_cache is not None
-            and not route_skip_checks
-        ):
-            admin_levels, admin_timeout = await _get_admin_levels_cached(
-                entity, event_cache
-            )
-
-        permission_context.group = group
-        permission_context.bot_data = bot_data
-        if admin_levels is not None:
-            permission_context.admin_levels = admin_levels
-        store_permission_context(state, permission_context)
-
-        # 并行执行所有 hook 检查，并记录执行时间
-        hooks_start = time.time()
-        allow_sleep_bypass = _is_bot_wake_command(module, text)
-
-        # 先进入 hooks 并行检查区域；饱和时快速放行，避免创建并积压协程。
-        await _enter_hooks_section()
-        entered_hooks = True
-
-        # 创建所有 hook 任务
-        hook_tasks = []
-        if event_cache is None:
-            hook_tasks.append(
-                time_hook(
-                    auth_bot(
-                        plugin,
-                        bot.self_id,
-                        allow_sleep_bypass=allow_sleep_bypass,
-                        context=permission_context,
-                    ),
-                    "auth_bot",
-                    hook_recorder,
-                )
-            )
-        else:
-            if bot_timeout:
-                hook_recorder.set("auth_bot", "timeout")
-            else:
-                hook_tasks.append(
-                    time_hook(
-                        auth_bot(
-                            plugin,
-                            bot.self_id,
-                            bot_data=bot_data,
-                            skip_fetch=True,
-                            allow_sleep_bypass=allow_sleep_bypass,
-                            context=permission_context,
-                        ),
-                        "auth_bot",
-                        hook_recorder,
-                    )
-                )
-
-        if is_superuser:
-            hook_recorder.set("auth_group", "superuser")
-        else:
-            hook_tasks.append(
-                time_hook(
-                    auth_group(
-                        plugin,
-                        group,
-                        text,
-                        entity.group_id,
-                        context=permission_context,
-                    ),
-                    "auth_group",
-                    hook_recorder,
-                )
-            )
-
-        if not route_skip_checks and plugin.admin_level and not admin_checked_pre:
-            if event_cache is None:
-                hook_tasks.append(
-                    time_hook(
-                        auth_admin(plugin, session, context=permission_context),
-                        "auth_admin",
-                        hook_recorder,
-                    )
-                )
-            else:
-                if admin_timeout:
-                    hook_recorder.set("auth_admin", "timeout")
-                else:
-                    hook_tasks.append(
-                        time_hook(
-                            auth_admin(
-                                plugin,
-                                session,
-                                context=permission_context,
-                            ),
-                            "auth_admin",
-                            hook_recorder,
-                        )
-                    )
-        else:
-            hook_recorder.setdefault("auth_admin", "skipped")
-
-        if is_superuser:
-            hook_recorder.set("auth_plugin", "superuser")
-        elif not route_skip_checks and _needs_auth_plugin(plugin, permission_context):
-            hook_tasks.append(
-                time_hook(
-                    auth_plugin(
-                        plugin,
-                        group,
-                        session,
-                        event,
-                        context=permission_context,
-                        skip_group_block=is_superuser,
-                    ),
-                    "auth_plugin",
-                    hook_recorder,
-                )
-            )
-        else:
-            hook_recorder.set("auth_plugin", "skipped")
-
-        if not route_skip_checks:
-            has_limits = await _has_limits_cached(module, event_cache)
-            if has_limits:
-                hook_tasks.append(
-                    time_hook(
-                        auth_limit(plugin, session, context=permission_context),
-                        "auth_limit",
-                        hook_recorder,
-                    )
-                )
-            else:
-                hook_recorder.set("auth_limit", "skipped")
-        else:
-            hook_recorder.set("auth_limit", "skipped")
-
-        # 使用 gather 并行执行所有 hook，但添加总体超时控制
-        try:
-            await with_timeout(
-                asyncio.gather(*hook_tasks),
-                timeout=TIMEOUT_SECONDS * 2,  # 给总体执行更多时间
-                name="auth_hooks_gather",
-            )
-        except asyncio.TimeoutError:
-            logger.error(
-                f"权限检查 hooks 总体执行超时，模块: {module}",
-                LOGGER_COMMAND,
-                session=session,
-            )
-            # 不抛出异常，允许继续执行
-
-        hooks_time = time.time() - hooks_start
+        bot_filter(session, context=prep.permission_context)
+        hooks_time = await _run_auth_hooks(
+            prep=prep,
+            matcher=matcher,
+            event=event,
+            bot=bot,
+            session=session,
+            event_cache=event_cache,
+            route_skip_checks=route_skip_checks,
+            flags=flags,
+            lane_context=lane_context,
+            hook_recorder=hook_recorder,
+            state=state,
+        )
         auth_allowed = True
+        decision_effect = "allow"
+        decision_reason = "auth_passed"
 
     except SkipPluginException as e:
         LimitManager.unblock(module, entity.user_id, entity.group_id, entity.channel_id)
         if e.tip_message:
-            try:
-                tip_coro = send_message(
-                    session,
-                    e.tip_message,
-                    e.tip_check_tag,
-                    background=e.tip_background,
-                )
-                if e.tip_timeout and not e.tip_background:
-                    await asyncio.wait_for(tip_coro, timeout=e.tip_timeout)
-                else:
-                    await tip_coro
-            except asyncio.TimeoutError:
-                logger.error("发送权限提示超时", LOGGER_COMMAND, session=session)
+            await side_effect_commit.send_permission_tip(
+                e.tip_message,
+                e.tip_check_tag,
+                background=e.tip_background,
+                timeout=e.tip_timeout,
+            )
         logger.info(str(e), LOGGER_COMMAND, session=session)
         ignore_flag = True
         auth_allowed = False
+        decision_effect = "defer" if "deferred" in str(e) else "skip"
+        decision_reason = str(e) or "skip_plugin"
     except IsSuperuserException:
         logger.debug("超级用户跳过权限检测...", LOGGER_COMMAND, session=session)
         auth_allowed = True
+        decision_effect = "allow"
+        decision_reason = "superuser"
     except PermissionExemption as e:
         logger.info(str(e), LOGGER_COMMAND, session=session)
         auth_allowed = True
+        decision_effect = "allow"
+        decision_reason = str(e) or "permission_exemption"
     finally:
-        # 如果进入过 hooks 区域，确保释放信号量（即使上层处理抛出了异常）
-        if entered_hooks:
-            try:
-                await _leave_hooks_section()
-            except Exception:
-                logger.error(
-                    "释放 hooks 信号量时出错",
-                    LOGGER_COMMAND,
-                    session=session,
-                )
         if auth_result_cache is not None and auth_allowed is not None:
-            auth_result_cache[module] = (auth_allowed, None)
+            auth_result_cache[module] = (
+                auth_allowed,
+                None if auth_allowed else decision_reason,
+            )
         if entered_side_effect_lock and side_effect_lock is not None:
             with contextlib.suppress(Exception):
                 side_effect_lock.release()
+        latency_ms = (time.time() - start_time) * 1000
+        await append_auth_decision_log(
+            bot_id=context.bot_id,
+            platform=context.platform,
+            group_id=entity.group_id,
+            user_id=entity.user_id,
+            module=module,
+            effect=decision_effect or "error",
+            reason=decision_reason,
+            latency_ms=latency_ms,
+            overloaded=is_overloaded(),
+        )
     # 扣除金币
     if not ignore_flag and cost_gold > 0:
         gold_start = time.time()
         try:
             await with_timeout(
-                reduce_gold(entity.user_id, module, cost_gold, session),
+                side_effect_commit.reduce_gold(
+                    lambda: reduce_gold(entity.user_id, module, cost_gold, session)
+                ),
                 name="reduce_gold",
             )
             hook_recorder.set("reduce_gold", f"{time.time() - gold_start:.3f}s")
