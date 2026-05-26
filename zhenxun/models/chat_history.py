@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 from typing_extensions import Self
 
 from tortoise import fields
+from tortoise.expressions import Q
 from tortoise.functions import Count
 
 from zhenxun.services.db_context import Model
@@ -34,6 +35,41 @@ class ChatHistory(Model):
             ("group_id", "create_time"),
             ("user_id", "group_id"),
         ]
+
+    @classmethod
+    def _platform_from_scope(cls, platform_scope: str | None) -> str | None:
+        """Map the new fine-grained scope back to the legacy platform column."""
+        if not platform_scope:
+            return None
+        scope = str(platform_scope).lower()
+        if scope in {"qq", "qq_client", "qq_api"} or scope.startswith("qq_"):
+            return "qq"
+        if "onebot" in scope:
+            return "qq"
+        return scope
+
+    @classmethod
+    def scoped_query(cls, platform_scope: str | None = None, **filters: Any):
+        """Return a chat-history query compatible with platform_scope callers.
+
+        chat_history currently stores the coarse legacy ``platform`` column rather
+        than a dedicated ``platform_scope`` column, so this method intentionally
+        stays as a thin compatibility shim.
+        """
+        query = cls.filter(**filters)
+        if not platform_scope:
+            return query
+        if "platform" in filters or any(k.startswith("platform__") for k in filters):
+            return query
+
+        platform = cls._platform_from_scope(platform_scope)
+        if not platform:
+            return query
+        if platform == "qq" and str(platform_scope).lower() in {"qq", "qq_client"}:
+            return query.filter(
+                Q(platform=platform) | Q(platform__isnull=True) | Q(platform="")
+            )
+        return query.filter(platform=platform)
 
     @classmethod
     async def get_group_msg_rank(
@@ -84,11 +120,12 @@ class ChatHistory(Model):
     @classmethod
     async def get_message(
         cls,
-        uid: str,
-        gid: str,
+        uid: str | None,
+        gid: str | None,
         type_: Literal["user", "group"],
         msg_type: Literal["private", "group"] | None = None,
         days: int | tuple[datetime, datetime] | None = None,
+        platform_scope: str | None = None,
     ) -> list[Self]:
         """获取消息查询query
 
@@ -98,15 +135,16 @@ class ChatHistory(Model):
             type_: 类型，私聊或群聊
             msg_type: 消息类型，用户或群聊
             days: 限制日期
+            platform_scope: 兼容细粒度平台作用域
         """
         if type_ == "user":
-            query = cls.filter(user_id=uid)
+            query = cls.scoped_query(platform_scope=platform_scope, user_id=uid)
             if msg_type == "private":
                 query = query.filter(group_id__isnull=True)
             elif msg_type == "group":
                 query = query.filter(group_id__not_isnull=True)
         else:
-            query = cls.filter(group_id=gid)
+            query = cls.scoped_query(platform_scope=platform_scope, group_id=gid)
             if uid:
                 query = query.filter(user_id=uid)
         if days:

@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from zhenxun.services.cache.runtime_cache import _parse_block_modules
+from zhenxun.utils.common_utils import CommonUtils
 from zhenxun.utils.enum import BlockType, PluginType
 
-from .auth.exception import SkipPluginException
+from .auth.exception import IsSuperuserException, SkipPluginException
 from .auth_profile import PluginAuthProfile
 from .auth_snapshot import AuthSnapshot
 
@@ -99,7 +101,7 @@ class PolicyDecisionPoint:
         if not bot_data.status and not context.allow_sleep_bypass:
             return PolicyDecision("deny", "bot_sleeping")
         module = snapshot.profile.module
-        if module and f"<{module}," in (bot_data.block_plugins or ""):
+        if module and self._module_in_block_string(module, bot_data.block_plugins):
             return PolicyDecision("deny", "bot_plugin_blocked")
         return PolicyDecision("allow", "bot_allowed")
 
@@ -113,7 +115,11 @@ class PolicyDecisionPoint:
             return PolicyDecision("deny", "group_not_found")
         if group.level < 0:
             return PolicyDecision("deny", "group_blacklisted")
-        if not group.status and not context.allow_group_sleep_bypass:
+        if (
+            not group.status
+            and not context.allow_group_sleep_bypass
+            and not snapshot.is_superuser
+        ):
             return PolicyDecision("deny", "group_sleeping")
         if profile.level > group.level:
             return PolicyDecision("deny", "group_level_low")
@@ -151,13 +157,13 @@ class PolicyDecisionPoint:
             if group is None:
                 return PolicyDecision("deny", "group_not_found")
             if profile.status and profile.block_type != BlockType.GROUP:
-                block_set = getattr(group, "block_plugin_set", ())
-                super_block_set = getattr(group, "superuser_block_plugin_set", ())
+                block_set, super_block_set = self._group_block_sets(group)
                 if not block_set and not super_block_set:
                     return PolicyDecision("allow", "plugin_group_fast_allow")
-            if profile.module in getattr(group, "superuser_block_plugin_set", ()):
+            block_set, super_block_set = self._group_block_sets(group)
+            if profile.module in super_block_set:
                 return PolicyDecision("deny", "plugin_superuser_blocked_in_group")
-            if profile.module in getattr(group, "block_plugin_set", ()):
+            if profile.module in block_set:
                 return PolicyDecision("deny", "plugin_blocked_in_group")
             if profile.block_type == BlockType.GROUP:
                 return PolicyDecision("deny", "plugin_disabled_in_group")
@@ -168,6 +174,28 @@ class PolicyDecisionPoint:
                 return PolicyDecision("allow", "super_group_bypass")
             return PolicyDecision("deny", "plugin_global_disabled")
         return PolicyDecision("allow", "plugin_allowed")
+
+    @staticmethod
+    def _group_block_sets(group: object) -> tuple[frozenset[str], frozenset[str]]:
+        block_set = getattr(group, "block_plugin_set", None)
+        super_block_set = getattr(group, "superuser_block_plugin_set", None)
+        if block_set is None:
+            block_set = _parse_block_modules(getattr(group, "block_plugin", "") or "")
+            setattr(group, "block_plugin_set", block_set)
+        if super_block_set is None:
+            super_block_set = _parse_block_modules(
+                getattr(group, "superuser_block_plugin", "") or ""
+            )
+            setattr(group, "superuser_block_plugin_set", super_block_set)
+        return block_set, super_block_set
+
+    @staticmethod
+    def _module_in_block_string(module: str, value: str | None) -> bool:
+        if not value:
+            return False
+        return CommonUtils.format(module) in value or module in _parse_block_modules(
+            value
+        )
 
 
 def principal_from_snapshot(snapshot: AuthSnapshot) -> PolicyPrincipal:
@@ -190,6 +218,8 @@ def resource_from_snapshot(snapshot: AuthSnapshot) -> PolicyResource:
 def raise_for_policy(decision: PolicyDecision, message: str | None = None) -> None:
     if decision.denied:
         raise SkipPluginException(message or decision.reason)
+    if decision.allowed and decision.reason == "super_group_bypass":
+        raise IsSuperuserException()
 
 
 __all__ = [

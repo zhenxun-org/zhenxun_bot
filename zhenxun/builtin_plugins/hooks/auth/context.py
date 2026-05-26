@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nonebot.adapters import Bot, Event
 from nonebot_plugin_alconna import UniMsg
@@ -30,6 +30,9 @@ EVENT_CACHE = (
     if AUTH_EVENT_CACHE_TTL > 0
     else None
 )
+
+if TYPE_CHECKING:
+    from zhenxun.builtin_plugins.hooks.auth_side_effect import SideEffectCommit
 
 
 @dataclass
@@ -62,6 +65,7 @@ class EventContext:
 class PermissionSideEffectCache:
     auth_results: dict[str, tuple[bool, str | None]] = field(default_factory=dict)
     module_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    commits: dict[str, "SideEffectCommit"] = field(default_factory=dict)
 
     def lock_for(self, module: str) -> asyncio.Lock:
         lock = self.module_locks.get(module)

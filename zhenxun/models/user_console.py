@@ -1,14 +1,52 @@
 import asyncio
+from dataclasses import dataclass
 from typing import ClassVar
 
 from tortoise import fields
 from tortoise.exceptions import IntegrityError
+from tortoise.expressions import F
+from tortoise.transactions import in_transaction
 
 from zhenxun.models.goods_info import GoodsInfo
 from zhenxun.services.buffered_writers import append_user_gold_log
 from zhenxun.services.db_context import Model
 from zhenxun.utils.enum import CacheType, GoldHandle
 from zhenxun.utils.exception import GoodsNotFound, InsufficientGold
+
+
+@dataclass(slots=True)
+class GoldReservation:
+    user_id: str
+    gold: int
+    handle: GoldHandle
+    plugin_module: str
+    platform: str | None = None
+    committed: bool = False
+    released: bool = False
+
+    async def commit(self) -> None:
+        if self.committed or self.released:
+            return
+        await append_user_gold_log(
+            user_id=self.user_id,
+            gold=self.gold,
+            handle=self.handle,
+            source=self.plugin_module,
+        )
+        self.committed = True
+
+    async def release(self) -> None:
+        if self.released or self.committed:
+            return
+        self.released = True
+        async with in_transaction() as connection:
+            updated = (
+                await UserConsole.filter(user_id=self.user_id)
+                .using_db(connection)
+                .update(gold=F("gold") + self.gold)
+            )
+        if updated:
+            await UserConsole.invalidate_user_cache(self.user_id)
 
 
 class UserConsole(Model):
@@ -149,6 +187,51 @@ class UserConsole(Model):
         await append_user_gold_log(
             user_id=user_id, gold=gold, handle=handle, source=plugin_module
         )
+
+    @classmethod
+    async def reserve_gold(
+        cls,
+        user_id: str,
+        gold: int,
+        handle: GoldHandle,
+        plugin_module: str,
+        platform: str | None = None,
+    ) -> GoldReservation:
+        """预扣金币；插件最终未执行时可 release 补偿。"""
+        async with in_transaction() as connection:
+            user = await cls.filter(user_id=user_id).using_db(connection).get_or_none()
+            if user is None:
+                try:
+                    user = await cls.create(
+                        using_db=connection,
+                        user_id=user_id,
+                        platform=platform,
+                        uid=await cls.get_new_uid(),
+                    )
+                except IntegrityError:
+                    user = await cls.filter(user_id=user_id).using_db(connection).get()
+            if user.gold < gold:
+                raise InsufficientGold()
+            updated = (
+                await cls.filter(user_id=user_id, gold__gte=gold)
+                .using_db(connection)
+                .update(gold=F("gold") - gold)
+            )
+            if not updated:
+                raise InsufficientGold()
+        return GoldReservation(
+            user_id=user_id,
+            gold=gold,
+            handle=handle,
+            plugin_module=plugin_module,
+            platform=platform,
+        )
+
+    @classmethod
+    async def invalidate_user_cache(cls, user_id: str) -> None:
+        from zhenxun.services.cache import CacheRoot
+
+        await CacheRoot.invalidate_cache(CacheType.USERS, user_id)
 
     @classmethod
     async def add_props(
