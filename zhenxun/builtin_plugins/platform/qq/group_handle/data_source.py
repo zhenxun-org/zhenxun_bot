@@ -18,6 +18,10 @@ from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.models.level_user import LevelUser
 from zhenxun.models.plugin_info import PluginInfo
+from zhenxun.services.hot_query_cache import (
+    invalidate_group_members,
+    invalidate_member_names,
+)
 from zhenxun.services.log import logger
 from zhenxun.utils.common_utils import CommonUtils
 from zhenxun.utils.enum import RequestHandleType
@@ -82,6 +86,8 @@ async def _refresh_member_info_async(
             "platform": platform,
         },
     )
+    await invalidate_group_members(group_id, [user_id])
+    await invalidate_member_names([user_id])
 
 
 class GroupManager:
@@ -333,6 +339,8 @@ class GroupManager:
                 "platform": platform,
             },
         )
+        await invalidate_group_members(group_id, [user_id])
+        await invalidate_member_names([user_id])
         task = asyncio.create_task(
             _refresh_member_info_async(
                 bot, str(group_id), str(user_id), _normalize_platform(platform)
@@ -400,6 +408,8 @@ class GroupManager:
             user_name = f"{user_id}"
         if user:
             await user.delete()
+            await invalidate_group_members(group_id, [user_id])
+            await invalidate_member_names([user_id])
         logger.info(
             f"名称: {user_name} 退出群聊",
             "group_decrease_handle",

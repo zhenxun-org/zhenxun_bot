@@ -24,7 +24,8 @@ MYSQL_CONFIG = {
 
 SQLITE_CONFIG = {
     "journal_mode": "WAL",  # 提高并发写入性能
-    "timeout": 30,  # 锁等待超时（可选）
+    "busy_timeout": 30000,  # SQLite 锁等待超时，单位毫秒
+    "foreign_keys": "ON",
 }
 
 

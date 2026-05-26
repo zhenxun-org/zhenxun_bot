@@ -35,9 +35,9 @@ class GroupInfoUser(Model):
         参数:
             group_id: 群号
         """
-        return set(
-            await cls.filter(group_id=group_id).values_list("user_id", flat=True)
-        )  # type: ignore
+        from zhenxun.services.hot_query_cache import get_group_user_ids
+
+        return await get_group_user_ids(group_id)
 
     @classmethod
     async def get_user_all_group(cls, user_id: str) -> list[str]:
@@ -46,9 +46,9 @@ class GroupInfoUser(Model):
         参数:
             user_id: 用户id
         """
-        return list(
-            await cls.filter(user_id=user_id).values_list("group_id", flat=True)
-        )  # type: ignore
+        from zhenxun.services.hot_query_cache import get_user_group_ids
+
+        return await get_user_group_ids(user_id)
 
     @classmethod
     async def _run_script(cls):

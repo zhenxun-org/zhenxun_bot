@@ -4,7 +4,6 @@ from typing_extensions import Self
 
 from tortoise import fields
 from tortoise.expressions import Q
-from tortoise.functions import Count
 
 from zhenxun.services.db_context import Model
 
@@ -78,7 +77,7 @@ class ChatHistory(Model):
         limit: int = 10,
         order: str = "DESC",
         date_scope: tuple[datetime, datetime] | None = None,
-    ) -> list[Self]:
+    ) -> list[tuple[str, int]]:
         """获取排行数据
 
         参数:
@@ -87,18 +86,9 @@ class ChatHistory(Model):
             order: 排序类型，desc，des
             date_scope: 日期范围
         """
-        o = "-" if order == "DESC" else ""
-        query = cls.filter(group_id=gid) if gid else cls
-        if date_scope:
-            filter_scope = (date_scope[0].isoformat(" "), date_scope[1].isoformat(" "))
-            query = query.filter(create_time__range=filter_scope)
-        return list(
-            await query.annotate(count=Count("user_id"))
-            .order_by(f"{o}count")
-            .group_by("user_id")
-            .limit(limit)
-            .values_list("user_id", "count")
-        )  # type: ignore
+        from zhenxun.services.hot_query_cache import get_chat_history_rank_cached
+
+        return await get_chat_history_rank_cached(cls, gid, limit, order, date_scope)
 
     @classmethod
     async def get_group_first_msg_datetime(
@@ -109,13 +99,11 @@ class ChatHistory(Model):
         参数:
             group_id: 群组id
         """
-        if group_id:
-            message = (
-                await cls.filter(group_id=group_id).order_by("create_time").first()
-            )
-        else:
-            message = await cls.all().order_by("create_time").first()
-        return message.create_time if message else None
+        from zhenxun.services.hot_query_cache import (
+            get_chat_history_first_msg_datetime_cached,
+        )
+
+        return await get_chat_history_first_msg_datetime_cached(cls, group_id)
 
     @classmethod
     async def get_message(

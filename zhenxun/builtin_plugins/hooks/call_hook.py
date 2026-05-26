@@ -65,7 +65,7 @@ async def handle_api_result(
     if not Config.get_config("hook", "RECORD_BOT_SENT_MESSAGES"):
         return
     try:
-        await BotMessageStore.create(
+        await BotMessageStore.append_buffered(
             bot_id=bot.self_id,
             user_id=user_id,
             group_id=group_id,

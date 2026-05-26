@@ -9,6 +9,10 @@ from zhenxun.configs.config import Config
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.models.level_user import LevelUser
+from zhenxun.services.hot_query_cache import (
+    invalidate_group_members,
+    invalidate_member_names,
+)
 from zhenxun.services.log import logger
 from zhenxun.utils.platform import PlatformUtils
 
@@ -181,4 +185,12 @@ class MemberUpdateManage:
                     group_id=group_id,
                     platform="qq",
                 )
+            changed_user_ids = (
+                {user.user_id for user in data_list[0]}
+                | {user.user_id for user in data_list[1]}
+                | delete_member_ids
+            )
+            if data_list[0] or data_list[1] or data_list[2] or delete_member_ids:
+                await invalidate_group_members(group_id, changed_user_ids)
+                await invalidate_member_names(changed_user_ids)
         return "群组成员信息更新完成!"

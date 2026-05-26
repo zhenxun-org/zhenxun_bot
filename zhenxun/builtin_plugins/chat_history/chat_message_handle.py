@@ -20,8 +20,8 @@ from zhenxun.configs.config import Config
 from zhenxun.configs.utils import Command, PluginExtraData, RegisterConfig
 from zhenxun.models.chat_history import ChatHistory
 from zhenxun.models.friend_user import FriendUser
-from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.services import avatar_service
+from zhenxun.services.hot_query_cache import get_group_member_map, get_member_names
 from zhenxun.services.log import logger
 from zhenxun.ui.models import ImageCell, TextCell
 from zhenxun.utils.enum import PluginType
@@ -133,22 +133,17 @@ async def _(
         platform = getattr(session, "platform", None) or "qq"
 
         user_ids_in_rank = [str(uid) for uid, _ in rank_data]
-        users_in_group: dict[str, GroupInfoUser] = {}
+        users_in_group = {}
         user_names: dict[str, str] = {}
         if has_group_context:
-            users_in_group_query = GroupInfoUser.filter(
-                user_id__in=user_ids_in_rank, group_id=group_id
-            )
-            users_in_group = {u.user_id: u for u in await users_in_group_query}
+            users_in_group = await get_group_member_map(group_id, user_ids_in_rank)
         else:
             friend_users = await FriendUser.filter(
                 user_id__in=user_ids_in_rank
             ).values_list("user_id", "user_name")
             user_names.update(dict(friend_users))
-            group_users = await GroupInfoUser.filter(
-                user_id__in=user_ids_in_rank
-            ).values_list("user_id", "user_name")
-            for user_id, user_name in group_users:
+            group_user_names = await get_member_names(user_ids_in_rank)
+            for user_id, user_name in group_user_names.items():
                 if user_name and user_id not in user_names:
                     user_names[user_id] = user_name
 

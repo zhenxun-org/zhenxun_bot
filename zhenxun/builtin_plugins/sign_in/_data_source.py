@@ -10,12 +10,12 @@ from zhenxun import ui
 from zhenxun.configs.path_config import IMAGE_PATH
 from zhenxun.models.friend_user import FriendUser
 from zhenxun.models.goods_info import GoodsInfo
-from zhenxun.models.group_member_info import GroupInfoUser
 from zhenxun.models.sign_log import SignLog
 from zhenxun.models.sign_user import SignUser
 from zhenxun.models.user_console import UserConsole
 from zhenxun.services.avatar_service import avatar_service
 from zhenxun.services.buffered_writers import append_user_gold_log
+from zhenxun.services.hot_query_cache import get_group_user_ids, get_member_names
 from zhenxun.services.log import logger
 from zhenxun.ui.models import ImageCell, TextCell
 from zhenxun.utils.enum import GoldHandle
@@ -52,9 +52,7 @@ class SignManage:
         """
         query = SignUser
         if group_id:
-            user_list = await GroupInfoUser.filter(group_id=group_id).values_list(
-                "user_id", flat=True
-            )
+            user_list = await get_group_user_ids(group_id)
             if user_list:
                 query = query.filter(user_id__in=user_list)
         user_list = (
@@ -76,11 +74,7 @@ class SignManage:
         )
         uid2name = {f[0]: f[1] for f in friend_list}
         if diff_id := set(user_id_list).difference(set(uid2name.keys())):
-            group_user = await GroupInfoUser.filter(user_id__in=diff_id).values_list(
-                "user_id", "user_name"
-            )
-            for g in group_user:
-                uid2name[g[0]] = g[1]
+            uid2name.update(await get_member_names(diff_id))
         data_list = []
         platform = PlatformUtils.get_platform(session)
         for i, user in enumerate(user_list):

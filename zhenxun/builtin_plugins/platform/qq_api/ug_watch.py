@@ -4,6 +4,10 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.models.friend_user import FriendUser
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.group_member_info import GroupInfoUser
+from zhenxun.services.hot_query_cache import (
+    invalidate_group_members,
+    invalidate_member_names,
+)
 from zhenxun.services.log import logger
 from zhenxun.utils.platform import PlatformUtils
 
@@ -27,6 +31,8 @@ async def _(session: Uninfo):
             group_id=session.group.id,
             platform=PlatformUtils.get_platform(session),
         )
+        await invalidate_group_members(session.group.id, [session.user.id])
+        await invalidate_member_names([session.user.id])
     elif not await FriendUser.exists(user_id=session.user.id, platform=platform):
         await FriendUser.create(
             user_id=session.user.id, platform=PlatformUtils.get_platform(session)
