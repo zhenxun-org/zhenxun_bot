@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 import contextlib
 from dataclasses import dataclass, field
+import html
 import re
 from typing import Any, Literal
 import weakref
@@ -215,7 +216,7 @@ class HandlerActivationIndex:
         )
         if rule_match == "match":
             return "deterministic"
-        if rule_match == "miss" and not descriptor.has_custom_rule:
+        if rule_match == "miss":
             return "miss"
         return "select"
 
@@ -267,11 +268,7 @@ class HandlerActivationIndex:
         )
         if rule_match == "match":
             command_matched = True
-        elif (
-            rule_match == "miss"
-            and not command_matched
-            and not descriptor.has_custom_rule
-        ):
+        elif rule_match == "miss":
             return "miss"
         elif (
             not (descriptor.commands or descriptor.shortcuts is not None)
@@ -533,8 +530,46 @@ def extract_matcher_rule_descriptors(
         ):
             descriptors.append(ActivationRuleDescriptor("alconna", command_like=True))
         else:
-            descriptors.append(ActivationRuleDescriptor("custom"))
+            descriptors.append(_custom_rule_descriptor(call))
     return tuple(descriptors)
+
+
+def _custom_rule_descriptor(call: object) -> ActivationRuleDescriptor:
+    keyword_regex = _extract_keyword_regex_pairs(call)
+    if keyword_regex:
+        return ActivationRuleDescriptor(
+            "keyword_regex",
+            keyword_regex,
+            deterministic_text=True,
+        )
+    return ActivationRuleDescriptor("custom")
+
+
+def _extract_keyword_regex_pairs(
+    call: object,
+) -> tuple[tuple[str, str, int], ...]:
+    """Recognize generic keyword + regex custom rules without plugin coupling."""
+
+    source = getattr(call, "key_pattern_list", None)
+    if source is None:
+        source = getattr(call, "keyword_patterns", None)
+    if source is None:
+        source = getattr(call, "patterns", None)
+    if not isinstance(source, Iterable) or isinstance(source, str):
+        return ()
+
+    pairs: list[tuple[str, str, int]] = []
+    for item in source:
+        if not isinstance(item, tuple | list) or len(item) < 2:
+            continue
+        keyword = str(item[0] or "").strip()
+        pattern_obj = item[1]
+        pattern = getattr(pattern_obj, "pattern", pattern_obj)
+        if not keyword or not isinstance(pattern, str) or not pattern:
+            continue
+        flags = int(getattr(pattern_obj, "flags", 0) or 0)
+        pairs.append((keyword, pattern, flags))
+    return tuple(pairs)
 
 
 def normalize_rule_string_tuple(value: object) -> tuple[str, ...]:
@@ -561,6 +596,10 @@ def text_match_candidates(
         if normalized and normalized not in candidates:
             candidates.append(normalized)
 
+        unescaped = _unescape_message_text(normalized)
+        if unescaped and unescaped not in candidates:
+            candidates.append(unescaped)
+
     add(plain_text)
     if event is not None:
         with contextlib.suppress(Exception):
@@ -569,6 +608,13 @@ def text_match_candidates(
                 add(getter())
     add(raw_text)
     return tuple(candidates)
+
+
+def _unescape_message_text(text: str) -> str:
+    if not text:
+        return ""
+    unescaped = html.unescape(text)
+    return unescaped.replace("\\/", "/").replace("\\u002F", "/").replace("\\u002f", "/")
 
 
 def matcher_rule_matches_text(
@@ -581,6 +627,7 @@ def matcher_rule_matches_text(
 ) -> ActivationDecision:
     matched_any = False
     saw_deterministic = False
+    saw_unknown = False
     message_text = raw_text or plain_text
     plain_candidates = text_match_candidates(plain_text, raw_text, event)
 
@@ -662,6 +709,13 @@ def matcher_rule_matches_text(
                 matched_any = True
             else:
                 return "miss"
+        elif kind == "keyword_regex":
+            saw_deterministic = True
+            values = descriptor.value if isinstance(descriptor.value, tuple) else ()
+            if _keyword_regex_matches(values, plain_candidates):
+                matched_any = True
+            else:
+                return "miss"
         elif kind == "to_me":
             if not to_me:
                 return "miss"
@@ -676,13 +730,40 @@ def matcher_rule_matches_text(
                 if not isinstance(event, types):
                     return "miss"
         elif kind in {"custom", "alconna", "matcher_command"}:
-            return "unknown"
+            saw_unknown = True
 
     if matched_any:
         return "match"
     if saw_deterministic:
         return "miss"
+    if saw_unknown:
+        return "unknown"
     return "unknown"
+
+
+def _keyword_regex_matches(
+    values: object,
+    candidates: tuple[str, ...],
+) -> bool:
+    if not isinstance(values, tuple):
+        return False
+    for item in values:
+        if not isinstance(item, tuple | list) or len(item) < 3:
+            continue
+        keyword, pattern, flags = item[:3]
+        keyword_text = str(keyword or "")
+        pattern_text = str(pattern or "")
+        if not keyword_text or not pattern_text:
+            continue
+        for text in candidates:
+            if keyword_text not in text:
+                continue
+            try:
+                if re.search(pattern_text, text, int(flags or 0)):
+                    return True
+            except re.error:
+                return False
+    return False
 
 
 def extract_matcher_command_literals(
@@ -1001,7 +1082,28 @@ def _selection_is_guaranteed(
         return True
     if context.event_type != "message":
         return not descriptor.command_like
+    if descriptor.lane == "passive_http" and (
+        context.has_url or _looks_like_rich_message(context.raw_text)
+    ):
+        return True
     return False
+
+
+def _looks_like_rich_message(text: str) -> bool:
+    lowered = (text or "").casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "[cq:json",
+            "[json:",
+            "[cq:xml",
+            "[xml:",
+            "qqdocurl",
+            "jumpurl",
+            "miniapp",
+            "com.tencent",
+        )
+    )
 
 
 def _miss_reason(descriptor: HandlerDescriptor, context: ActivationContext) -> str:
