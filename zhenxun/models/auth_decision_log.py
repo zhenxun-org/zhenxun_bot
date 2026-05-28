@@ -22,6 +22,12 @@ class AuthDecisionLog(Model):
     """决策结果 allow/deny/skip/defer/error"""
     reason = fields.CharField(255, null=True, description="原因")
     """原因"""
+    shadow_effect = fields.CharField(32, null=True, description="影子决策结果")
+    """影子决策结果"""
+    shadow_reason = fields.CharField(255, null=True, description="影子决策原因")
+    """影子决策原因"""
+    side_effect_state = fields.TextField(null=True, description="副作用状态")
+    """副作用状态 JSON 摘要"""
     latency_ms = fields.FloatField(default=0, description="耗时毫秒")
     """耗时毫秒"""
     overloaded = fields.BooleanField(default=False, description="是否过载")
@@ -40,11 +46,4 @@ class AuthDecisionLog(Model):
 
     @classmethod
     async def _run_script(cls):
-        return [
-            "CREATE INDEX IF NOT EXISTS idx_auth_decision_log_create_time "
-            "ON auth_decision_log(create_time);",
-            "CREATE INDEX IF NOT EXISTS idx_auth_decision_log_module_time "
-            "ON auth_decision_log(module, create_time);",
-            "CREATE INDEX IF NOT EXISTS idx_auth_decision_log_effect_time "
-            "ON auth_decision_log(effect, create_time);",
-        ]
+        return []

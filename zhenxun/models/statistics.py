@@ -3,6 +3,7 @@ from typing import ClassVar
 from tortoise import fields
 
 from zhenxun.services.db_context import Model
+from zhenxun.services.db_context.schema_ops import AlterColumnType, RenameColumn
 
 
 class Statistics(Model):
@@ -32,9 +33,16 @@ class Statistics(Model):
     @classmethod
     async def _run_script(cls):
         return [
-            "ALTER TABLE statistics RENAME COLUMN user_qq TO user_id;",
+            RenameColumn("statistics", "user_qq", "user_id"),
             # 将user_qq改为user_id
-            "ALTER TABLE statistics ALTER COLUMN user_id TYPE character varying(255);",
-            "ALTER TABLE statistics ALTER COLUMN group_id TYPE character varying(255);",
-            "ALTER TABLE statistics ADD bot_id Text DEFAULT '';",
+            AlterColumnType(
+                "statistics",
+                "user_id",
+                {"postgres": "character varying(255)", "mysql": "VARCHAR(255)"},
+            ),
+            AlterColumnType(
+                "statistics",
+                "group_id",
+                {"postgres": "character varying(255)", "mysql": "VARCHAR(255)"},
+            ),
         ]

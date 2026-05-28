@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import time
 from typing import Any, Protocol
 
 from nonebot_plugin_uninfo import Uninfo
@@ -29,6 +30,25 @@ class AsyncReservation(Protocol):
 
 
 ReservationLike = AsyncAction | SyncReservation | AsyncReservation
+SideEffectKind = str
+SideEffectState = str
+
+
+@dataclass(slots=True)
+class SideEffectReservation:
+    kind: SideEffectKind
+    reservation: ReservationLike
+    amount: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
+    state: SideEffectState = "reserved"
+    reserved_at: float = field(default_factory=time.monotonic)
+    committed_at: float | None = None
+    released_at: float | None = None
+    reason: str | None = None
+
+    @property
+    def should_auto_unblock(self) -> bool:
+        return bool(getattr(self.reservation, "should_auto_unblock", False))
 
 
 async def _maybe_await(value: Any) -> None:
@@ -62,13 +82,43 @@ class SideEffectCommit:
     module: str
     owner_matcher_id: int | None = None
     limit_entity: EntityIDs | None = None
-    _reserved_limit: ReservationLike | None = None
-    _reserved_gold: ReservationLike | None = None
+    _reservations: dict[SideEffectKind, SideEffectReservation] = field(
+        default_factory=dict
+    )
     committed: bool = False
 
     @property
     def limit_should_auto_unblock(self) -> bool:
-        return bool(getattr(self._reserved_limit, "should_auto_unblock", False))
+        record = self._reservations.get("limit")
+        return bool(record and record.should_auto_unblock)
+
+    @property
+    def has_pending(self) -> bool:
+        return any(record.state == "reserved" for record in self._reservations.values())
+
+    @property
+    def pending_kinds(self) -> tuple[str, ...]:
+        return tuple(
+            kind
+            for kind, record in self._reservations.items()
+            if record.state == "reserved"
+        )
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "module": self.module,
+            "committed": self.committed,
+            "pending": list(self.pending_kinds),
+            "reservations": {
+                kind: {
+                    "state": record.state,
+                    "amount": record.amount,
+                    "metadata": record.metadata,
+                    "reason": record.reason,
+                }
+                for kind, record in self._reservations.items()
+            },
+        }
 
     async def send_permission_tip(
         self,
@@ -99,9 +149,51 @@ class SideEffectCommit:
         await self.reserve_gold(func)
         await self.commit_gold()
 
+    async def reserve(
+        self,
+        kind: SideEffectKind,
+        reservation: ReservationLike,
+        *,
+        amount: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        await self.release(kind, f"replace_{kind}_reservation")
+        self._reservations[kind] = SideEffectReservation(
+            kind=kind,
+            reservation=reservation,
+            amount=amount,
+            metadata=metadata or {},
+        )
+
+    async def commit(self, kind: SideEffectKind) -> None:
+        record = self._reservations.get(kind)
+        if record is None or record.state != "reserved":
+            return
+        try:
+            await _commit_reservation(record.reservation)
+        except Exception:
+            record.reason = "commit_failed"
+            raise
+        record.state = "committed"
+        record.committed_at = time.monotonic()
+
+    async def release(
+        self,
+        kind: SideEffectKind,
+        reason: str | None = None,
+    ) -> None:
+        record = self._reservations.get(kind)
+        if record is None or record.state != "reserved":
+            return
+        try:
+            await _release_reservation(record.reservation)
+        finally:
+            record.state = "released"
+            record.released_at = time.monotonic()
+            record.reason = reason
+
     async def reserve_limit(self, reservation: ReservationLike) -> None:
-        await self.release_limit("replace_limit_reservation")
-        self._reserved_limit = reservation
+        await self.reserve("limit", reservation)
 
     async def commit_limit(
         self,
@@ -109,18 +201,10 @@ class SideEffectCommit:
     ) -> None:
         if reservation is not None:
             await self.reserve_limit(reservation)
-        if self._reserved_limit is None:
-            return
-        action = self._reserved_limit
-        self._reserved_limit = None
-        await _commit_reservation(action)
+        await self.commit("limit")
 
     async def release_limit(self, reason: str | None = None) -> None:
-        del reason
-        reservation = self._reserved_limit
-        self._reserved_limit = None
-        if reservation is not None:
-            await _release_reservation(reservation)
+        await self.release("limit", reason)
 
     async def reserve_gold(
         self,
@@ -129,32 +213,24 @@ class SideEffectCommit:
         amount: int = 0,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        del amount, metadata
-        await self.rollback_gold("replace_gold_reservation")
-        self._reserved_gold = reservation
+        await self.reserve(
+            "gold",
+            reservation,
+            amount=amount,
+            metadata=metadata,
+        )
 
     async def commit_gold(self) -> None:
-        if self._reserved_gold is None:
-            return
-        action = self._reserved_gold
-        self._reserved_gold = None
-        await _commit_reservation(action)
+        await self.commit("gold")
 
     async def rollback_gold(self, reason: str | None = None) -> None:
-        del reason
-        reservation = self._reserved_gold
-        self._reserved_gold = None
-        if reservation is not None:
-            await _release_reservation(reservation)
+        await self.release("gold", reason)
 
     async def rollback_all(self, reason: str | None = None) -> None:
-        await self.release_limit(reason)
-        await self.rollback_gold(reason)
+        for kind in list(self._reservations):
+            await self.release(kind, reason)
 
     async def commit_all(self, *, order: Sequence[str] = ("gold", "limit")) -> None:
         for name in order:
-            if name == "limit":
-                await self.commit_limit()
-            elif name == "gold":
-                await self.commit_gold()
+            await self.commit(name)
         self.committed = True

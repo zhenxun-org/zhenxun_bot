@@ -4,9 +4,13 @@ import asyncio
 from collections import deque
 import contextlib
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+import json
 import random
 import time
-from typing import TypeVar
+from typing import Any, TypeVar
+
+from tortoise import Tortoise
 
 from zhenxun.builtin_plugins.hooks.auth_runtime_config import (
     AUTH_OBSERVABILITY_RUNTIME_CONFIG,
@@ -43,6 +47,9 @@ class AuthDecisionLogRecord:
     module: str | None
     effect: str
     reason: str | None = None
+    shadow_effect: str | None = None
+    shadow_reason: str | None = None
+    side_effect_state: dict[str, Any] | None = None
     latency_ms: float = 0.0
     overloaded: bool = False
 
@@ -55,6 +62,15 @@ class AuthDecisionLogRecord:
             module=self.module,
             effect=self.effect,
             reason=self.reason,
+            shadow_effect=self.shadow_effect,
+            shadow_reason=self.shadow_reason,
+            side_effect_state=json.dumps(
+                self.side_effect_state,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )[:4000]
+            if self.side_effect_state
+            else None,
             latency_ms=self.latency_ms,
             overloaded=self.overloaded,
         )
@@ -89,6 +105,8 @@ _flush_lock = asyncio.Lock()
 _flush_task: asyncio.Task[None] | None = None
 _dropped = 0
 _last_drop_log_at = 0.0
+_last_schema_repair_at = 0.0
+_SCHEMA_REPAIR_INTERVAL_SECONDS = 300.0
 
 T = TypeVar("T")
 
@@ -196,10 +214,15 @@ async def append_auth_decision_log(
     module: str | None,
     effect: str,
     reason: str | None = None,
+    shadow_effect: str | None = None,
+    shadow_reason: str | None = None,
+    side_effect_state: dict[str, Any] | None = None,
     latency_ms: float = 0.0,
     overloaded: bool = False,
 ) -> None:
-    if not _sample(_auth_decision_sample_rate(effect, overloaded)):
+    if shadow_effect is None and not _sample(
+        _auth_decision_sample_rate(effect, overloaded)
+    ):
         return
     record = AuthDecisionLogRecord(
         bot_id=bot_id,
@@ -209,6 +232,9 @@ async def append_auth_decision_log(
         module=module,
         effect=effect,
         reason=(reason or "")[:255] or None,
+        shadow_effect=(shadow_effect or "")[:32] or None,
+        shadow_reason=(shadow_reason or "")[:255] or None,
+        side_effect_state=side_effect_state,
         latency_ms=latency_ms,
         overloaded=overloaded,
     )
@@ -265,6 +291,36 @@ async def _restore_batch(buffer: deque[T], batch: list[T]) -> None:
             buffer.appendleft(record)
 
 
+def _is_schema_mismatch_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "no column named",
+            "unknown column",
+            "column does not exist",
+            "no such column",
+        )
+    )
+
+
+async def _try_repair_auth_schema_once() -> bool:
+    global _last_schema_repair_at
+    now = time.monotonic()
+    if now - _last_schema_repair_at < _SCHEMA_REPAIR_INTERVAL_SECONDS:
+        return False
+    _last_schema_repair_at = now
+    try:
+        from zhenxun.services.db_context.schema_guard import repair_table_schema
+
+        await repair_table_schema("auth_decision_log")
+        await repair_table_schema("runtime_backpressure_log")
+        return True
+    except Exception as exc:
+        logger.warning("权限观测日志表结构自修复失败", LOG_COMMAND, e=exc)
+        return False
+
+
 async def flush_auth_observability_buffer(reason: str) -> int:
     async with _flush_lock:
         written = 0
@@ -287,6 +343,35 @@ async def flush_auth_observability_buffer(reason: str) -> int:
                     )
                     written += len(backpressure_batch)
             except Exception as exc:
+                if _is_schema_mismatch_error(exc):
+                    if await _try_repair_auth_schema_once():
+                        try:
+                            if auth_batch:
+                                await AuthDecisionLog.bulk_create(
+                                    [record.to_model() for record in auth_batch],
+                                    _FLUSH_BATCH_SIZE,
+                                )
+                                written += len(auth_batch)
+                            if backpressure_batch:
+                                await RuntimeBackpressureLog.bulk_create(
+                                    [
+                                        record.to_model()
+                                        for record in backpressure_batch
+                                    ],
+                                    _FLUSH_BATCH_SIZE,
+                                )
+                                written += len(backpressure_batch)
+                            continue
+                        except Exception as retry_exc:
+                            exc = retry_exc
+                    dropped = len(auth_batch) + len(backpressure_batch)
+                    logger.warning(
+                        f"{reason}批量写入权限观测日志遇到表结构不匹配，"
+                        f"已丢弃低优先级观测日志 {dropped} 条，等待下次启动修复",
+                        LOG_COMMAND,
+                        e=exc,
+                    )
+                    return written
                 await _restore_batch(_auth_decision_buffer, auth_batch)
                 await _restore_batch(_backpressure_buffer, backpressure_batch)
                 logger.error(f"{reason}批量写入权限观测日志失败", LOG_COMMAND, e=exc)
@@ -305,6 +390,156 @@ async def stop_auth_observability_buffer() -> int:
         with contextlib.suppress(BaseException):
             await task
     return await flush_auth_observability_buffer("关闭")
+
+
+def _percentile(values: list[float], ratio: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = min(max(round((len(ordered) - 1) * ratio), 0), len(ordered) - 1)
+    return round(ordered[index], 3)
+
+
+def _bucket_counts(rows: list[dict[str, Any]], field: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get(field) or "<none>")
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _lane_budget_advice(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        lane = str(row.get("lane") or "<unknown>")
+        buckets.setdefault(lane, []).append(row)
+    advice: dict[str, dict[str, Any]] = {}
+    for lane, items in buckets.items():
+        if lane == "<unknown>":
+            continue
+        durations = [float(item.get("duration_ms") or 0.0) for item in items]
+        slow_waits = sum(1 for value in durations if value >= 200.0)
+        active_max = max(
+            (int(item.get("active_count") or 0) for item in items), default=0
+        )
+        total = len(items)
+        if not total:
+            continue
+        pressure_ratio = slow_waits / total
+        if pressure_ratio >= 0.2 or active_max >= 5:
+            action = "increase_or_split"
+        elif pressure_ratio == 0 and active_max <= 1 and total >= 20:
+            action = "can_reduce"
+        else:
+            action = "keep"
+        advice[lane] = {
+            "samples": total,
+            "slow_waits": slow_waits,
+            "pressure_ratio": round(pressure_ratio, 3),
+            "active_max": active_max,
+            "p95_duration_ms": _percentile(durations, 0.95),
+            "action": action,
+        }
+    return advice
+
+
+def _query_placeholder() -> str:
+    try:
+        connection = Tortoise.get_connection("default")
+        if (
+            getattr(connection, "capabilities", None)
+            and getattr(
+                connection.capabilities,
+                "dialect",
+                "",
+            )
+            == "postgres"
+        ):
+            return "$1"
+    except Exception:
+        return "?"
+    return "?"
+
+
+async def build_auth_observability_report(*, hours: float = 24.0) -> dict[str, Any]:
+    since = datetime.now() - timedelta(hours=hours)
+    db = Tortoise.get_connection("default")
+    placeholder = _query_placeholder()
+    auth_rows = await db.execute_query_dict(
+        "SELECT module, effect, reason, shadow_effect, shadow_reason, latency_ms, "
+        f"overloaded FROM auth_decision_log WHERE create_time >= {placeholder} "
+        "ORDER BY create_time DESC LIMIT 100000",
+        [since],
+    )
+    backpressure_rows = await db.execute_query_dict(
+        "SELECT scope_key, lane, reason, action, queue_size, active_count, duration_ms "
+        f"FROM runtime_backpressure_log WHERE create_time >= {placeholder} "
+        "ORDER BY create_time DESC LIMIT 100000",
+        [since],
+    )
+
+    module_buckets: dict[str, list[dict[str, Any]]] = {}
+    for row in auth_rows:
+        module_buckets.setdefault(str(row.get("module") or "<unknown>"), []).append(row)
+    module_stats: list[dict[str, Any]] = []
+    for module, items in module_buckets.items():
+        latencies = [float(item.get("latency_ms") or 0.0) for item in items]
+        module_stats.append(
+            {
+                "module": module,
+                "total": len(items),
+                "effects": _bucket_counts(items, "effect"),
+                "shadow_effects": _bucket_counts(items, "shadow_effect"),
+                "avg_latency_ms": round(sum(latencies) / len(latencies), 3)
+                if latencies
+                else 0.0,
+                "p95_latency_ms": _percentile(latencies, 0.95),
+                "overloaded": sum(1 for item in items if bool(item.get("overloaded"))),
+            }
+        )
+
+    backpressure_buckets: dict[str, list[dict[str, Any]]] = {}
+    for row in backpressure_rows:
+        key = f"{row.get('lane') or '<unknown>'}:{row.get('reason') or '<none>'}"
+        backpressure_buckets.setdefault(key, []).append(row)
+    backpressure_stats: list[dict[str, Any]] = []
+    for key, items in backpressure_buckets.items():
+        durations = [float(item.get("duration_ms") or 0.0) for item in items]
+        backpressure_stats.append(
+            {
+                "key": key,
+                "total": len(items),
+                "actions": _bucket_counts(items, "action"),
+                "avg_duration_ms": round(sum(durations) / len(durations), 3)
+                if durations
+                else 0.0,
+                "p95_duration_ms": _percentile(durations, 0.95),
+            }
+        )
+
+    return {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "window_hours": hours,
+        "auth_decisions": {
+            "total": len(auth_rows),
+            "effects": _bucket_counts(auth_rows, "effect"),
+            "shadow_effects": _bucket_counts(auth_rows, "shadow_effect"),
+            "top_modules_by_p95": sorted(
+                module_stats,
+                key=lambda item: (item["p95_latency_ms"], item["total"]),
+                reverse=True,
+            )[:30],
+        },
+        "backpressure": {
+            "total": len(backpressure_rows),
+            "lane_budget_advice": _lane_budget_advice(backpressure_rows),
+            "top_reasons": sorted(
+                backpressure_stats,
+                key=lambda item: (item["total"], item["p95_duration_ms"]),
+                reverse=True,
+            )[:30],
+        },
+    }
 
 
 @PriorityLifecycle.on_shutdown(priority=90)

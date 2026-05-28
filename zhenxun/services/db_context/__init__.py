@@ -1,8 +1,10 @@
 import asyncio
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+from typing import Literal
 from urllib.parse import urlparse
 
 import aiofiles
@@ -27,7 +29,11 @@ from .config import (
     prompt,
 )
 from .exceptions import DbConnectError, DbUrlIsNode
+from .schema_guard import repair_safe_schema_drift
+from .schema_ops import SchemaOpRisk, normalize_schema_ops
 from .utils import with_db_timeout
+
+Dialect = Literal["sqlite", "postgres", "mysql", "unknown"]
 
 MODELS = db_model.models
 SCRIPT_METHOD = db_model.script_method
@@ -47,7 +53,66 @@ __all__ = [
 
 driver = nonebot.get_driver()
 
-_SCRIPT_HASH_FILE = Path() / "data" / ".db_script_hash"
+_SCRIPT_HASH_DIR = Path() / "data" / ".db_script_hashes"
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _connection_dialect() -> Dialect:
+    try:
+        connection = Tortoise.get_connection("default")
+        capabilities = getattr(connection, "capabilities", None)
+        raw = str(getattr(capabilities, "dialect", "") or "").lower()
+        if raw.startswith("sqlite"):
+            return "sqlite"
+        if raw.startswith("postgres"):
+            return "postgres"
+        if raw.startswith("mysql"):
+            return "mysql"
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _allow_guarded_schema_ops() -> bool:
+    """Whether startup may run guarded SchemaOp migrations.
+
+    Safe SchemaOps are limited to non-destructive changes such as adding nullable
+    columns and non-unique indexes. Guarded operations may rename, drop, or alter
+    columns, so keep them opt-in to avoid damaging existing databases during
+    normal startup.
+    """
+    return os.getenv("DB_SCHEMA_RUN_GUARDED_OPS", "").strip().lower() in _TRUE_VALUES
+
+
+def _extract_alter_table_name(sql: str) -> str | None:
+    match = re.match(r"ALTER\s+TABLE\s+[`\"]?(\w+)[`\"]?", sql, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _extract_create_index_table_name(sql: str) -> str | None:
+    match = re.search(r"\bON\s+[`\"]?(\w+)[`\"]?\s*\(", sql, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _db_script_hash_file(script_fingerprint: str) -> Path:
+    parsed = urlparse(BotConfig.db_url or "")
+    dialect = parsed.scheme or "unknown"
+    if dialect == "sqlite":
+        db_identity = str(Path(parsed.path).resolve())
+    else:
+        db_identity = f"{parsed.hostname or ''}:{parsed.port or ''}{parsed.path}"
+    db_hash = hashlib.md5(
+        json.dumps(
+            {
+                "dialect": dialect,
+                "db": db_identity,
+                "script": script_fingerprint,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    return _SCRIPT_HASH_DIR / f"{db_hash}.json"
 
 
 def get_config() -> dict:
@@ -131,20 +196,39 @@ async def init():
                 f"<u><y>{len(db_model.script_method)}</y></u> 个..."
             )
             sql_list = []
+            allow_guarded_ops = _allow_guarded_schema_ops()
             for module, func in db_model.script_method:
                 try:
-                    sql = await func() if is_coroutine_callable(func) else func()
-                    if sql:
-                        sql_list += sql
+                    items = await func() if is_coroutine_callable(func) else func()
+                    if not items:
+                        continue
+                    for item in items:
+                        if not isinstance(item, str):
+                            if item.risk == SchemaOpRisk.MANUAL:
+                                logger.debug(f"{module} 跳过手动迁移动作: {item}")
+                                continue
+                            if (
+                                item.risk == SchemaOpRisk.GUARDED
+                                and not allow_guarded_ops
+                            ):
+                                logger.debug(f"{module} 跳过受保护迁移动作: {item}")
+                                continue
+                            if item.risk != SchemaOpRisk.SAFE and not allow_guarded_ops:
+                                logger.debug(f"{module} 跳过未知风险迁移动作: {item}")
+                                continue
+                        sql_list += normalize_schema_ops([item], _connection_dialect())
                 except Exception as e:
                     logger.debug(f"{module} 执行SCRIPT_METHOD方法出错...", e=e)
             if sql_list:
                 fingerprint = hashlib.md5(
                     json.dumps(sorted(sql_list), ensure_ascii=False).encode()
                 ).hexdigest()
+                script_hash_file = _db_script_hash_file(fingerprint)
                 need_run = not (
-                    _SCRIPT_HASH_FILE.exists()
-                    and _SCRIPT_HASH_FILE.read_text(encoding="utf-8").strip()
+                    script_hash_file.exists()
+                    and json.loads(script_hash_file.read_text(encoding="utf-8")).get(
+                        "script_fingerprint"
+                    )
                     == fingerprint
                 )
                 if need_run:
@@ -186,12 +270,16 @@ async def init():
 
                     for sql in sql_list:
                         # 对于 ALTER TABLE 操作，先检查表是否存在
-                        if sql.strip().upper().startswith("ALTER TABLE"):
-                            match = re.match(
-                                r"ALTER\s+TABLE\s+(\w+)", sql, re.IGNORECASE
-                            )
-                            if match:
-                                table_name = match.group(1)
+                        sql_upper = sql.strip().upper()
+                        if sql_upper.startswith("ALTER TABLE"):
+                            table_name = _extract_alter_table_name(sql)
+                            if table_name:
+                                if not await table_exists(table_name):
+                                    logger.debug(f"跳过SQL（表不存在）: {sql}")
+                                    continue
+                        elif sql_upper.startswith("CREATE INDEX"):
+                            table_name = _extract_create_index_table_name(sql)
+                            if table_name:
                                 if not await table_exists(table_name):
                                     logger.debug(f"跳过SQL（表不存在）: {sql}")
                                     continue
@@ -236,13 +324,27 @@ async def init():
                         except Exception as e:
                             logger.debug(f"执行SQL: {sql} 错误...", e=e)
                     logger.debug("SCRIPT_METHOD方法执行完毕!")
-                    _SCRIPT_HASH_FILE.parent.mkdir(parents=True, exist_ok=True)
-                    _SCRIPT_HASH_FILE.write_text(fingerprint, encoding="utf-8")
+                    script_hash_file.parent.mkdir(parents=True, exist_ok=True)
+                    script_hash_file.write_text(
+                        json.dumps(
+                            {
+                                "dialect": urlparse(BotConfig.db_url or "").scheme,
+                                "db_url_hash": hashlib.md5(
+                                    (BotConfig.db_url or "").encode()
+                                ).hexdigest(),
+                                "script_fingerprint": fingerprint,
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
                 else:
                     logger.debug("迁移脚本无变化，跳过执行")
         logger.debug("开始生成数据库表结构...")
         await Tortoise.generate_schemas()
         logger.debug("数据库表结构生成完毕!")
+        await repair_safe_schema_drift()
         logger.info("Database loaded successfully!")
     except Exception as e:
         raise DbConnectError(f"数据库连接错误... e:{e}") from e

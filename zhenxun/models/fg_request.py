@@ -8,7 +8,6 @@ from zhenxun.configs.config import BotConfig
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.services.db_context import Model
 from zhenxun.services.log import logger
-from zhenxun.utils.common_utils import SqlUtils
 from zhenxun.utils.enum import RequestHandleType, RequestType
 from zhenxun.utils.exception import NotFoundError
 from zhenxun.utils.manager.bot_profile_manager import BotProfileManager
@@ -173,6 +172,4 @@ class FgRequest(Model):
 
     @classmethod
     async def _run_script(cls):
-        return [
-            SqlUtils.add_column("fg_request", "message_ids", "character varying(255)")
-        ]
+        return []

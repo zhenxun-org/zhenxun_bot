@@ -716,9 +716,19 @@ class PluginInfoMemoryCache:
         await cls.refresh()
 
     @classmethod
+    def is_loaded(cls) -> bool:
+        return cls._loaded
+
+    @classmethod
     async def get_by_module(cls, module: str) -> "PluginInfo | None":
         if not cls._loaded:
             await cls.ensure_loaded()
+        return cls._to_model(cls._by_module.get(module))
+
+    @classmethod
+    def get_by_module_if_ready(cls, module: str) -> "PluginInfo | None":
+        if not cls._loaded:
+            return None
         return cls._to_model(cls._by_module.get(module))
 
     @classmethod
@@ -852,12 +862,29 @@ class BotMemoryCache:
         await cls.refresh()
 
     @classmethod
+    def is_loaded(cls) -> bool:
+        return cls._loaded
+
+    @classmethod
     async def get(cls, bot_id: str | None) -> BotSnapshot | None:
         bot_id = cls._normalize(bot_id)
         if not bot_id:
             return None
         if not cls._loaded:
             await cls.ensure_loaded()
+        entry = cls._by_id.get(bot_id)
+        if entry:
+            return entry
+        if cls._is_negative(bot_id):
+            return None
+        cls._mark_negative(bot_id)
+        return None
+
+    @classmethod
+    def get_if_ready(cls, bot_id: str | None) -> BotSnapshot | None:
+        bot_id = cls._normalize(bot_id)
+        if not bot_id or not cls._loaded:
+            return None
         entry = cls._by_id.get(bot_id)
         if entry:
             return entry
@@ -1200,6 +1227,10 @@ class LevelUserMemoryCache:
         await cls.refresh()
 
     @classmethod
+    def is_loaded(cls) -> bool:
+        return cls._loaded
+
+    @classmethod
     async def ensure_fresh(cls) -> None:
         interval = LEVEL_MEM_REFRESH_INTERVAL
         if not cls._loaded:
@@ -1233,6 +1264,23 @@ class LevelUserMemoryCache:
     ) -> tuple[LevelUserSnapshot | None, LevelUserSnapshot | None]:
         if not cls._loaded:
             await cls.ensure_loaded()
+        global_user = None
+        group_user = None
+        global_key = cls._key(user_id, "")
+        if global_key:
+            global_user = cls._by_key.get(global_key)
+        if group_id:
+            group_key = cls._key(user_id, group_id)
+            if group_key:
+                group_user = cls._by_key.get(group_key)
+        return global_user, group_user
+
+    @classmethod
+    def get_levels_if_ready(
+        cls, user_id: str | None, group_id: str | None
+    ) -> tuple[LevelUserSnapshot | None, LevelUserSnapshot | None] | None:
+        if not cls._loaded:
+            return None
         global_user = None
         group_user = None
         global_key = cls._key(user_id, "")
@@ -1577,6 +1625,10 @@ class PluginLimitMemoryCache:
         await cls.refresh()
 
     @classmethod
+    def is_loaded(cls) -> bool:
+        return cls._loaded
+
+    @classmethod
     async def get_limits(cls, module: str) -> list[PluginLimitSnapshot]:
         normalized = cls._normalize(module)
         if not normalized:
@@ -1584,6 +1636,22 @@ class PluginLimitMemoryCache:
         module = normalized
         if not cls._loaded:
             await cls.ensure_loaded()
+        limits = cls._by_module.get(module)
+        if limits is not None:
+            return limits
+        if cls._is_negative(module):
+            return []
+        cls._mark_negative(module)
+        return []
+
+    @classmethod
+    def get_limits_if_ready(cls, module: str) -> list[PluginLimitSnapshot] | None:
+        normalized = cls._normalize(module)
+        if not normalized:
+            return []
+        module = normalized
+        if not cls._loaded:
+            return None
         limits = cls._by_module.get(module)
         if limits is not None:
             return limits

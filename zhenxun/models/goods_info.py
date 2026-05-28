@@ -4,6 +4,7 @@ import uuid
 from tortoise import fields
 
 from zhenxun.services.db_context import Model
+from zhenxun.services.db_context.schema_ops import DropColumn
 
 
 class GoodsInfo(Model):
@@ -158,11 +159,6 @@ class GoodsInfo(Model):
     @classmethod
     async def _run_script(cls):
         return [
-            "ALTER TABLE goods_info ADD uuid VARCHAR(255);",
-            "ALTER TABLE goods_info ADD daily_limit Integer DEFAULT 0;",
-            "ALTER TABLE goods_info ADD is_passive boolean DEFAULT False;",
-            "ALTER TABLE goods_info ADD icon VARCHAR(255);",
             # 删除 daily_purchase_limit 字段
-            "ALTER TABLE goods_info DROP daily_purchase_limit;",
-            "ALTER TABLE goods_info ADD partition VARCHAR(255);",
+            DropColumn("goods_info", "daily_purchase_limit"),
         ]

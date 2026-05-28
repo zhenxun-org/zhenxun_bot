@@ -6,6 +6,7 @@ from tortoise import fields
 from tortoise.expressions import Q
 
 from zhenxun.services.db_context import Model
+from zhenxun.services.db_context.schema_ops import AlterColumnType, RenameColumn
 
 
 class ChatHistory(Model):
@@ -154,13 +155,15 @@ class ChatHistory(Model):
             # 允许 plain_text 为空
             "alter table chat_history alter plain_text drop not null;",
             # 将user_id改为user_id
-            "ALTER TABLE chat_history RENAME COLUMN user_qq TO user_id;",
-            "ALTER TABLE chat_history "
-            "ALTER COLUMN user_id TYPE character varying(255);",
-            "ALTER TABLE chat_history "
-            "ALTER COLUMN group_id TYPE character varying(255);",
-            # 添加bot_id字段
-            "ALTER TABLE chat_history ADD bot_id VARCHAR(255);",
-            "ALTER TABLE chat_history ALTER COLUMN bot_id TYPE character varying(255);",
-            "ALTER TABLE chat_history ADD COLUMN platform character varying(255);",
+            RenameColumn("chat_history", "user_qq", "user_id"),
+            AlterColumnType(
+                "chat_history",
+                "user_id",
+                {"postgres": "character varying(255)", "mysql": "VARCHAR(255)"},
+            ),
+            AlterColumnType(
+                "chat_history",
+                "group_id",
+                {"postgres": "character varying(255)", "mysql": "VARCHAR(255)"},
+            ),
         ]

@@ -2,6 +2,7 @@ from tortoise import fields
 
 from zhenxun.services.cache.runtime_cache import LevelUserMemoryCache
 from zhenxun.services.db_context import Model
+from zhenxun.services.db_context.schema_ops import AlterColumnType, RenameColumn
 from zhenxun.utils.enum import CacheType
 
 
@@ -151,9 +152,16 @@ class LevelUser(Model):
     async def _run_script(cls):
         return [
             # 将user_id改为user_id
-            "ALTER TABLE level_users RENAME COLUMN user_qq TO user_id;",
-            "ALTER TABLE level_users ALTER COLUMN user_id TYPE character varying(255);",
+            RenameColumn("level_users", "user_qq", "user_id"),
+            AlterColumnType(
+                "level_users",
+                "user_id",
+                {"postgres": "character varying(255)", "mysql": "VARCHAR(255)"},
+            ),
             # 将user_id字段类型改为character varying(255)
-            "ALTER TABLE level_users "
-            "ALTER COLUMN group_id TYPE character varying(255);",
+            AlterColumnType(
+                "level_users",
+                "group_id",
+                {"postgres": "character varying(255)", "mysql": "VARCHAR(255)"},
+            ),
         ]

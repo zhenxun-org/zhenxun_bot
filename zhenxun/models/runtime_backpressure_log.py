@@ -36,11 +36,4 @@ class RuntimeBackpressureLog(Model):
 
     @classmethod
     async def _run_script(cls):
-        return [
-            "CREATE INDEX IF NOT EXISTS idx_runtime_backpressure_log_create_time "
-            "ON runtime_backpressure_log(create_time);",
-            "CREATE INDEX IF NOT EXISTS idx_runtime_backpressure_log_scope_time "
-            "ON runtime_backpressure_log(scope_key, create_time);",
-            "CREATE INDEX IF NOT EXISTS idx_runtime_backpressure_log_lane_time "
-            "ON runtime_backpressure_log(lane, create_time);",
-        ]
+        return []

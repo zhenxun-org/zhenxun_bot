@@ -73,6 +73,22 @@ class PolicyDecisionPoint:
     deferred to the old hooks.
     """
 
+    @staticmethod
+    def _missing(snapshot: AuthSnapshot, name: str) -> bool:
+        return name in snapshot.cache_misses
+
+    @staticmethod
+    def _private_disabled(profile: PluginAuthProfile) -> bool:
+        return profile.block_type == BlockType.PRIVATE
+
+    @staticmethod
+    def _group_disabled(profile: PluginAuthProfile) -> bool:
+        return profile.block_type == BlockType.GROUP
+
+    @staticmethod
+    def _globally_disabled(profile: PluginAuthProfile) -> bool:
+        return profile.block_type == BlockType.ALL and not profile.status
+
     def decide(
         self,
         principal: PolicyPrincipal,
@@ -97,6 +113,8 @@ class PolicyDecisionPoint:
         snapshot = context.snapshot
         bot_data = snapshot.bot_data
         if bot_data is None:
+            if self._missing(snapshot, "bot"):
+                return PolicyDecision("defer", "bot_cache_unavailable")
             return PolicyDecision("deny", "bot_not_found")
         if not bot_data.status and not context.allow_sleep_bypass:
             return PolicyDecision("deny", "bot_sleeping")
@@ -112,6 +130,8 @@ class PolicyDecisionPoint:
         group = snapshot.group
         profile = snapshot.profile
         if group is None:
+            if self._missing(snapshot, "group"):
+                return PolicyDecision("defer", "group_cache_unavailable")
             return PolicyDecision("deny", "group_not_found")
         if group.level < 0:
             return PolicyDecision("deny", "group_blacklisted")
@@ -155,8 +175,10 @@ class PolicyDecisionPoint:
             return PolicyDecision("allow", "superuser")
         if snapshot.group_id:
             if group is None:
+                if self._missing(snapshot, "group"):
+                    return PolicyDecision("defer", "group_cache_unavailable")
                 return PolicyDecision("deny", "group_not_found")
-            if profile.status and profile.block_type != BlockType.GROUP:
+            if profile.status and not self._group_disabled(profile):
                 block_set, super_block_set = self._group_block_sets(group)
                 if not block_set and not super_block_set:
                     return PolicyDecision("allow", "plugin_group_fast_allow")
@@ -165,11 +187,11 @@ class PolicyDecisionPoint:
                 return PolicyDecision("deny", "plugin_superuser_blocked_in_group")
             if profile.module in block_set:
                 return PolicyDecision("deny", "plugin_blocked_in_group")
-            if profile.block_type == BlockType.GROUP:
+            if self._group_disabled(profile):
                 return PolicyDecision("deny", "plugin_disabled_in_group")
-        elif profile.block_type == BlockType.PRIVATE:
+        elif self._private_disabled(profile):
             return PolicyDecision("deny", "plugin_disabled_in_private")
-        if profile.block_type == BlockType.ALL and not profile.status:
+        if self._globally_disabled(profile):
             if group is not None and getattr(group, "is_super", False):
                 return PolicyDecision("allow", "super_group_bypass")
             return PolicyDecision("deny", "plugin_global_disabled")

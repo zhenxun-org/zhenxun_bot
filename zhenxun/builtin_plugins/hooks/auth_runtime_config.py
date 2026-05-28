@@ -17,8 +17,6 @@ class AuthDispatchRuntimeConfig:
     passive_http_limit: int = 4
     passive_ai_limit: int = 2
     passive_render_limit: int = 2
-    plain_passive_light_limit: int = 3
-    plain_passive_db_limit: int = 1
     overload_selected_threshold: int = 48
     overload_lane_wait_ms: float = 200.0
     timeout_seconds: float = 5.0
@@ -56,8 +54,6 @@ _ENV_ALIASES: dict[str, tuple[str, ...]] = {
     "passive_http_limit": ("ZX_AUTH_DISPATCH_PASSIVE_HTTP_LIMIT",),
     "passive_ai_limit": ("ZX_AUTH_DISPATCH_PASSIVE_AI_LIMIT",),
     "passive_render_limit": ("ZX_AUTH_DISPATCH_PASSIVE_RENDER_LIMIT",),
-    "plain_passive_light_limit": ("ZX_AUTH_DISPATCH_PLAIN_PASSIVE_LIGHT_LIMIT",),
-    "plain_passive_db_limit": ("ZX_AUTH_DISPATCH_PLAIN_PASSIVE_DB_LIMIT",),
     "overload_selected_threshold": ("ZX_AUTH_OVERLOAD_SELECTED_THRESHOLD",),
     "overload_lane_wait_ms": ("ZX_AUTH_OVERLOAD_LANE_WAIT_MS",),
     "timeout_seconds": ("ZX_AUTH_TIMEOUT_SECONDS",),

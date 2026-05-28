@@ -101,8 +101,4 @@ class TaskInfo(Model):
 
     @classmethod
     async def _run_script(cls):
-        return [
-            "ALTER TABLE task_info ADD default_status boolean DEFAULT true;",
-            "ALTER TABLE task_info ADD load_status boolean DEFAULT false;",
-            # 默认状态
-        ]
+        return []

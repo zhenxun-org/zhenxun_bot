@@ -10,6 +10,7 @@ import weakref
 
 from nonebot import get_loaded_plugins
 from nonebot.adapters import Bot, Event
+from nonebot.consts import CMD_ARG_KEY, CMD_KEY, PREFIX_KEY, RAW_CMD_KEY
 from nonebot.exception import IgnoredException
 from nonebot.matcher import Matcher
 import nonebot.message as nb_message
@@ -21,9 +22,13 @@ from zhenxun.models.user_console import UserConsole
 from zhenxun.services.auth_observability import (
     append_auth_decision_log,
     append_runtime_backpressure_log,
+    build_auth_observability_report,
 )
 from zhenxun.services.cache.cache_containers import CacheDict
-from zhenxun.services.cache.runtime_cache import PluginInfoMemoryCache
+from zhenxun.services.cache.runtime_cache import (
+    PluginInfoMemoryCache,
+    PluginLimitMemoryCache,
+)
 from zhenxun.services.data_access import DataAccess
 from zhenxun.services.log import logger
 from zhenxun.services.message_load import is_overloaded, signal_overload
@@ -31,10 +36,13 @@ from zhenxun.utils.enum import GoldHandle, PluginType
 from zhenxun.utils.exception import InsufficientGold
 from zhenxun.utils.platform import PlatformUtils
 
+from .auth.auth_admin import auth_admin
 from .auth.auth_ban import auth_ban
+from .auth.auth_bot import auth_bot
 from .auth.auth_cost import auth_cost
-from .auth.auth_group import _is_group_wake_command
+from .auth.auth_group import _is_group_wake_command, auth_group
 from .auth.auth_limit import LimitManager, reserve_auth_limit
+from .auth.auth_plugin import auth_plugin
 from .auth.bot_filter import bot_filter
 from .auth.config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .auth.context import (
@@ -54,10 +62,13 @@ from .auth.exception import (
 )
 from .auth_activation import (
     ActivationContext,
+    ActivationDecision,
+    ActivationResult,
     HandlerActivationIndex,
+    matcher_alconna_shortcut_matches_any,
+    text_match_candidates,
 )
 from .auth_patch_guard import (
-    validate_check_and_run_matcher_patch,
     validate_handle_event_patch,
 )
 from .auth_pipeline import AuthPipeline, AuthPipelineContext, AuthPipelineStage
@@ -72,7 +83,7 @@ from .auth_policy import (
 from .auth_profile import PluginAuthProfile, get_plugin_auth_profile
 from .auth_runtime_config import AUTH_DISPATCH_RUNTIME_CONFIG
 from .auth_side_effect import SideEffectCommit
-from .auth_snapshot import AuthSnapshot, build_auth_snapshot
+from .auth_snapshot import AuthSnapshot, get_or_build_auth_snapshot
 
 AUTH_HOOKS_CONCURRENCY_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.hooks_concurrency_limit
 AUTH_DB_CONCURRENCY_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.db_concurrency_limit
@@ -87,12 +98,6 @@ AUTH_DISPATCH_PASSIVE_DB_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.passive_db_limit
 AUTH_DISPATCH_PASSIVE_HTTP_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.passive_http_limit
 AUTH_DISPATCH_PASSIVE_AI_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.passive_ai_limit
 AUTH_DISPATCH_PASSIVE_RENDER_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.passive_render_limit
-AUTH_DISPATCH_PLAIN_PASSIVE_LIGHT_LIMIT = (
-    AUTH_DISPATCH_RUNTIME_CONFIG.plain_passive_light_limit
-)
-AUTH_DISPATCH_PLAIN_PASSIVE_DB_LIMIT = (
-    AUTH_DISPATCH_RUNTIME_CONFIG.plain_passive_db_limit
-)
 AUTH_OVERLOAD_SELECTED_THRESHOLD = (
     AUTH_DISPATCH_RUNTIME_CONFIG.overload_selected_threshold
 )
@@ -165,8 +170,7 @@ _DISPATCH_LANE_SEMAPHORES = {
     for lane, limit in _DISPATCH_LANE_LIMITS.items()
     if limit > 0
 }
-_CHECK_MATCHER_PATCHED = False
-_ORIGINAL_CHECK_AND_RUN_MATCHER: Callable[..., Awaitable[None]] | None = None
+_DISPATCH_BUDGET_LANES = set(_DISPATCH_LANE_LIMITS)
 _HANDLE_EVENT_PATCHED = False
 _ORIGINAL_HANDLE_EVENT: Callable[..., Awaitable[None]] | None = None
 _ORIGINAL_ADAPTER_HANDLE_EVENTS: dict[object, object] = {}
@@ -256,6 +260,7 @@ _DISPATCH_LANE_WAIT_MS: dict[str, float] = {
     "passive_render": 0.0,
 }
 _DISPATCH_LAST_LOG = 0.0
+_DISPATCH_SHADOW_LAST_LOG = 0.0
 _CACHE_SWEEP_TASK: asyncio.Task | None = None
 _BOT_WAKE_COMMAND_PATTERN = re.compile(r"^bot醒来(?:\s+\S+)?$", re.IGNORECASE)
 _BOT_WAKE_CANONICAL_PATTERN = re.compile(
@@ -319,6 +324,9 @@ class EventDispatchContext:
     event_type: str
     plain_text: str = ""
     raw_text: str = ""
+    trie_command_text: str = ""
+    trie_raw_command: str = ""
+    text_candidates: tuple[str, ...] = ()
     to_me: bool = False
     has_url: bool = False
     has_image: bool = False
@@ -540,6 +548,16 @@ def _match_route_modules(text: str) -> set[str]:
             modules = _ROUTE_COMMAND_MAP.get(command)
             if modules:
                 matched_modules.update(modules)
+    return matched_modules
+
+
+def _match_route_modules_for_event(event: Event) -> set[str]:
+    raw_text = ""
+    with contextlib.suppress(Exception):
+        raw_text = getattr(event, "raw_message", "") or str(event.get_message())
+    matched_modules: set[str] = set()
+    for text in _event_text_candidates(event, None, _event_plain_text(event), raw_text):
+        matched_modules.update(_match_route_modules(text))
     return matched_modules
 
 
@@ -775,10 +793,11 @@ def _matcher_rule_matches_text(
     matcher_cls: type[Matcher],
     event: Event,
     plain_text: str,
-) -> bool | None:
+) -> ActivationDecision:
     matched_any = False
     saw_deterministic = False
     message_text: str | None = None
+    plain_candidates = text_match_candidates(plain_text, event=event)
 
     for descriptor in _extract_matcher_rule_descriptors(matcher_cls):
         kind = descriptor.kind
@@ -796,72 +815,100 @@ def _matcher_rule_matches_text(
                 if re.search(pattern, message_text, descriptor.flags):
                     matched_any = True
                 else:
-                    return False
+                    return "miss"
             except re.error:
-                return False
+                return "unknown"
         elif kind == "startswith":
             saw_deterministic = True
-            text = plain_text.casefold() if descriptor.ignorecase else plain_text
             prefixes = descriptor.value if isinstance(descriptor.value, tuple) else ()
             candidates = (
                 tuple(item.casefold() for item in prefixes)
                 if descriptor.ignorecase
                 else prefixes
             )
-            if any(text.startswith(prefix) for prefix in candidates if prefix):
+            texts = (
+                tuple(item.casefold() for item in plain_candidates)
+                if descriptor.ignorecase
+                else plain_candidates
+            )
+            if any(
+                text.startswith(prefix)
+                for text in texts
+                for prefix in candidates
+                if prefix
+            ):
                 matched_any = True
             else:
-                return False
+                return "miss"
         elif kind == "endswith":
             saw_deterministic = True
-            text = plain_text.casefold() if descriptor.ignorecase else plain_text
             suffixes = descriptor.value if isinstance(descriptor.value, tuple) else ()
             candidates = (
                 tuple(item.casefold() for item in suffixes)
                 if descriptor.ignorecase
                 else suffixes
             )
-            if any(text.endswith(suffix) for suffix in candidates if suffix):
+            texts = (
+                tuple(item.casefold() for item in plain_candidates)
+                if descriptor.ignorecase
+                else plain_candidates
+            )
+            if any(
+                text.endswith(suffix)
+                for text in texts
+                for suffix in candidates
+                if suffix
+            ):
                 matched_any = True
             else:
-                return False
+                return "miss"
         elif kind == "fullmatch":
             saw_deterministic = True
-            text = plain_text.casefold() if descriptor.ignorecase else plain_text
             values = descriptor.value if isinstance(descriptor.value, tuple) else ()
             candidates = (
                 tuple(item.casefold() for item in values)
                 if descriptor.ignorecase
                 else values
             )
-            if text in candidates:
+            texts = (
+                tuple(item.casefold() for item in plain_candidates)
+                if descriptor.ignorecase
+                else plain_candidates
+            )
+            if any(text in candidates for text in texts):
                 matched_any = True
             else:
-                return False
+                return "miss"
         elif kind == "keywords":
             saw_deterministic = True
             keywords = descriptor.value if isinstance(descriptor.value, tuple) else ()
-            if any(keyword and keyword in plain_text for keyword in keywords):
+            if any(
+                keyword and keyword in text
+                for text in plain_candidates
+                for keyword in keywords
+            ):
                 matched_any = True
             else:
-                return False
+                return "miss"
         elif kind == "is_type":
             types = descriptor.value
             if isinstance(types, type):
                 if not isinstance(event, types):
-                    return False
+                    return "miss"
             elif isinstance(types, tuple) and types:
                 if not isinstance(event, types):
-                    return False
+                    return "miss"
         elif kind == "to_me":
             if not getattr(event, "to_me", False):
-                return False
+                return "miss"
+        elif kind in {"custom", "alconna", "matcher_command"}:
+            return "unknown"
 
     if matched_any:
-        return True
+        return "match"
     if saw_deterministic:
-        return False
-    return None
+        return "miss"
+    return "unknown"
 
 
 def _is_command_matcher_class(matcher_cls: type[Matcher]) -> bool:
@@ -908,6 +955,19 @@ def _event_plain_text(event: Event) -> str:
     return ""
 
 
+def _normalize_dispatch_text(text: str) -> str:
+    normalized = text.strip()
+    if not normalized:
+        return ""
+    # strip leading placeholders like "[reply:id=10004]撤回"
+    normalized = re.sub(
+        r"^(?:\s*(?:\[[^\]]*]|\<[^>]*>))+\s*",
+        "",
+        normalized,
+    )
+    return normalized.strip()
+
+
 def _state_plain_text(state: dict | None) -> str:
     if state is None:
         return ""
@@ -918,6 +978,79 @@ def _state_plain_text(state: dict | None) -> str:
     if isinstance(text, str):
         return text.strip()
     return ""
+
+
+def _message_to_plain_text(message: object) -> str:
+    if message is None:
+        return ""
+    with contextlib.suppress(Exception):
+        extractor = getattr(message, "extract_plain_text", None)
+        if callable(extractor):
+            return _normalize_dispatch_text(str(extractor() or ""))
+    return _normalize_dispatch_text(str(message))
+
+
+def _trie_command_text_from_state(state: dict | None) -> str:
+    if state is None:
+        return ""
+    prefix = state.get(PREFIX_KEY)
+    if not isinstance(prefix, dict):
+        return ""
+    command = prefix.get(CMD_KEY)
+    if isinstance(command, tuple):
+        return _normalize_dispatch_text(" ".join(str(item) for item in command))
+    if isinstance(command, str):
+        return _normalize_dispatch_text(command)
+    return ""
+
+
+def _trie_raw_command_from_state(state: dict | None) -> str:
+    if state is None:
+        return ""
+    prefix = state.get(PREFIX_KEY)
+    if not isinstance(prefix, dict):
+        return ""
+    raw_command = prefix.get(RAW_CMD_KEY)
+    return _normalize_dispatch_text(raw_command) if isinstance(raw_command, str) else ""
+
+
+def _trie_command_arg_text_from_state(state: dict | None) -> str:
+    if state is None:
+        return ""
+    prefix = state.get(PREFIX_KEY)
+    if not isinstance(prefix, dict):
+        return ""
+    return _message_to_plain_text(prefix.get(CMD_ARG_KEY))
+
+
+def _event_text_candidates(
+    event: Event,
+    state: dict | None,
+    plain_text: str = "",
+    raw_text: str = "",
+) -> tuple[str, ...]:
+    candidates: list[str] = []
+
+    def add(text: object) -> None:
+        if not isinstance(text, str):
+            return
+        normalized = _normalize_dispatch_text(text)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    add(_trie_command_text_from_state(state))
+    add(_trie_raw_command_from_state(state))
+    trie_arg = _trie_command_arg_text_from_state(state)
+    if _trie_raw_command_from_state(state) and trie_arg:
+        add(f"{_trie_raw_command_from_state(state)} {trie_arg}")
+    add(plain_text)
+    if event is not None:
+        with contextlib.suppress(Exception):
+            getter = getattr(event, "get_plaintext", None)
+            if callable(getter):
+                add(getter())
+    add(raw_text)
+    return tuple(candidates)
 
 
 def _event_raw_message_text(event: Event) -> str:
@@ -973,12 +1106,17 @@ def _build_dispatch_context_sync(
     ai_route_modules = _collect_ai_route_modules(event, state)
     ai_route_heads = _collect_ai_route_heads(event, state)
     raw_text = _event_raw_message_text(event)
+    text_candidates = _event_text_candidates(event, state, plain_text, raw_text)
+    trie_command_text = _trie_command_text_from_state(state)
+    trie_raw_command = _trie_raw_command_from_state(state)
     to_me = _event_to_me(event)
     has_url = _event_has_url(raw_text) or _event_has_url(plain_text)
     has_image = _event_has_image(event)
     is_command_like = bool(
         route_modules
         or ai_route_modules
+        or trie_command_text
+        or trie_raw_command
         or plain_text.startswith("/")
         or plain_text.startswith("!")
         or plain_text.startswith(".")
@@ -987,6 +1125,9 @@ def _build_dispatch_context_sync(
         event_type=event_type,
         plain_text=plain_text,
         raw_text=raw_text,
+        trie_command_text=trie_command_text,
+        trie_raw_command=trie_raw_command,
+        text_candidates=text_candidates,
         to_me=to_me,
         has_url=has_url,
         has_image=has_image,
@@ -1011,6 +1152,8 @@ async def _build_dispatch_context(
         context.is_command_like = bool(
             route_modules
             or context.ai_route_modules
+            or context.trie_command_text
+            or context.trie_raw_command
             or context.plain_text.startswith("/")
             or context.plain_text.startswith("!")
             or context.plain_text.startswith(".")
@@ -1021,6 +1164,10 @@ async def _build_dispatch_context(
 def _dispatch_lane_for_matcher(
     matcher_cls: type[Matcher], context: EventDispatchContext
 ) -> str:
+    descriptor = _HANDLER_ACTIVATION_INDEX.descriptor_for(matcher_cls)
+    if descriptor is not None:
+        return descriptor.lane
+
     event_type = context.event_type
     if getattr(matcher_cls, "temp", False):
         return "system"
@@ -1043,9 +1190,27 @@ def _dispatch_lane_for_matcher(
         return "passive_render"
     if any(hint in module for hint in _PASSIVE_HTTP_HINTS):
         return "passive_http"
+    if _matcher_has_unknown_custom_rule(matcher_cls):
+        return "passive_light"
     if any(hint in module for hint in _PASSIVE_DB_HINTS):
         return "passive_db"
     return "passive_light"
+
+
+def _matcher_has_unknown_custom_rule(matcher_cls: type[Matcher]) -> bool:
+    rule = getattr(matcher_cls, "rule", None)
+    checkers = getattr(rule, "checkers", ()) or ()
+    for checker in checkers:
+        call = getattr(checker, "call", None)
+        if call is None:
+            continue
+        call_module = call.__class__.__module__
+        if call_module.startswith("nonebot.rule") or call_module.startswith(
+            "nonebot_plugin_alconna.rule"
+        ):
+            continue
+        return True
+    return False
 
 
 def _dispatch_command_lane_for_matcher(matcher_cls: type[Matcher]) -> str:
@@ -1059,34 +1224,6 @@ def _dispatch_command_lane_for_matcher(matcher_cls: type[Matcher]) -> str:
     return "command_exact"
 
 
-def _dispatch_budget_for_context(context: EventDispatchContext) -> dict[str, int]:
-    high_signal = (
-        context.to_me or context.is_command_like or context.has_url or context.has_image
-    )
-    passive_light = (
-        AUTH_DISPATCH_PASSIVE_LIGHT_LIMIT
-        if high_signal
-        else AUTH_DISPATCH_PLAIN_PASSIVE_LIGHT_LIMIT
-    )
-    passive_db = (
-        AUTH_DISPATCH_PASSIVE_DB_LIMIT
-        if high_signal
-        else AUTH_DISPATCH_PLAIN_PASSIVE_DB_LIMIT
-    )
-    budget = {
-        "passive_light": passive_light,
-        "passive_db": passive_db,
-        "passive_http": AUTH_DISPATCH_PASSIVE_HTTP_LIMIT if context.has_url else 0,
-        "passive_ai": AUTH_DISPATCH_PASSIVE_AI_LIMIT
-        if (context.to_me or context.is_command_like)
-        else int(bool(context.plain_text)),
-        "passive_render": AUTH_DISPATCH_PASSIVE_RENDER_LIMIT
-        if (context.to_me or context.has_image or context.is_command_like)
-        else 0,
-    }
-    return budget
-
-
 def _activation_context_from_dispatch(
     context: EventDispatchContext,
     event: Event,
@@ -1094,8 +1231,12 @@ def _activation_context_from_dispatch(
     return ActivationContext(
         event=event,
         event_type=context.event_type,
-        plain_text=context.plain_text,
-        raw_text=context.raw_text,
+        plain_text=context.text_candidates[0]
+        if context.text_candidates
+        else context.plain_text,
+        raw_text="\n".join(context.text_candidates)
+        if context.text_candidates
+        else context.raw_text,
         to_me=context.to_me,
         has_url=context.has_url,
         has_image=context.has_image,
@@ -1141,36 +1282,62 @@ def _record_dispatch_selection(lane: str, selected: bool, wait_ms: float = 0.0) 
     )
 
 
-def _passive_signal_skip_reason(lane: str, context: EventDispatchContext) -> str | None:
-    if context.event_type != "message":
-        return None
-    if lane == "passive_ai" and not (
-        context.to_me or context.is_command_like or context.plain_text
-    ):
-        return "passive_ai_no_signal"
-    if lane == "passive_http" and not (context.has_url or context.is_command_like):
-        return "passive_http_no_signal"
-    if lane == "passive_render" and not (
-        context.to_me or context.has_image or context.is_command_like
-    ):
-        return "passive_render_no_signal"
-    if lane in {"passive_light", "passive_db"} and not context.plain_text:
-        return "empty_text"
-    return None
+def _new_dispatch_budget() -> dict[str, int]:
+    return dict(_DISPATCH_LANE_LIMITS)
 
 
-def _consume_dispatch_budget(
-    lane: str,
-    budget: dict[str, int],
+def _merge_dispatch_budget(
+    target: dict[str, int],
+    source: dict[str, int],
+) -> None:
+    for lane in _DISPATCH_BUDGET_LANES:
+        target[lane] = source.get(lane, target.get(lane, 0))
+
+
+def _record_activation_result(activation_result: ActivationResult) -> None:
+    for lane, count in activation_result.skipped_by_lane.items():
+        for _ in range(count):
+            _record_dispatch_selection(lane, False)
+
+
+def _compact_counter(counter: dict[str, int], limit: int = 6) -> str:
+    if not counter:
+        return "-"
+    items = sorted(counter.items(), key=lambda item: item[1], reverse=True)[:limit]
+    return ",".join(f"{key}={value}" for key, value in items)
+
+
+def _debug_activation_shadow(
     *,
-    ignore: bool = False,
-) -> bool:
-    if ignore or lane not in budget:
-        return True
-    if budget[lane] <= 0:
-        return False
-    budget[lane] -= 1
-    return True
+    priority: int,
+    activation_result: ActivationResult,
+    context: EventDispatchContext,
+) -> None:
+    global _DISPATCH_SHADOW_LAST_LOG
+    if is_overloaded():
+        return
+    now = time.monotonic()
+    if now - _DISPATCH_SHADOW_LAST_LOG < DISPATCH_STATS_LOG_INTERVAL:
+        return
+    _DISPATCH_SHADOW_LAST_LOG = now
+    text_hint = (context.plain_text or context.trie_raw_command or "")[:48]
+    _debug_log(
+        (
+            "dispatch shadow: "
+            f"priority={priority} "
+            f"event={context.event_type} "
+            f"selected={activation_result.candidate_count}/"
+            f"{activation_result.total_descriptors} "
+            f"selected_lane={_compact_counter(activation_result.selected_by_lane)} "
+            f"skipped_lane={_compact_counter(activation_result.skipped_by_lane)} "
+            f"selected_reason="
+            f"{_compact_counter(activation_result.selected_by_reason)} "
+            f"skipped_reason="
+            f"{_compact_counter(activation_result.skipped_by_reason)} "
+            f"text={text_hint!r}"
+        ),
+        LOGGER_COMMAND,
+    )
 
 
 def _auth_scope_key(context: EventContext) -> str:
@@ -1197,6 +1364,9 @@ def _auth_lane_context_from_state(
         dispatch_context = EventDispatchContext(
             event_type=auth_context.event_type,
             plain_text=auth_context.plain_text,
+            text_candidates=(auth_context.plain_text,)
+            if auth_context.plain_text
+            else (),
             is_command_like=bool(auth_context.route_modules),
             route_modules=set(auth_context.route_modules),
         )
@@ -1262,7 +1432,11 @@ def _get_route_modules_for_event(event: Event, state: dict | None = None) -> set
     try:
         route_modules = _CHECK_MATCHER_ROUTE_CACHE[key]
     except KeyError:
-        route_modules = _match_route_modules(_event_plain_text(event))
+        raw_text = _event_raw_message_text(event)
+        plain_text = _state_plain_text(state) or _event_plain_text(event)
+        route_modules = set()
+        for text in _event_text_candidates(event, state, plain_text, raw_text):
+            route_modules.update(_match_route_modules(text))
         _CHECK_MATCHER_ROUTE_CACHE[key] = route_modules
     if state is not None:
         context = get_event_context(state)
@@ -1277,6 +1451,15 @@ def _prepare_handle_event_state(event: Event, state: dict) -> None:
     get_permission_side_effect_cache(state=state)
     if event.get_type() != "message":
         return
+    raw_text = _event_raw_message_text(event)
+    text_candidates = _event_text_candidates(
+        event,
+        state,
+        _event_plain_text(event),
+        raw_text,
+    )
+    if text_candidates:
+        state["_zx_text_candidates"] = text_candidates
     if _state_plain_text(state):
         return
     text = _event_plain_text(event)
@@ -1432,6 +1615,11 @@ def _collect_alconna_shortcut_strings(command, depth: int = 0) -> set[str]:
     shortcuts: set[str] = set()
     if command is None or depth > 4:
         return shortcuts
+    if isinstance(command, weakref.ReferenceType):
+        resolved = command()
+        if resolved is not None and resolved is not command:
+            return _collect_alconna_shortcut_strings(resolved, depth + 1)
+        return shortcuts
     get_shortcuts = getattr(command, "get_shortcuts", None)
     if callable(get_shortcuts):
         with contextlib.suppress(Exception):
@@ -1457,6 +1645,13 @@ def _collect_alconna_shortcut_strings(command, depth: int = 0) -> set[str]:
             for shortcut in trace_shortcuts:
                 if isinstance(shortcut, str) and shortcut.strip():
                     shortcuts.add(shortcut.strip())
+    with contextlib.suppress(Exception):
+        from arclet.alconna import command_manager
+
+        for shortcut_obj in command_manager.get_shortcut(command).values():  # type: ignore[arg-type]
+            origin_key = getattr(shortcut_obj, "origin_key", None)
+            if isinstance(origin_key, str) and origin_key.strip():
+                shortcuts.add(origin_key.strip())
     for attr in ("command", "commands", "base", "formatter", "source"):
         nested = getattr(command, attr, None)
         if nested is not None and nested is not command:
@@ -1492,9 +1687,14 @@ def _extract_matcher_alconna_shortcuts(
 
         command_ref = getattr(call, "command", None)
         command = None
-        if callable(command_ref):
+        if isinstance(command_ref, weakref.ReferenceType):
             with contextlib.suppress(Exception):
                 command = command_ref()
+        elif callable(command_ref):
+            with contextlib.suppress(Exception):
+                command = command_ref()
+        else:
+            command = command_ref
         shortcuts.update(_collect_alconna_shortcut_strings(command))
 
     if not shortcuts:
@@ -1517,6 +1717,7 @@ def _normalize_shortcut_pattern(shortcut: str) -> str:
     text = re.sub(r"^\[(?:[^\]]*)\]\s*", "", text)
     text = re.sub(r"\s*\.\.\.args?$", "", text).strip()
     text = re.sub(r"\s*\.\.\.$", "", text).strip()
+    text = re.sub(r"^\^", "", text)
     return text
 
 
@@ -1556,270 +1757,32 @@ def _shortcut_matches_text(text: str, shortcut: str) -> bool:
     return _matcher_command_matches(text, pattern)
 
 
+def _matcher_alconna_shortcuts_for(
+    matcher_cls: type[Matcher],
+) -> tuple[str, ...] | None:
+    return _extract_matcher_alconna_shortcuts(matcher_cls)
+
+
 def _matcher_alconna_shortcut_matches(
     matcher_cls: type[Matcher], text: str
-) -> bool | None:
-    shortcuts = _extract_matcher_alconna_shortcuts(matcher_cls)
-    if shortcuts is None:
-        return None
-    for shortcut in shortcuts:
-        if _shortcut_matches_text(text, shortcut):
-            return True
-    return False
-
-
-async def _check_matcher_prefilter(
-    matcher_cls: type[Matcher], event: Event, state: dict | None = None
-) -> tuple[bool, str | None]:
-    dispatch_context = _context_from_state(state) or _build_dispatch_context_sync(
-        event, state
+) -> ActivationDecision:
+    return matcher_alconna_shortcut_matches_any(
+        _matcher_alconna_shortcuts_for(matcher_cls),
+        (text,),
     )
-    event_type = event.get_type()
-    matcher_type = getattr(matcher_cls, "type", "") or ""
-    if isinstance(matcher_type, str) and matcher_type and matcher_type != event_type:
-        # Explicit matcher type mismatch cannot match this event.
-        return True, "type_miss"
-
-    if event_type != "message":
-        if _is_command_matcher_class(matcher_cls):
-            return True, "non_message_command"
-        return False, None
-
-    # Session continuation matchers generated by pause/reject are temp=True.
-    # They must bypass command-route prefilter, otherwise follow-up messages
-    # (e.g. got_path waiting for plain text) will be dropped.
-    if getattr(matcher_cls, "temp", False):
-        return False, None
-
-    is_command_matcher = _is_command_matcher_class(matcher_cls)
-    if not is_command_matcher:
-        lane = _dispatch_lane_for_matcher(matcher_cls, dispatch_context)
-        if reason := _passive_signal_skip_reason(lane, dispatch_context):
-            return True, reason
-        return False, None
-
-    text = dispatch_context.plain_text or _state_plain_text(state)
-    if is_command_matcher and not text:
-        text = _event_plain_text(event)
-        if state is not None and text:
-            state["_zx_plain_text"] = text
-    if is_command_matcher and not text:
-        return True, "empty_text"
-
-    module = _matcher_module_name(matcher_cls)
-    if not module:
-        return False, None
-
-    command_matched = False
-    matcher_commands = _extract_matcher_command_literals(matcher_cls)
-    shortcut_match = _matcher_alconna_shortcut_matches(matcher_cls, text)
-    if matcher_commands:
-        for command in matcher_commands:
-            if _matcher_command_matches(text, command):
-                command_matched = True
-                break
-        else:
-            if shortcut_match:
-                command_matched = True
-            else:
-                return True, "command_miss"
-    elif shortcut_match is False:
-        return True, "command_miss"
-    elif shortcut_match is True:
-        command_matched = True
-    rule_match = _matcher_rule_matches_text(matcher_cls, event, text)
-    if rule_match is True:
-        command_matched = True
-    elif rule_match is False and not command_matched:
-        return True, "command_miss"
-    elif not (matcher_commands or shortcut_match is not None) and not command_matched:
-        return True, "command_miss"
-
-    ai_route_modules = dispatch_context.ai_route_modules or _collect_ai_route_modules(
-        event, state
-    )
-    ai_route_heads = dispatch_context.ai_route_heads or _collect_ai_route_heads(
-        event, state
-    )
-    if ai_route_modules and module not in ai_route_modules:
-        if not _matcher_matches_ai_route_heads(matcher_cls, ai_route_heads):
-            return True, "route_miss"
-    elif ai_route_modules:
-        return False, None
-
-    if not _ROUTE_INDEX_READY:
-        await _ensure_route_index()
-
-    if module not in _ROUTE_MODULES_WITH_COMMANDS:
-        return False, None
-
-    route_modules = dispatch_context.route_modules or _get_route_modules_for_event(
-        event, state
-    )
-    if module not in route_modules:
-        if command_matched:
-            return False, None
-        return True, "route_miss"
-    return False, None
 
 
-def _check_matcher_prefilter_before_task(
+def _matcher_alconna_shortcut_matches_any(
     matcher_cls: type[Matcher],
-    event: Event,
-    state: dict | None = None,
-    dispatch_context: EventDispatchContext | None = None,
-) -> tuple[bool, str | None]:
-    """Conservative selector before creating matcher task.
-
-    This mirrors the async matcher prefilter but never performs IO or route-index
-    rebuild. If anything is uncertain, let the existing check_and_run_matcher
-    patch handle it inside the task.
-    """
-    if dispatch_context is None:
-        dispatch_context = _context_from_state(state) or _build_dispatch_context_sync(
-            event, state
-        )
-
-    event_type = event.get_type()
-    matcher_type = getattr(matcher_cls, "type", "") or ""
-    if isinstance(matcher_type, str) and matcher_type and matcher_type != event_type:
-        return True, "type_miss"
-
-    if event_type != "message":
-        if _is_command_matcher_class(matcher_cls):
-            return True, "non_message_command"
-        return False, None
-
-    if getattr(matcher_cls, "temp", False):
-        return False, None
-
-    if not _is_command_matcher_class(matcher_cls):
-        lane = _dispatch_lane_for_matcher(matcher_cls, dispatch_context)
-        if reason := _passive_signal_skip_reason(lane, dispatch_context):
-            return True, reason
-        return False, None
-
-    text = dispatch_context.plain_text or _state_plain_text(state)
-    if not text:
-        text = _event_plain_text(event)
-        if state is not None and text:
-            state["_zx_plain_text"] = text
-    if not text:
-        return True, "empty_text"
-
-    module = _matcher_module_name(matcher_cls)
-    if not module:
-        return False, None
-
-    command_matched = False
-    matcher_commands = _extract_matcher_command_literals(matcher_cls)
-    shortcut_match = _matcher_alconna_shortcut_matches(matcher_cls, text)
-    if matcher_commands:
-        for command in matcher_commands:
-            if _matcher_command_matches(text, command):
-                command_matched = True
-                break
-        else:
-            if shortcut_match:
-                command_matched = True
-            else:
-                return True, "command_miss"
-    elif shortcut_match is False:
-        return True, "command_miss"
-    elif shortcut_match is True:
-        command_matched = True
-    rule_match = _matcher_rule_matches_text(matcher_cls, event, text)
-    if rule_match is True:
-        command_matched = True
-    elif rule_match is False and not command_matched:
-        return True, "command_miss"
-    elif not (matcher_commands or shortcut_match is not None) and not command_matched:
-        return True, "command_miss"
-
-    ai_route_modules = dispatch_context.ai_route_modules or _collect_ai_route_modules(
-        event, state
+    texts: tuple[str, ...],
+) -> ActivationDecision:
+    return matcher_alconna_shortcut_matches_any(
+        _matcher_alconna_shortcuts_for(matcher_cls),
+        texts,
     )
-    ai_route_heads = dispatch_context.ai_route_heads or _collect_ai_route_heads(
-        event, state
-    )
-    if ai_route_modules and module not in ai_route_modules:
-        if not _matcher_matches_ai_route_heads(matcher_cls, ai_route_heads):
-            return True, "route_miss"
-    elif ai_route_modules:
-        return False, None
-
-    if not _ROUTE_INDEX_READY:
-        return False, None
-
-    if module not in _ROUTE_MODULES_WITH_COMMANDS:
-        return False, None
-
-    route_modules = dispatch_context.route_modules or _get_route_modules_for_event(
-        event, state
-    )
-    if module not in route_modules:
-        if command_matched:
-            return False, None
-        return True, "route_miss"
-    return False, None
 
 
 _MAX_MATCHER_CACHE = 512
-
-
-async def _patched_check_and_run_matcher(
-    Matcher: type[Matcher],
-    bot: Bot,
-    event: Event,
-    state: dict,
-    stack=None,
-    dependency_cache=None,
-) -> None:
-    skip, reason = await _check_matcher_prefilter(
-        Matcher, event, state if isinstance(state, dict) else None
-    )
-    _record_prefilter_stats(skip, reason, "inside_task")
-    if skip:
-        return
-
-    original = _ORIGINAL_CHECK_AND_RUN_MATCHER
-    if not original:
-        return
-    kwargs = {
-        "Matcher": Matcher,
-        "bot": bot,
-        "event": event,
-        "state": state,
-        "stack": stack,
-        "dependency_cache": dependency_cache,
-    }
-    await original(**kwargs)
-
-
-def _install_matcher_prefilter() -> None:
-    global _CHECK_MATCHER_PATCHED, _ORIGINAL_CHECK_AND_RUN_MATCHER
-    if _CHECK_MATCHER_PATCHED:
-        return
-    guard = validate_check_and_run_matcher_patch()
-    if not guard.ok:
-        logger.warning(
-            f"权限 matcher 预筛选 patch 未安装，回退 NoneBot 原生分发: {guard.reason}",
-            LOGGER_COMMAND,
-        )
-        return
-    _ORIGINAL_CHECK_AND_RUN_MATCHER = nb_message.check_and_run_matcher
-    nb_message.check_and_run_matcher = _patched_check_and_run_matcher  # type: ignore[assignment]
-    _CHECK_MATCHER_PATCHED = True
-
-
-def _uninstall_matcher_prefilter() -> None:
-    global _CHECK_MATCHER_PATCHED, _ORIGINAL_CHECK_AND_RUN_MATCHER
-    if not _CHECK_MATCHER_PATCHED:
-        return
-    if _ORIGINAL_CHECK_AND_RUN_MATCHER is not None:
-        nb_message.check_and_run_matcher = _ORIGINAL_CHECK_AND_RUN_MATCHER  # type: ignore[assignment]
-    _CHECK_MATCHER_PATCHED = False
-    _ORIGINAL_CHECK_AND_RUN_MATCHER = None
 
 
 async def _patched_handle_event(bot: Bot, event: Event) -> None:
@@ -1867,7 +1830,6 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
             )
         _prepare_handle_event_state(event, state)
         dispatch_context = await _build_dispatch_context(event, state)
-        dispatch_budget = _dispatch_budget_for_context(dispatch_context)
         activation_context = _activation_context_from_dispatch(
             dispatch_context,
             event,
@@ -1908,13 +1870,14 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
                     ),
                 }
             ):
+                priority_budget = _new_dispatch_budget()
                 if activation_available:
                     try:
                         activation_result = _HANDLER_ACTIVATION_INDEX.select_priority(
                             priority,
                             priority_matchers,
                             activation_context,
-                            dispatch_budget.copy(),
+                            priority_budget,
                         )
                     except Exception as exc:
                         logger.warning(
@@ -1928,10 +1891,12 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
 
                 if activation_result is not None:
                     selected_matchers = activation_result.selected
-                    deterministic_selected = activation_result.deterministic_selected
-                    for lane, count in activation_result.skipped_by_lane.items():
-                        for _ in range(count):
-                            _record_dispatch_selection(lane, False)
+                    _record_activation_result(activation_result)
+                    _debug_activation_shadow(
+                        priority=priority,
+                        activation_result=activation_result,
+                        context=dispatch_context,
+                    )
                     if (
                         activation_result.candidate_count
                         > AUTH_OVERLOAD_SELECTED_THRESHOLD
@@ -1939,38 +1904,40 @@ async def _patched_handle_event(bot: Bot, event: Event) -> None:
                         signal_overload(3.0)
                 else:
                     selected_matchers = priority_matchers
-                    deterministic_selected = set()
 
                 async with anyio_mod.create_task_group() as tg:
                     for matcher in selected_matchers:
-                        skip, reason = _check_matcher_prefilter_before_task(
-                            matcher,
-                            event,
-                            state,
-                            dispatch_context,
-                        )
-                        _record_prefilter_stats(skip, reason, "before_task")
-                        if skip:
-                            lane = _dispatch_lane_for_matcher(matcher, dispatch_context)
-                            _record_dispatch_selection(lane, False)
-                            continue
                         lane = _dispatch_lane_for_matcher(matcher, dispatch_context)
-                        ignore_budget = matcher in deterministic_selected
-                        if (
-                            lane.startswith("passive_")
-                            and not ignore_budget
-                            and not _consume_dispatch_budget(lane, dispatch_budget)
-                        ):
-                            _record_dispatch_selection(lane, False)
-                            await append_runtime_backpressure_log(
-                                scope_key=f"{bot.type}:{bot.self_id}",
-                                reason="dispatch_passive_budget_exhausted",
-                                lane=lane,
-                                action="skip",
-                                queue_size=len(selected_matchers),
-                                active_count=HOOKS_ACTIVE_COUNT,
+                        if activation_result is None:
+                            descriptor = _HANDLER_ACTIVATION_INDEX.descriptor_for(
+                                matcher
                             )
-                            continue
+                            if descriptor is not None:
+                                single_budget = dict(priority_budget)
+                                try:
+                                    single_result = (
+                                        _HANDLER_ACTIVATION_INDEX.select_priority(
+                                            priority,
+                                            [matcher],
+                                            activation_context,
+                                            single_budget,
+                                        )
+                                    )
+                                except Exception:
+                                    single_result = None
+                                if single_result is not None:
+                                    _record_activation_result(single_result)
+                                    _debug_activation_shadow(
+                                        priority=priority,
+                                        activation_result=single_result,
+                                        context=dispatch_context,
+                                    )
+                                    _merge_dispatch_budget(
+                                        priority_budget,
+                                        single_budget,
+                                    )
+                                    if not single_result.selected:
+                                        continue
                         matcher_state = _build_matcher_state(state)
                         tg.start_soon(
                             run_coro_with_shield,
@@ -2038,7 +2005,9 @@ async def _get_route_context(text: str, event_cache: dict | None) -> set[str]:
     if event_cache is not None and "route_modules" in event_cache:
         return event_cache["route_modules"]
     await _ensure_route_index()
-    matched = _match_route_modules(text)
+    matched = set()
+    for candidate in text_match_candidates(text):
+        matched.update(_match_route_modules(candidate))
     if event_cache is not None:
         event_cache["route_modules"] = matched
     return matched
@@ -2064,7 +2033,6 @@ async def _cache_sweep_loop() -> None:
 async def start_auth_runtime_tasks() -> None:
     global _CACHE_SWEEP_TASK
     await _ensure_route_index()
-    _install_matcher_prefilter()
     _install_handle_event_selector()
     if _CACHE_SWEEP_TASK is None or _CACHE_SWEEP_TASK.done():
         _CACHE_SWEEP_TASK = asyncio.create_task(_cache_sweep_loop())
@@ -2073,7 +2041,6 @@ async def start_auth_runtime_tasks() -> None:
 async def stop_auth_runtime_tasks() -> None:
     global _CACHE_SWEEP_TASK
     _uninstall_handle_event_selector()
-    _uninstall_matcher_prefilter()
     task = _CACHE_SWEEP_TASK
     _CACHE_SWEEP_TASK = None
     if task is not None:
@@ -2092,18 +2059,53 @@ async def _has_limits_cached(
     if event_cache is not None:
         module_limit_cache = event_cache.setdefault("module_limits", {})
     if module in module_limit_cache:
-        return module_limit_cache[module]
-    if known is not None:
+        ready_cache = (
+            event_cache.setdefault("module_limits_ready", {})
+            if event_cache is not None
+            else {}
+        )
+        if ready_cache.get(module, True):
+            return module_limit_cache[module]
+        if known is True:
+            module_limit_cache[module] = True
+            ready_cache[module] = True
+            return True
+    elif known is not None:
         module_limit_cache[module] = known
-        return known
+        if event_cache is not None:
+            event_cache.setdefault("module_limits_ready", {})[module] = True
+        return module_limit_cache[module]
+    limit_entries = None
+    if event_cache is not None:
+        entry_cache = event_cache.setdefault("module_limit_entries", {})
+        if module in entry_cache:
+            limit_entries = entry_cache[module]
+    if limit_entries is not None:
+        has_limits = bool(limit_entries)
+        module_limit_cache[module] = has_limits
+        if event_cache is not None:
+            event_cache.setdefault("module_limits_ready", {})[module] = True
+        return has_limits
+    limit_entries = PluginLimitMemoryCache.get_limits_if_ready(module)
+    if limit_entries is not None:
+        has_limits = bool(limit_entries)
+        module_limit_cache[module] = has_limits
+        if event_cache is not None:
+            event_cache.setdefault("module_limit_entries", {})[module] = limit_entries
+            event_cache.setdefault("module_limits_ready", {})[module] = True
+        return has_limits
     limits = await LimitManager.get_module_limits(module)
     has_limits = bool(limits)
     module_limit_cache[module] = has_limits
+    if event_cache is not None:
+        event_cache.setdefault("module_limit_entries", {})[module] = limits
+        event_cache.setdefault("module_limits_ready", {})[module] = True
     return has_limits
 
 
 @contextlib.asynccontextmanager
 async def _db_section():
+    """Legacy bounded DB section kept for explicit fallback callers."""
     global DB_ACTIVE_COUNT
     if DB_SEMAPHORE.locked():
         logger.warning(
@@ -2211,61 +2213,29 @@ def _is_hidden_plugin(matcher: Matcher) -> bool:
     return extra.get("plugin_type") == PluginType.HIDDEN
 
 
-async def _fetch_user_readonly(
-    user_dao: DataAccess, user_id: str
-) -> UserConsole | None:
-    return await with_timeout(
-        user_dao.safe_get_or_none(user_id=user_id), name="get_user"
-    )
-
-
-async def get_plugin_and_user(
+async def _get_plugin_cache_first(
     module: str,
-    user_id: str,
-    platform: str | None = None,
-    event_cache: dict | None = None,
-    need_user: bool = True,
-) -> tuple[PluginInfo, UserConsole | None]:
-    """Fetch plugin info and read user only when cost is required."""
-    user_dao = DataAccess(UserConsole)
-
+    event_cache: dict | None,
+    *,
+    allow_cache_load: bool,
+) -> tuple[PluginInfo | None, bool]:
     plugin = None
     if event_cache is not None:
         plugin_cache = event_cache.setdefault("plugin_cache", {})
         if module in plugin_cache:
-            plugin = plugin_cache[module]
-    if plugin is None:
+            return cast(PluginInfo | None, plugin_cache[module]), False
+
+    plugin = PluginInfoMemoryCache.get_by_module_if_ready(module)
+    cache_miss = plugin is None and not PluginInfoMemoryCache.is_loaded()
+    if plugin is None and allow_cache_load:
         plugin = await PluginInfoMemoryCache.get_by_module(module)
-        if event_cache is not None:
-            event_cache.setdefault("plugin_cache", {})[module] = plugin
-    plugin = cast(PluginInfo | None, plugin)
-
-    if not plugin:
-        raise PermissionExemption(f"plugin:{module} not found, skip permission check")
-    if plugin.plugin_type == PluginType.HIDDEN:
-        raise PermissionExemption(f"plugin {plugin.name}:{plugin.module} hidden, skip")
-
-    user = None
-    if need_user and plugin.cost_gold > 0:
-        if event_cache is not None:
-            user_cache = event_cache.setdefault("user_cache", {})
-            if user_id in user_cache:
-                user = user_cache[user_id]
-            else:
-                try:
-                    async with _db_section():
-                        user = await _fetch_user_readonly(user_dao, user_id)
-                except PermissionExemption:
-                    user = None
-                user_cache[user_id] = user
-        else:
-            try:
-                async with _db_section():
-                    user = await _fetch_user_readonly(user_dao, user_id)
-            except PermissionExemption:
-                user = None
-
-    return plugin, user
+        cache_miss = False
+    if event_cache is not None:
+        event_cache.setdefault("plugin_cache", {})[module] = plugin
+        event_cache.setdefault("auth_cache_misses", set()).discard("plugin")
+        if cache_miss:
+            event_cache.setdefault("auth_cache_misses", set()).add("plugin")
+    return plugin, cache_miss
 
 
 async def get_plugin_cost(
@@ -2367,24 +2337,17 @@ async def _record_backpressure(
 
 
 async def _enter_hooks_section(lane_context: AuthLaneContext):
-    """尝试获取全局信号量；过载时保命令、降级被动 matcher。"""
+    """尝试获取全局信号量；过载时记录背压但不丢弃 matcher。"""
     global HOOKS_ACTIVE_COUNT
     if HOOKS_SEMAPHORE.locked():
         signal_overload(3.0)
-        action = "execute" if lane_context.is_guaranteed else "defer"
         await _record_backpressure(
             lane_context=lane_context,
             reason="hooks_semaphore_saturated",
-            action=action,
+            action="wait",
         )
-        if not lane_context.is_guaranteed:
-            logger.warning(
-                "hooks semaphore saturated, passive matcher deferred",
-                LOGGER_COMMAND,
-            )
-            raise SkipPluginException("hooks saturated passive deferred")
         logger.warning(
-            "hooks semaphore saturated, guaranteed lane waiting",
+            "hooks semaphore saturated, matcher waiting",
             LOGGER_COMMAND,
         )
     started = time.perf_counter()
@@ -2449,20 +2412,26 @@ async def _prepare_auth_state(
     hook_recorder: HookTraceRecorder,
     state: dict | None,
     session: Uninfo,
+    allow_cache_load: bool = False,
 ) -> AuthPreparation | None:
-    entity = context.entity
     plugin_user_start = time.time()
     try:
-        plugin, user = await with_timeout(
-            get_plugin_and_user(
-                module,
-                entity.user_id,
-                context.platform,
-                event_cache=event_cache,
-                need_user=not route_skip_checks,
-            ),
-            name="get_plugin_and_user",
+        plugin, plugin_cache_miss = await _get_plugin_cache_first(
+            module,
+            event_cache,
+            allow_cache_load=allow_cache_load,
         )
+        user = None
+        if plugin is None:
+            if not allow_cache_load and plugin_cache_miss:
+                return None
+            raise PermissionExemption(
+                f"plugin:{module} not found, skip permission check"
+            )
+        if plugin.plugin_type == PluginType.HIDDEN:
+            raise PermissionExemption(
+                f"plugin {plugin.name}:{plugin.module} hidden, skip"
+            )
         hook_recorder.set("get_plugin_user", f"{time.time() - plugin_user_start:.3f}s")
     except asyncio.TimeoutError:
         logger.error(
@@ -2471,6 +2440,8 @@ async def _prepare_auth_state(
             session=session,
         )
         return None
+    except PermissionExemption:
+        raise
 
     permission_context = PermissionContext(
         event=context,
@@ -2480,13 +2451,18 @@ async def _prepare_auth_state(
     )
     store_permission_context(state, permission_context)
 
-    profile = await get_plugin_auth_profile(plugin, event_cache=event_cache)
-    snapshot = await build_auth_snapshot(
+    profile = await get_plugin_auth_profile(
+        plugin,
+        event_cache=event_cache,
+        allow_cache_load=allow_cache_load,
+    )
+    snapshot = await get_or_build_auth_snapshot(
         context=context,
         plugin=plugin,
         profile=profile,
         bot=bot,
         skip_ban=skip_ban,
+        allow_cache_load=allow_cache_load,
     )
     permission_context.group = snapshot.group
     permission_context.bot_data = snapshot.bot_data
@@ -2522,6 +2498,8 @@ def _apply_policy_precheck(
         resource_from_snapshot(snapshot),
         prep.policy_context,
     )
+    if decision.deferred:
+        hook_recorder.set("auth_core", f"policy:{decision.reason}")
     if decision.denied:
         raise_for_policy(decision, _policy_skip_message(decision.reason))
     if decision.allowed and decision.reason in {
@@ -2536,12 +2514,16 @@ def _apply_policy_precheck(
         hook_recorder.set("auth_bot", "policy")
     elif bot_decision.denied:
         raise_for_policy(bot_decision, _policy_skip_message(bot_decision.reason))
+    elif bot_decision.deferred:
+        raise PermissionExemption(f"auth_bot deferred: {bot_decision.reason}")
 
     group_decision = _AUTH_PDP.decide_group(prep.policy_context)
     if group_decision.allowed or group_decision.skipped:
         hook_recorder.set("auth_group", f"policy:{group_decision.reason}")
     elif group_decision.denied:
         raise_for_policy(group_decision, _policy_skip_message(group_decision.reason))
+    elif group_decision.deferred:
+        raise PermissionExemption(f"auth_group deferred: {group_decision.reason}")
 
     plugin_decision = _AUTH_PDP.decide_plugin(prep.policy_context)
     if plugin_decision.allowed or plugin_decision.skipped:
@@ -2549,9 +2531,7 @@ def _apply_policy_precheck(
     elif plugin_decision.denied:
         raise_for_policy(plugin_decision, _policy_skip_message(plugin_decision.reason))
     else:
-        raise SkipPluginException(
-            f"plugin policy deferred unexpectedly: {plugin_decision.reason}"
-        )
+        raise PermissionExemption(f"auth_plugin deferred: {plugin_decision.reason}")
 
     admin_decision = _AUTH_PDP.decide_admin(prep.policy_context)
     if admin_decision.allowed or admin_decision.skipped:
@@ -2559,11 +2539,90 @@ def _apply_policy_precheck(
     elif admin_decision.denied:
         raise_for_policy(admin_decision, _policy_skip_message(admin_decision.reason))
     else:
-        raise SkipPluginException(
-            f"admin policy deferred unexpectedly: {admin_decision.reason}"
-        )
+        raise PermissionExemption(f"auth_admin deferred: {admin_decision.reason}")
 
     return flags
+
+
+async def _prepare_auth_state_with_fallback(
+    *,
+    module: str,
+    context: EventContext,
+    bot: Bot,
+    event_cache: dict | None,
+    route_skip_checks: bool,
+    skip_ban: bool,
+    hook_recorder: HookTraceRecorder,
+    state: dict | None,
+    session: Uninfo,
+) -> AuthPreparation | None:
+    prep = await _prepare_auth_state(
+        module=module,
+        context=context,
+        bot=bot,
+        event_cache=event_cache,
+        route_skip_checks=route_skip_checks,
+        skip_ban=skip_ban,
+        hook_recorder=hook_recorder,
+        state=state,
+        session=session,
+        allow_cache_load=False,
+    )
+    if prep is not None:
+        return prep
+    hook_recorder.set("auth_snapshot", "cache_miss_fallback")
+    return await _prepare_auth_state(
+        module=module,
+        context=context,
+        bot=bot,
+        event_cache=event_cache,
+        route_skip_checks=route_skip_checks,
+        skip_ban=skip_ban,
+        hook_recorder=hook_recorder,
+        state=state,
+        session=session,
+        allow_cache_load=True,
+    )
+
+
+async def _legacy_pure_auth_fallback(
+    *,
+    prep: AuthPreparation,
+    event: Event,
+    session: Uninfo,
+    text: str,
+) -> None:
+    """Compatibility fallback for cache-deferred pure permission checks."""
+    await auth_bot(
+        prep.plugin,
+        prep.snapshot.context.bot_id,
+        prep.snapshot.bot_data,
+        skip_fetch=prep.snapshot.bot_data is not None,
+        allow_sleep_bypass=prep.policy_context.allow_sleep_bypass,
+        context=prep.permission_context,
+    )
+    await auth_group(
+        prep.plugin,
+        prep.snapshot.group,
+        text,
+        prep.snapshot.group_id,
+        context=prep.permission_context,
+    )
+    await auth_plugin(
+        prep.plugin,
+        prep.snapshot.group,
+        session,
+        event,
+        context=prep.permission_context,
+        user_id=prep.snapshot.user_id,
+    )
+    await auth_admin(
+        prep.plugin,
+        session,
+        cached_levels=prep.snapshot.admin_levels,
+        context=prep.permission_context,
+        entity=prep.snapshot.context.entity,
+    )
 
 
 async def _check_ban_from_snapshot(
@@ -2765,7 +2824,7 @@ async def _auth_pipeline_route_gate(ctx: AuthPipelineContext) -> None:
 
 
 async def _auth_pipeline_prepare_snapshot(ctx: AuthPipelineContext) -> None:
-    ctx.prep = await _prepare_auth_state(
+    ctx.prep = await _prepare_auth_state_with_fallback(
         module=ctx.module,
         context=ctx.event_context,
         bot=ctx.bot,
@@ -2781,7 +2840,36 @@ async def _auth_pipeline_prepare_snapshot(ctx: AuthPipelineContext) -> None:
 
 
 async def _auth_pipeline_policy_precheck(ctx: AuthPipelineContext) -> None:
-    ctx.flags = _apply_policy_precheck(ctx.prep, ctx.hook_recorder)
+    try:
+        ctx.flags = _apply_policy_precheck(ctx.prep, ctx.hook_recorder)
+    except PermissionExemption as exc:
+        ctx.hook_recorder.set("policy_fallback", str(exc))
+        ctx.prep = await _prepare_auth_state(
+            module=ctx.module,
+            context=ctx.event_context,
+            bot=ctx.bot,
+            event_cache=ctx.event_cache,
+            route_skip_checks=ctx.route_skip_checks,
+            skip_ban=ctx.skip_ban,
+            hook_recorder=ctx.hook_recorder,
+            state=ctx.state,
+            session=ctx.session,
+            allow_cache_load=True,
+        )
+        if ctx.prep is None:
+            ctx.stop(allowed=True, effect="allow", reason="policy_fallback_timeout")
+            return
+        try:
+            ctx.flags = _apply_policy_precheck(ctx.prep, ctx.hook_recorder)
+        except PermissionExemption as fallback_exc:
+            ctx.hook_recorder.set("legacy_pure_auth", str(fallback_exc))
+            await _legacy_pure_auth_fallback(
+                prep=ctx.prep,
+                event=ctx.event,
+                session=ctx.session,
+                text=ctx.text,
+            )
+            ctx.flags = AuthPolicyFlags()
     if ctx.flags.should_return_allowed:
         ctx.stop(allowed=True, effect="allow", reason="policy_precheck_allow")
         return
@@ -2822,7 +2910,7 @@ async def _auth_pipeline_side_effect_commit(ctx: AuthPipelineContext) -> None:
         await ctx.side_effect_commit.rollback_all("auth_ignored")
         return
     if ctx.cost_gold <= 0:
-        if ctx.side_effect_commit._reserved_limit is not None:
+        if ctx.side_effect_commit.has_pending:
             ctx.side_effect_cache.commits[ctx.module] = ctx.side_effect_commit
         return
     gold_start = time.time()
@@ -2857,9 +2945,8 @@ async def _auth_pipeline_side_effect_commit(ctx: AuthPipelineContext) -> None:
 
 
 async def _auth_pipeline_decision_log(ctx: AuthPipelineContext) -> None:
-    has_deferred_commit = ctx.side_effect_commit is not None and (
-        ctx.side_effect_commit._reserved_limit is not None
-        or ctx.side_effect_commit._reserved_gold is not None
+    has_deferred_commit = (
+        ctx.side_effect_commit is not None and ctx.side_effect_commit.has_pending
     )
     if (
         ctx.auth_result_cache is not None
@@ -2869,6 +2956,18 @@ async def _auth_pipeline_decision_log(ctx: AuthPipelineContext) -> None:
         ctx.auth_result_cache[ctx.module] = (
             ctx.auth_allowed,
             None if ctx.auth_allowed else ctx.decision_reason,
+        )
+    side_effect_state = (
+        ctx.side_effect_commit.snapshot()
+        if ctx.side_effect_commit is not None
+        else None
+    )
+    shadow_effect = None
+    shadow_reason = None
+    if has_deferred_commit:
+        shadow_effect = "defer"
+        shadow_reason = "side_effect_pending:" + ",".join(
+            ctx.side_effect_commit.pending_kinds
         )
     if ctx.entered_side_effect_lock and ctx.side_effect_lock is not None:
         with contextlib.suppress(Exception):
@@ -2883,9 +2982,19 @@ async def _auth_pipeline_decision_log(ctx: AuthPipelineContext) -> None:
         module=ctx.module,
         effect=ctx.decision_effect or "error",
         reason=ctx.decision_reason,
+        shadow_effect=shadow_effect,
+        shadow_reason=shadow_reason,
+        side_effect_state=side_effect_state,
         latency_ms=latency_ms,
         overloaded=is_overloaded(),
     )
+
+
+async def build_auth_decision_backpressure_report(
+    *,
+    hours: float = 24.0,
+) -> dict:
+    return await build_auth_observability_report(hours=hours)
 
 
 _AUTH_PIPELINE = AuthPipeline(

@@ -1,6 +1,7 @@
 from tortoise import fields
 
 from zhenxun.services.db_context import Model
+from zhenxun.services.db_context.schema_ops import DropColumn
 
 
 class FriendUser(Model):
@@ -30,4 +31,4 @@ class FriendUser(Model):
 
     @classmethod
     def _run_script(cls):
-        return ["ALTER TABLE friend_users DROP COLUMN nickname;"]
+        return [DropColumn("friend_users", "nickname")]

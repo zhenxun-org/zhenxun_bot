@@ -306,7 +306,4 @@ class UserConsole(Model):
 
     @classmethod
     async def _run_script(cls):
-        return [
-            "CREATE INDEX idx_user_console_user_id ON user_console(user_id);",
-            "CREATE INDEX idx_user_console_uid ON user_console(uid);",
-        ]
+        return []

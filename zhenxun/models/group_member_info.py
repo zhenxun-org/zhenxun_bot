@@ -2,8 +2,8 @@ from typing import ClassVar
 
 from tortoise import fields
 
-from zhenxun.configs.config import BotConfig
 from zhenxun.services.db_context import Model
+from zhenxun.services.db_context.schema_ops import AlterColumnType, DropColumn
 
 
 class GroupInfoUser(Model):
@@ -52,54 +52,18 @@ class GroupInfoUser(Model):
 
     @classmethod
     async def _run_script(cls):
-        db_type = (BotConfig.get_sql_type() or "").lower()
-        scripts = ["ALTER TABLE group_info_users DROP COLUMN nickname;"]
-
-        if "postgres" in db_type:
-            scripts.extend(
-                [
-                    (
-                        "ALTER TABLE group_info_users ADD COLUMN IF NOT EXISTS "
-                        "platform character varying(255);"
-                    ),
-                    (
-                        "ALTER TABLE group_info_users ALTER COLUMN user_id "
-                        "TYPE character varying(255) USING user_id::character varying;"
-                    ),
-                    (
-                        "ALTER TABLE group_info_users ALTER COLUMN group_id "
-                        "TYPE character varying(255) USING group_id::character varying;"
-                    ),
-                    (
-                        "ALTER TABLE group_info_users ALTER COLUMN platform "
-                        "TYPE character varying(255) USING platform::character varying;"
-                    ),
-                ]
-            )
-        elif "mysql" in db_type:
-            scripts.extend(
-                [
-                    (
-                        "ALTER TABLE group_info_users ADD COLUMN "
-                        "platform VARCHAR(255) NULL;"
-                    ),
-                    (
-                        "ALTER TABLE group_info_users MODIFY COLUMN "
-                        "user_id VARCHAR(255) NOT NULL;"
-                    ),
-                    (
-                        "ALTER TABLE group_info_users MODIFY COLUMN "
-                        "group_id VARCHAR(255) NOT NULL;"
-                    ),
-                    (
-                        "ALTER TABLE group_info_users MODIFY COLUMN "
-                        "platform VARCHAR(255) NULL;"
-                    ),
-                ]
-            )
-        elif "sqlite" in db_type:
-            scripts.append(
-                "ALTER TABLE group_info_users ADD COLUMN platform VARCHAR(255);"
-            )
-
-        return scripts
+        return [
+            DropColumn("group_info_users", "nickname"),
+            AlterColumnType(
+                "group_info_users",
+                "user_id",
+                {"postgres": "character varying(255)", "mysql": "VARCHAR(255)"},
+                nullable=False,
+            ),
+            AlterColumnType(
+                "group_info_users",
+                "group_id",
+                {"postgres": "character varying(255)", "mysql": "VARCHAR(255)"},
+                nullable=False,
+            ),
+        ]

@@ -206,12 +206,4 @@ class PluginInfo(Model):
 
     @classmethod
     async def _run_script(cls):
-        return [
-            "ALTER TABLE plugin_info ADD COLUMN parent character varying(255);",
-            "ALTER TABLE plugin_info ADD COLUMN is_show boolean DEFAULT true;",
-            "ALTER TABLE plugin_info ADD COLUMN ignore_prompt boolean DEFAULT false;",
-            "ALTER TABLE plugin_info ADD COLUMN impression float DEFAULT 0;",
-            "CREATE INDEX idx_plugin_info_module ON plugin_info(module);",
-            "ALTER TABLE plugin_info ADD COLUMN ignore_statistics"
-            " boolean DEFAULT false;",
-        ]
+        return []

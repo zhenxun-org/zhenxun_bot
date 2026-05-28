@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from zhenxun.services.cache.runtime_cache import PluginLimitMemoryCache
+from zhenxun.services.cache.runtime_cache import (
+    PluginLimitMemoryCache,
+    PluginLimitSnapshot,
+)
 from zhenxun.utils.enum import BlockType, PluginType
 
 
@@ -77,6 +80,7 @@ async def get_plugin_auth_profile(
     plugin,
     *,
     event_cache: dict | None = None,
+    allow_cache_load: bool = True,
 ) -> PluginAuthProfile:
     module = str(getattr(plugin, "module", "") or "")
     profile_cache: dict[str, PluginAuthProfile] = {}
@@ -86,11 +90,28 @@ async def get_plugin_auth_profile(
         if cached is not None:
             return cached
 
-    limits = await PluginLimitMemoryCache.get_limits(module)
+    limits: list[PluginLimitSnapshot] | None = None
+    limits_ready = False
+    if event_cache is not None:
+        limit_cache = event_cache.setdefault("module_limit_entries", {})
+        if module in limit_cache:
+            limits = limit_cache[module]
+            limits_ready = True
+    if limits is None:
+        limits = PluginLimitMemoryCache.get_limits_if_ready(module)
+        limits_ready = limits is not None
+    if limits is None and allow_cache_load:
+        limits = await PluginLimitMemoryCache.get_limits(module)
+        limits_ready = True
+    if limits is None:
+        limits = []
     profile = build_plugin_auth_profile(plugin, has_limit=bool(limits))
     if event_cache is not None:
         profile_cache[module] = profile
         event_cache.setdefault("module_limits", {})[module] = profile.has_limit
+        event_cache.setdefault("module_limits_ready", {})[module] = limits_ready
+        if limits_ready:
+            event_cache.setdefault("module_limit_entries", {})[module] = limits
     return profile
 
 
