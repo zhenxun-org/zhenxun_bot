@@ -1,12 +1,8 @@
 import asyncio
-from collections.abc import Awaitable, Callable
 import contextlib
-from dataclasses import dataclass, field
-import importlib
 import re
 import time
 from typing import cast
-import weakref
 
 from nonebot import get_loaded_plugins
 from nonebot.adapters import Bot, Event
@@ -36,13 +32,10 @@ from zhenxun.utils.enum import GoldHandle, PluginType
 from zhenxun.utils.exception import InsufficientGold
 from zhenxun.utils.platform import PlatformUtils
 
-from .auth.auth_admin import auth_admin
 from .auth.auth_ban import auth_ban
-from .auth.auth_bot import auth_bot
 from .auth.auth_cost import auth_cost
-from .auth.auth_group import _is_group_wake_command, auth_group
+from .auth.auth_group import _is_group_wake_command
 from .auth.auth_limit import LimitManager, reserve_auth_limit
-from .auth.auth_plugin import auth_plugin
 from .auth.bot_filter import bot_filter
 from .auth.config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .auth.context import (
@@ -62,28 +55,38 @@ from .auth.exception import (
 )
 from .auth_activation import (
     ActivationContext,
-    ActivationDecision,
     ActivationResult,
     HandlerActivationIndex,
-    matcher_alconna_shortcut_matches_any,
+    classify_matcher_lane,
+    extract_matcher_alconna_shortcuts,
     text_match_candidates,
 )
-from .auth_patch_guard import (
-    validate_handle_event_patch,
+from .auth_event_selector import (
+    HandleEventSelectorDependencies,
+    install_handle_event_selector,
+    uninstall_handle_event_selector,
 )
-from .auth_pipeline import AuthPipeline, AuthPipelineContext, AuthPipelineStage
+from .auth_legacy_fallback import legacy_pure_auth_fallback
+from .auth_pipeline import (
+    AuthPipelineContext,
+    AuthPipelineDependencies,
+    build_auth_pipeline,
+    decision_log_stage,
+)
 from .auth_policy import (
     PolicyContext,
     PolicyDecisionPoint,
-    action_from_snapshot,
-    principal_from_snapshot,
-    raise_for_policy,
-    resource_from_snapshot,
 )
-from .auth_profile import PluginAuthProfile, get_plugin_auth_profile
+from .auth_profile import get_plugin_auth_profile
 from .auth_runtime_config import AUTH_DISPATCH_RUNTIME_CONFIG
 from .auth_side_effect import SideEffectCommit
-from .auth_snapshot import AuthSnapshot, get_or_build_auth_snapshot
+from .auth_snapshot import get_or_build_auth_snapshot
+from .auth_trace import HookTraceRecorder
+from .auth_types import (
+    AuthLaneContext,
+    AuthPreparation,
+    EventDispatchContext,
+)
 
 AUTH_HOOKS_CONCURRENCY_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.hooks_concurrency_limit
 AUTH_DB_CONCURRENCY_LIMIT = AUTH_DISPATCH_RUNTIME_CONFIG.db_concurrency_limit
@@ -171,44 +174,12 @@ _DISPATCH_LANE_SEMAPHORES = {
     if limit > 0
 }
 _DISPATCH_BUDGET_LANES = set(_DISPATCH_LANE_LIMITS)
-_HANDLE_EVENT_PATCHED = False
-_ORIGINAL_HANDLE_EVENT: Callable[..., Awaitable[None]] | None = None
-_ORIGINAL_ADAPTER_HANDLE_EVENTS: dict[object, object] = {}
 _HANDLER_ACTIVATION_INDEX = HandlerActivationIndex()
 _AUTH_PDP = PolicyDecisionPoint()
 _MATCHER_COMMAND_TYPE_CACHE: dict[type[Matcher], bool] = {}
-_MATCHER_COMMAND_LITERAL_CACHE: dict[type[Matcher], tuple[str, ...] | None] = {}
-_MATCHER_ALCONNA_SHORTCUT_CACHE: dict[type[Matcher], tuple[str, ...] | None] = {}
-_MATCHER_RULE_DESCRIPTOR_CACHE: dict[type[Matcher], tuple["RuleDescriptor", ...]] = {}
 _CHECK_MATCHER_ROUTE_CACHE = CacheDict(
     "AUTH_MATCHER_ROUTE_CACHE", expire=MATCHER_ROUTE_PREFILTER_TTL
 )
-
-
-@dataclass(slots=True)
-class AuthPreparation:
-    plugin: PluginInfo
-    user: UserConsole | None
-    profile: PluginAuthProfile
-    snapshot: AuthSnapshot
-    permission_context: PermissionContext
-    policy_context: PolicyContext
-
-
-@dataclass(slots=True)
-class AuthPolicyFlags:
-    should_return_allowed: bool = False
-
-
-@dataclass(slots=True)
-class AuthLaneContext:
-    lane: str = "passive_light"
-    scope_key: str = ""
-    queue_size: int = 0
-
-    @property
-    def is_guaranteed(self) -> bool:
-        return self.lane.startswith("command_") or self.lane == "system"
 
 
 _PREFILTER_STATS = {
@@ -267,162 +238,26 @@ _BOT_WAKE_CANONICAL_PATTERN = re.compile(
     r"^bot_manage\s+bot_switch\s+enable(?:\s+\S+)?$", re.IGNORECASE
 )
 _URL_PATTERN = re.compile(r"(?:https?://|www\.|b23\.tv|t\.cn/)", re.IGNORECASE)
-_PASSIVE_DB_HINTS = (
-    "word_bank",
-    "black_word",
-    "history",
-    "statistics",
-    "sign",
-    "gold",
-    "redbag",
-    "mute",
-    "group",
-    "user",
-    "admin",
-    "ban",
-    "limit",
-    "check",
-)
-_PASSIVE_HTTP_HINTS = (
-    "http",
-    "translate",
-    "bilibili",
-    "music",
-    "comment",
-    "nbnhhsh",
-    "quote",
-    "search",
-    "jitang",
-    "poetry",
-    "anime",
-    "cover",
-)
-_PASSIVE_AI_HINTS = (
-    "chatinter",
-    "dialogue",
-    "ai",
-    "llm",
-    "fudu",
-    "bym_ai",
-)
-_PASSIVE_RENDER_HINTS = (
-    "render",
-    "image",
-    "meme",
-    "memes",
-    "word_cloud",
-    "wordcloud",
-    "pic",
-    "picture",
-    "coser",
-    "luxun",
-)
-
-
-@dataclass(slots=True)
-class EventDispatchContext:
-    event_type: str
-    plain_text: str = ""
-    raw_text: str = ""
-    trie_command_text: str = ""
-    trie_raw_command: str = ""
-    text_candidates: tuple[str, ...] = ()
-    to_me: bool = False
-    has_url: bool = False
-    has_image: bool = False
-    is_command_like: bool = False
-    route_modules: set[str] = field(default_factory=set)
-    ai_route_modules: set[str] = field(default_factory=set)
-    ai_route_heads: set[str] = field(default_factory=set)
-
-
-@dataclass(frozen=True, slots=True)
-class RuleDescriptor:
-    kind: str
-    value: object | None = None
-    flags: int = 0
-    ignorecase: bool = False
-    deterministic_text: bool = False
-    command_like: bool = False
-
-
-class HookTraceRecorder:
-    def __init__(self, start_time: float) -> None:
-        self._start_time = start_time
-        self._enabled = False
-        self._data: dict[str, str] = {}
-
-    def _ensure_enabled(self) -> bool:
-        if self._enabled:
-            return True
-        if time.time() - self._start_time <= WARNING_THRESHOLD:
-            return False
-        self._enabled = True
-        return True
-
-    def set(self, key: str, value: str) -> None:
-        if self._ensure_enabled():
-            self._data[key] = value
-
-    def setdefault(self, key: str, value: str) -> None:
-        if self._ensure_enabled():
-            self._data.setdefault(key, value)
-
-    def contains(self, key: str) -> bool:
-        return key in self._data
-
-    def snapshot(self) -> dict[str, str]:
-        return self._data if self._enabled else {}
-
-
-def _debug_log(message: str, *args, **kwargs) -> None:
-    if is_overloaded():
-        return
-    logger.debug(message, *args, **kwargs)
 
 
 def _normalize_command(command: str) -> str:
     text = command.strip()
     if not text:
         return ""
-
-    # strip leading placeholders like "[引用消息] 撤回"
     text = re.sub(r"^(?:\s*(?:\[[^\]]*]|\<[^>]*>))+\s*", "", text)
-
-    # keep command head: "点歌 [歌名]" -> "点歌", "foo <arg>" -> "foo"
     cut_points = [idx for idx in (text.find("["), text.find("<")) if idx >= 0]
     if cut_points:
         text = text[: min(cut_points)]
-
-    # normalize spacing after trimming placeholders
     text = re.sub(r"\s+", " ", text).strip()
-    # remove trailing template markers left by forms like "foo ?[arg]" / "foo ?*[tags]"
-    text = re.sub(r"(?:\s+[?*]+|[?*]+)$", "", text).strip()
-    return text
-
-
-def _is_bot_wake_command(module: str, text: str | None) -> bool:
-    if "bot_manage" not in (module or ""):
-        return False
-    if not text:
-        return False
-    normalized = re.sub(r"\s+", " ", text.strip())
-    if not normalized:
-        return False
-    return (
-        _BOT_WAKE_COMMAND_PATTERN.match(normalized) is not None
-        or _BOT_WAKE_CANONICAL_PATTERN.match(normalized) is not None
-    )
+    return re.sub(r"(?:\s+[?*]+|[?*]+)$", "", text).strip()
 
 
 def _split_command_variants(command: str) -> tuple[str, ...]:
     text = command.strip()
     if not text:
         return ()
-    # Keep slash-prefixed commands like "/info" as-is.
     if text.startswith("/"):
         return (text,)
-    # "今日运势/抽签/运势" => ("今日运势", "抽签", "运势")
     if "/" in text and " " not in text:
         parts = tuple(part.strip() for part in text.split("/") if part.strip())
         if parts:
@@ -434,12 +269,9 @@ def _is_ambiguous_route_command(command: str) -> bool:
     text = command.strip()
     if not text:
         return True
-    # Keep route-index strict only for literal, deterministic command heads.
     if any(token in text for token in ("?", "*", "|", "(", ")", "^", "$", "re:")):
         return True
-    if "xx" in text.lower():
-        return True
-    return False
+    return "xx" in text.lower()
 
 
 def _extract_commands(extra: PluginExtraData | None) -> tuple[set[str], bool]:
@@ -480,9 +312,7 @@ async def _ensure_route_index():
             except Exception:
                 continue
             command_set, has_ambiguous = _extract_commands(extra_data)
-            if not command_set:
-                continue
-            if has_ambiguous:
+            if not command_set or has_ambiguous:
                 continue
             module = plugin.name
             _ROUTE_MODULES_WITH_COMMANDS.add(module)
@@ -495,7 +325,7 @@ async def _ensure_route_index():
         _ROUTE_INDEX_READY = True
 
 
-def _command_matches(text: str, command: str) -> bool:
+def _route_command_matches(text: str, command: str) -> bool:
     if not text or not command:
         return False
     if text == command:
@@ -503,36 +333,8 @@ def _command_matches(text: str, command: str) -> bool:
     if text.startswith(command):
         if len(text) == len(command):
             return True
-        next_char = text[len(command)]
-        return next_char.isspace()
+        return text[len(command)].isspace()
     return False
-
-
-def _matcher_command_matches(text: str, command: str) -> bool:
-    normalized = command.strip()
-    if not normalized:
-        return False
-    if normalized.startswith("re:"):
-        pattern = normalized.removeprefix("re:").strip()
-        if not pattern:
-            return False
-        try:
-            return re.search(pattern, text) is not None
-        except re.error:
-            return False
-    if _command_matches(text, normalized):
-        return True
-    # CJK command heads often accept compact arguments, e.g. "鲁迅说测试".
-    return text.startswith(normalized) and not normalized[-1].isascii()
-
-
-def _is_regex_like_command_literal(command: str) -> bool:
-    text = command.strip()
-    if not text:
-        return False
-    if text.startswith("re:"):
-        return True
-    return any(token in text for token in ("\\", "(", ")", "[", "]", "|", "^", "$"))
 
 
 def _match_route_modules(text: str) -> set[str]:
@@ -544,31 +346,52 @@ def _match_route_modules(text: str) -> set[str]:
         return set()
     matched_modules: set[str] = set()
     for command in commands:
-        if _command_matches(text, command):
+        if _route_command_matches(text, command):
             modules = _ROUTE_COMMAND_MAP.get(command)
             if modules:
                 matched_modules.update(modules)
     return matched_modules
 
 
-def _match_route_modules_for_event(event: Event) -> set[str]:
-    raw_text = ""
-    with contextlib.suppress(Exception):
-        raw_text = getattr(event, "raw_message", "") or str(event.get_message())
-    matched_modules: set[str] = set()
-    for text in _event_text_candidates(event, None, _event_plain_text(event), raw_text):
-        matched_modules.update(_match_route_modules(text))
-    return matched_modules
+def _is_bot_wake_command(module: str, text: str | None) -> bool:
+    if "bot_manage" not in (module or ""):
+        return False
+    if not text:
+        return False
+    normalized = re.sub(r"\s+", " ", text.strip())
+    if not normalized:
+        return False
+    return (
+        _BOT_WAKE_COMMAND_PATTERN.match(normalized) is not None
+        or _BOT_WAKE_CANONICAL_PATTERN.match(normalized) is not None
+    )
 
 
-def _matcher_module_name(matcher_cls: type[Matcher]) -> str:
-    module = getattr(matcher_cls, "plugin_name", "") or ""
-    if module:
-        return module
-    plugin = getattr(matcher_cls, "plugin", None)
-    if not plugin:
-        return ""
-    return (getattr(plugin, "name", "") or "").strip()
+def _debug_log(message: str, *args, **kwargs) -> None:
+    if is_overloaded():
+        return
+    logger.debug(message, *args, **kwargs)
+
+
+def _is_command_matcher_class(matcher_cls: type[Matcher]) -> bool:
+    if matcher_cls in _MATCHER_COMMAND_TYPE_CACHE:
+        return _MATCHER_COMMAND_TYPE_CACHE[matcher_cls]
+    descriptor = _HANDLER_ACTIVATION_INDEX.descriptor_for(matcher_cls)
+    if descriptor is not None:
+        result = descriptor.command_like
+    else:
+        from .auth_activation import matcher_is_command_like
+
+        result = matcher_is_command_like(matcher_cls)
+    _MATCHER_COMMAND_TYPE_CACHE[matcher_cls] = result
+    return result
+
+
+def _matcher_has_alconna_shortcuts(matcher_cls: type[Matcher]) -> bool:
+    descriptor = _HANDLER_ACTIVATION_INDEX.descriptor_for(matcher_cls)
+    if descriptor is not None:
+        return bool(descriptor.shortcuts)
+    return bool(extract_matcher_alconna_shortcuts(matcher_cls))
 
 
 def _collect_ai_route_modules(event: Event, state: dict | None = None) -> set[str]:
@@ -618,304 +441,6 @@ def _collect_ai_route_heads(event: Event, state: dict | None = None) -> set[str]
 
     if state is not None and result:
         state["_zx_ai_route_heads"] = result
-    return result
-
-
-def _matcher_matches_ai_route_heads(
-    matcher_cls: type[Matcher],
-    ai_route_heads: set[str],
-) -> bool:
-    if not ai_route_heads:
-        return False
-    matcher_commands = _extract_matcher_command_literals(matcher_cls)
-    for command in matcher_commands or ():
-        normalized_command = command.strip().casefold()
-        if not normalized_command:
-            continue
-        for head in ai_route_heads:
-            if not head:
-                continue
-            if _matcher_command_matches(head, normalized_command) or _command_matches(
-                normalized_command, head
-            ):
-                return True
-    shortcuts = _extract_matcher_alconna_shortcuts(matcher_cls) or ()
-    for shortcut in shortcuts:
-        for head in ai_route_heads:
-            if head and _shortcut_matches_text(head, shortcut):
-                return True
-    return False
-
-
-def _rule_call_name(call) -> str:
-    call_type = call.__class__
-    return getattr(call_type, "__name__", "")
-
-
-def _rule_call_module(call) -> str:
-    call_type = call.__class__
-    return getattr(call_type, "__module__", "")
-
-
-def _normalize_rule_string_tuple(value) -> tuple[str, ...]:
-    if isinstance(value, str):
-        return (value,)
-    if isinstance(value, list | tuple | set | frozenset):
-        result = tuple(str(item) for item in value if str(item))
-        return result
-    return ()
-
-
-def _iter_matcher_rule_calls(matcher_cls: type[Matcher]):
-    rule = getattr(matcher_cls, "rule", None)
-    checkers = getattr(rule, "checkers", ()) or ()
-    for checker in checkers:
-        call = getattr(checker, "call", None)
-        if call is not None:
-            yield call
-
-
-def _extract_matcher_rule_descriptors(
-    matcher_cls: type[Matcher],
-) -> tuple[RuleDescriptor, ...]:
-    if matcher_cls in _MATCHER_RULE_DESCRIPTOR_CACHE:
-        return _MATCHER_RULE_DESCRIPTOR_CACHE[matcher_cls]
-
-    descriptors: list[RuleDescriptor] = []
-    if hasattr(matcher_cls, "command"):
-        descriptors.append(RuleDescriptor("matcher_command", command_like=True))
-
-    for call in _iter_matcher_rule_calls(matcher_cls):
-        call_module = _rule_call_module(call)
-        call_name = _rule_call_name(call)
-        if call_module.startswith("nonebot.rule"):
-            if call_name == "CommandRule":
-                descriptors.append(
-                    RuleDescriptor(
-                        "command",
-                        getattr(call, "cmds", ()),
-                        command_like=True,
-                    )
-                )
-            elif call_name == "ShellCommandRule":
-                descriptors.append(
-                    RuleDescriptor(
-                        "shell_command",
-                        getattr(call, "cmds", ()),
-                        command_like=True,
-                    )
-                )
-            elif call_name == "RegexRule":
-                descriptors.append(
-                    RuleDescriptor(
-                        "regex",
-                        getattr(call, "regex", ""),
-                        flags=int(getattr(call, "flags", 0) or 0),
-                        deterministic_text=True,
-                        command_like=True,
-                    )
-                )
-            elif call_name == "StartswithRule":
-                descriptors.append(
-                    RuleDescriptor(
-                        "startswith",
-                        _normalize_rule_string_tuple(getattr(call, "msg", ())),
-                        ignorecase=bool(getattr(call, "ignorecase", False)),
-                        deterministic_text=True,
-                        command_like=True,
-                    )
-                )
-            elif call_name == "EndswithRule":
-                descriptors.append(
-                    RuleDescriptor(
-                        "endswith",
-                        _normalize_rule_string_tuple(getattr(call, "msg", ())),
-                        ignorecase=bool(getattr(call, "ignorecase", False)),
-                        deterministic_text=True,
-                        command_like=True,
-                    )
-                )
-            elif call_name == "FullmatchRule":
-                descriptors.append(
-                    RuleDescriptor(
-                        "fullmatch",
-                        _normalize_rule_string_tuple(getattr(call, "msg", ())),
-                        ignorecase=bool(getattr(call, "ignorecase", False)),
-                        deterministic_text=True,
-                        command_like=True,
-                    )
-                )
-            elif call_name == "KeywordsRule":
-                descriptors.append(
-                    RuleDescriptor(
-                        "keywords",
-                        _normalize_rule_string_tuple(getattr(call, "keywords", ())),
-                        deterministic_text=True,
-                        command_like=True,
-                    )
-                )
-            elif call_name == "IsTypeRule":
-                descriptors.append(
-                    RuleDescriptor("is_type", getattr(call, "types", ()))
-                )
-            elif call_name == "ToMeRule":
-                descriptors.append(RuleDescriptor("to_me"))
-            else:
-                descriptors.append(RuleDescriptor("custom"))
-        elif (
-            call_module.startswith("nonebot_plugin_alconna.rule")
-            and call_name == "AlconnaRule"
-        ):
-            descriptors.append(RuleDescriptor("alconna", command_like=True))
-        else:
-            descriptors.append(RuleDescriptor("custom"))
-
-    result = tuple(descriptors)
-    _MATCHER_RULE_DESCRIPTOR_CACHE[matcher_cls] = result
-    return result
-
-
-def _matcher_has_command_like_rule(matcher_cls: type[Matcher]) -> bool:
-    return any(
-        descriptor.command_like
-        for descriptor in _extract_matcher_rule_descriptors(matcher_cls)
-    )
-
-
-def _matcher_has_deterministic_text_rule(matcher_cls: type[Matcher]) -> bool:
-    return any(
-        descriptor.deterministic_text
-        for descriptor in _extract_matcher_rule_descriptors(matcher_cls)
-    )
-
-
-def _matcher_rule_matches_text(
-    matcher_cls: type[Matcher],
-    event: Event,
-    plain_text: str,
-) -> ActivationDecision:
-    matched_any = False
-    saw_deterministic = False
-    message_text: str | None = None
-    plain_candidates = text_match_candidates(plain_text, event=event)
-
-    for descriptor in _extract_matcher_rule_descriptors(matcher_cls):
-        kind = descriptor.kind
-        if kind == "regex":
-            saw_deterministic = True
-            pattern = str(descriptor.value or "")
-            if not pattern:
-                continue
-            if message_text is None:
-                with contextlib.suppress(Exception):
-                    message_text = str(event.get_message())
-                if message_text is None:
-                    message_text = plain_text
-            try:
-                if re.search(pattern, message_text, descriptor.flags):
-                    matched_any = True
-                else:
-                    return "miss"
-            except re.error:
-                return "unknown"
-        elif kind == "startswith":
-            saw_deterministic = True
-            prefixes = descriptor.value if isinstance(descriptor.value, tuple) else ()
-            candidates = (
-                tuple(item.casefold() for item in prefixes)
-                if descriptor.ignorecase
-                else prefixes
-            )
-            texts = (
-                tuple(item.casefold() for item in plain_candidates)
-                if descriptor.ignorecase
-                else plain_candidates
-            )
-            if any(
-                text.startswith(prefix)
-                for text in texts
-                for prefix in candidates
-                if prefix
-            ):
-                matched_any = True
-            else:
-                return "miss"
-        elif kind == "endswith":
-            saw_deterministic = True
-            suffixes = descriptor.value if isinstance(descriptor.value, tuple) else ()
-            candidates = (
-                tuple(item.casefold() for item in suffixes)
-                if descriptor.ignorecase
-                else suffixes
-            )
-            texts = (
-                tuple(item.casefold() for item in plain_candidates)
-                if descriptor.ignorecase
-                else plain_candidates
-            )
-            if any(
-                text.endswith(suffix)
-                for text in texts
-                for suffix in candidates
-                if suffix
-            ):
-                matched_any = True
-            else:
-                return "miss"
-        elif kind == "fullmatch":
-            saw_deterministic = True
-            values = descriptor.value if isinstance(descriptor.value, tuple) else ()
-            candidates = (
-                tuple(item.casefold() for item in values)
-                if descriptor.ignorecase
-                else values
-            )
-            texts = (
-                tuple(item.casefold() for item in plain_candidates)
-                if descriptor.ignorecase
-                else plain_candidates
-            )
-            if any(text in candidates for text in texts):
-                matched_any = True
-            else:
-                return "miss"
-        elif kind == "keywords":
-            saw_deterministic = True
-            keywords = descriptor.value if isinstance(descriptor.value, tuple) else ()
-            if any(
-                keyword and keyword in text
-                for text in plain_candidates
-                for keyword in keywords
-            ):
-                matched_any = True
-            else:
-                return "miss"
-        elif kind == "is_type":
-            types = descriptor.value
-            if isinstance(types, type):
-                if not isinstance(event, types):
-                    return "miss"
-            elif isinstance(types, tuple) and types:
-                if not isinstance(event, types):
-                    return "miss"
-        elif kind == "to_me":
-            if not getattr(event, "to_me", False):
-                return "miss"
-        elif kind in {"custom", "alconna", "matcher_command"}:
-            return "unknown"
-
-    if matched_any:
-        return "match"
-    if saw_deterministic:
-        return "miss"
-    return "unknown"
-
-
-def _is_command_matcher_class(matcher_cls: type[Matcher]) -> bool:
-    if matcher_cls in _MATCHER_COMMAND_TYPE_CACHE:
-        return _MATCHER_COMMAND_TYPE_CACHE[matcher_cls]
-    result = _matcher_has_command_like_rule(matcher_cls)
-    _MATCHER_COMMAND_TYPE_CACHE[matcher_cls] = result
     return result
 
 
@@ -1174,54 +699,10 @@ def _dispatch_lane_for_matcher(
     matcher_type = getattr(matcher_cls, "type", "") or ""
     if isinstance(matcher_type, str) and matcher_type and matcher_type != event_type:
         return "system"
-    if _is_command_matcher_class(matcher_cls):
-        return _dispatch_command_lane_for_matcher(matcher_cls)
-
-    module = _matcher_module_name(matcher_cls).casefold()
-    if not module:
-        return "passive_light"
-    if any(
-        module == route_module.casefold() for route_module in context.ai_route_modules
-    ):
-        return "passive_ai"
-    if any(hint in module for hint in _PASSIVE_AI_HINTS):
-        return "passive_ai"
-    if any(hint in module for hint in _PASSIVE_RENDER_HINTS):
-        return "passive_render"
-    if any(hint in module for hint in _PASSIVE_HTTP_HINTS):
-        return "passive_http"
-    if _matcher_has_unknown_custom_rule(matcher_cls):
-        return "passive_light"
-    if any(hint in module for hint in _PASSIVE_DB_HINTS):
-        return "passive_db"
-    return "passive_light"
-
-
-def _matcher_has_unknown_custom_rule(matcher_cls: type[Matcher]) -> bool:
-    rule = getattr(matcher_cls, "rule", None)
-    checkers = getattr(rule, "checkers", ()) or ()
-    for checker in checkers:
-        call = getattr(checker, "call", None)
-        if call is None:
-            continue
-        call_module = call.__class__.__module__
-        if call_module.startswith("nonebot.rule") or call_module.startswith(
-            "nonebot_plugin_alconna.rule"
-        ):
-            continue
-        return True
-    return False
-
-
-def _dispatch_command_lane_for_matcher(matcher_cls: type[Matcher]) -> str:
-    if _matcher_has_alconna_shortcuts(matcher_cls):
-        return "command_shortcut"
-    if _matcher_has_deterministic_text_rule(matcher_cls):
-        return "command_regex"
-    commands = _extract_matcher_command_literals(matcher_cls) or ()
-    if any(_is_regex_like_command_literal(command) for command in commands):
-        return "command_regex"
-    return "command_exact"
+    return classify_matcher_lane(
+        matcher_cls,
+        ai_route_modules=context.ai_route_modules,
+    )
 
 
 def _activation_context_from_dispatch(
@@ -1546,457 +1027,31 @@ def _record_prefilter_stats(
     )
 
 
-def _collect_command_literals(value, target: set[str], depth: int = 0) -> None:
-    if depth > 3 or value is None:
-        return
-    if isinstance(value, str):
-        text = value.strip()
-        if text:
-            target.add(text)
-        return
-    if isinstance(value, weakref.ReferenceType):
-        resolved = value()
-        if resolved is not None and resolved is not value:
-            _collect_command_literals(resolved, target, depth + 1)
-        return
-    if isinstance(value, list | tuple | set | frozenset):
-        for item in value:
-            _collect_command_literals(item, target, depth + 1)
-        return
-    if callable(value) and getattr(value, "__self__", None) is not None:
-        with contextlib.suppress(TypeError, RuntimeError, ReferenceError):
-            resolved = value()
-            if resolved is not None and resolved is not value:
-                _collect_command_literals(resolved, target, depth + 1)
-                return
-    for attr in (
-        "name",
-        "path",
-        "aliases",
-        "header_display",
-        "command",
-        "commands",
-        "cmd",
-        "cmds",
-    ):
-        nested = getattr(value, attr, None)
-        if nested is not None and nested is not value:
-            _collect_command_literals(nested, target, depth + 1)
-
-
-def _extract_matcher_command_literals(
-    matcher_cls: type[Matcher],
-) -> tuple[str, ...] | None:
-    if matcher_cls in _MATCHER_COMMAND_LITERAL_CACHE:
-        return _MATCHER_COMMAND_LITERAL_CACHE[matcher_cls]
-
-    commands: set[str] = set()
-    _collect_command_literals(getattr(matcher_cls, "command", None), commands)
-
-    rule = getattr(matcher_cls, "rule", None)
-    checkers = getattr(rule, "checkers", ()) or ()
-    for checker in checkers:
-        call = getattr(checker, "call", None)
-        if call is None:
-            continue
-        for attr in ("cmds", "command", "commands", "cmd"):
-            _collect_command_literals(getattr(call, attr, None), commands)
-
-    if not commands:
-        _MATCHER_COMMAND_LITERAL_CACHE[matcher_cls] = None
-        return None
-
-    sorted_commands = tuple(sorted(commands, key=len, reverse=True))
-    _MATCHER_COMMAND_LITERAL_CACHE[matcher_cls] = sorted_commands
-    return sorted_commands
-
-
-def _collect_alconna_shortcut_strings(command, depth: int = 0) -> set[str]:
-    shortcuts: set[str] = set()
-    if command is None or depth > 4:
-        return shortcuts
-    if isinstance(command, weakref.ReferenceType):
-        resolved = command()
-        if resolved is not None and resolved is not command:
-            return _collect_alconna_shortcut_strings(resolved, depth + 1)
-        return shortcuts
-    get_shortcuts = getattr(command, "get_shortcuts", None)
-    if callable(get_shortcuts):
-        with contextlib.suppress(Exception):
-            raw_shortcuts = get_shortcuts()
-            if isinstance(raw_shortcuts, list | tuple | set | frozenset):
-                for shortcut in raw_shortcuts:
-                    if isinstance(shortcut, str) and shortcut.strip():
-                        shortcuts.add(shortcut.strip())
-    elif callable(command):
-        with contextlib.suppress(Exception):
-            resolved = command()
-            if resolved is not None and resolved is not command:
-                shortcuts.update(_collect_alconna_shortcut_strings(resolved, depth + 1))
-                return shortcuts
-
-    formatter = getattr(command, "formatter", None)
-    data = getattr(formatter, "data", None)
-    if isinstance(data, dict):
-        for trace in data.values():
-            trace_shortcuts = getattr(trace, "shortcuts", None)
-            if not isinstance(trace_shortcuts, dict):
-                continue
-            for shortcut in trace_shortcuts:
-                if isinstance(shortcut, str) and shortcut.strip():
-                    shortcuts.add(shortcut.strip())
-    with contextlib.suppress(Exception):
-        from arclet.alconna import command_manager
-
-        for shortcut_obj in command_manager.get_shortcut(command).values():  # type: ignore[arg-type]
-            origin_key = getattr(shortcut_obj, "origin_key", None)
-            if isinstance(origin_key, str) and origin_key.strip():
-                shortcuts.add(origin_key.strip())
-    for attr in ("command", "commands", "base", "formatter", "source"):
-        nested = getattr(command, attr, None)
-        if nested is not None and nested is not command:
-            shortcuts.update(_collect_alconna_shortcut_strings(nested, depth + 1))
-    return shortcuts
-
-
-def _extract_matcher_alconna_shortcuts(
-    matcher_cls: type[Matcher],
-) -> tuple[str, ...] | None:
-    if matcher_cls in _MATCHER_ALCONNA_SHORTCUT_CACHE:
-        return _MATCHER_ALCONNA_SHORTCUT_CACHE[matcher_cls]
-
-    shortcuts: set[str] = set()
-    for attr in ("command", "_rule", "rule"):
-        shortcuts.update(
-            _collect_alconna_shortcut_strings(getattr(matcher_cls, attr, None))
-        )
-    rule = getattr(matcher_cls, "rule", None)
-    checkers = getattr(rule, "checkers", ()) or ()
-    for checker in checkers:
-        call = getattr(checker, "call", None)
-        if call is None:
-            continue
-        call_type = call.__class__
-        call_module = getattr(call_type, "__module__", "")
-        call_name = getattr(call_type, "__name__", "")
-        if not (
-            call_module.startswith("nonebot_plugin_alconna.rule")
-            and call_name == "AlconnaRule"
-        ):
-            continue
-
-        command_ref = getattr(call, "command", None)
-        command = None
-        if isinstance(command_ref, weakref.ReferenceType):
-            with contextlib.suppress(Exception):
-                command = command_ref()
-        elif callable(command_ref):
-            with contextlib.suppress(Exception):
-                command = command_ref()
-        else:
-            command = command_ref
-        shortcuts.update(_collect_alconna_shortcut_strings(command))
-
-    if not shortcuts:
-        _MATCHER_ALCONNA_SHORTCUT_CACHE[matcher_cls] = None
-        return None
-
-    result = tuple(sorted(shortcuts, key=len, reverse=True))
-    _MATCHER_ALCONNA_SHORTCUT_CACHE[matcher_cls] = result
-    return result
-
-
-def _matcher_has_alconna_shortcuts(matcher_cls: type[Matcher]) -> bool:
-    return bool(_extract_matcher_alconna_shortcuts(matcher_cls))
-
-
-def _normalize_shortcut_pattern(shortcut: str) -> str:
-    text = shortcut.strip()
-    if not text:
-        return ""
-    text = re.sub(r"^\[(?:[^\]]*)\]\s*", "", text)
-    text = re.sub(r"\s*\.\.\.args?$", "", text).strip()
-    text = re.sub(r"\s*\.\.\.$", "", text).strip()
-    text = re.sub(r"^\^", "", text)
-    return text
-
-
-def _is_regex_like_shortcut(pattern: str) -> bool:
-    return any(token in pattern for token in ("\\", "(", ")", "[", "]", "|", "^", "$"))
-
-
-def _placeholder_shortcut_matches(text: str, pattern: str) -> bool:
-    if "{" not in pattern or "}" not in pattern:
-        return False
-    pieces: list[str] = []
-    last = 0
-    for match in re.finditer(r"\{[^{}]+\}", pattern):
-        pieces.append(re.escape(pattern[last : match.start()]))
-        pieces.append(r"\S+")
-        last = match.end()
-    if not pieces:
-        return False
-    pieces.append(re.escape(pattern[last:]))
-    try:
-        return re.match(rf"^{''.join(pieces)}(?:\s|$)", text) is not None
-    except re.error:
-        return False
-
-
-def _shortcut_matches_text(text: str, shortcut: str) -> bool:
-    pattern = _normalize_shortcut_pattern(shortcut)
-    if not pattern:
-        return False
-    if _placeholder_shortcut_matches(text, pattern):
-        return True
-    if _is_regex_like_shortcut(pattern):
-        try:
-            return re.match(pattern, text) is not None
-        except re.error:
-            return False
-    return _matcher_command_matches(text, pattern)
-
-
-def _matcher_alconna_shortcuts_for(
-    matcher_cls: type[Matcher],
-) -> tuple[str, ...] | None:
-    return _extract_matcher_alconna_shortcuts(matcher_cls)
-
-
-def _matcher_alconna_shortcut_matches(
-    matcher_cls: type[Matcher], text: str
-) -> ActivationDecision:
-    return matcher_alconna_shortcut_matches_any(
-        _matcher_alconna_shortcuts_for(matcher_cls),
-        (text,),
-    )
-
-
-def _matcher_alconna_shortcut_matches_any(
-    matcher_cls: type[Matcher],
-    texts: tuple[str, ...],
-) -> ActivationDecision:
-    return matcher_alconna_shortcut_matches_any(
-        _matcher_alconna_shortcuts_for(matcher_cls),
-        texts,
-    )
-
-
 _MAX_MATCHER_CACHE = 512
 
 
-async def _patched_handle_event(bot: Bot, event: Event) -> None:
-    show_log = True
-    escape_tag = getattr(nb_message, "escape_tag")
-    logger_ = getattr(nb_message, "logger")
-    no_log_exception = getattr(nb_message, "NoLogException")
-
-    log_msg = f"<m>{escape_tag(bot.type)} {escape_tag(bot.self_id)}</m> | "
-    try:
-        log_msg += event.get_log_string()
-    except no_log_exception:
-        show_log = False
-    if show_log:
-        logger_.opt(colors=True).success(log_msg)
-
-    state = {}
-    dependency_cache = {}
-    async_exit_stack = getattr(nb_message, "AsyncExitStack")
-    apply_event_preprocessors = getattr(nb_message, "_apply_event_preprocessors")
-    apply_event_postprocessors = getattr(nb_message, "_apply_event_postprocessors")
-    trie_rule = getattr(nb_message, "TrieRule")
-    matchers = getattr(nb_message, "matchers")
-    catch = getattr(nb_message, "catch")
-    stop_propagation = getattr(nb_message, "StopPropagation")
-    handle_exception = getattr(nb_message, "_handle_exception")
-    anyio_mod = getattr(nb_message, "anyio")
-    run_coro_with_shield = getattr(nb_message, "run_coro_with_shield")
-
-    async with async_exit_stack() as stack:
-        if not await apply_event_preprocessors(
-            bot=bot,
-            event=event,
-            state=state,
-            stack=stack,
-            dependency_cache=dependency_cache,
-        ):
-            return
-
-        try:
-            trie_rule.get_value(bot, event, state)
-        except Exception as e:
-            logger_.opt(colors=True, exception=e).warning(
-                "Error while parsing command for event"
-            )
-        _prepare_handle_event_state(event, state)
-        dispatch_context = await _build_dispatch_context(event, state)
-        activation_context = _activation_context_from_dispatch(
-            dispatch_context,
-            event,
-        )
-        activation_available = True
-        try:
-            _HANDLER_ACTIVATION_INDEX.ensure_fresh(matchers)
-        except Exception as exc:
-            activation_available = False
-            logger.warning(
-                "HandlerActivationIndex 构建失败，回退到旧 matcher 选择逻辑",
-                LOGGER_COMMAND,
-                e=exc,
-            )
-
-        break_flag = False
-
-        def _handle_stop_propagation(_exc_group) -> None:
-            nonlocal break_flag
-            break_flag = True
-            logger_.debug("Stop event propagation")
-
-        for priority in sorted(matchers.keys()):
-            if break_flag:
-                break
-
-            if show_log:
-                logger_.debug(f"Checking for matchers in priority {priority}...")
-
-            if not (priority_matchers := matchers[priority]):
-                continue
-
-            with catch(
-                {
-                    stop_propagation: _handle_stop_propagation,
-                    Exception: handle_exception(
-                        "<r><bg #f8bbd0>Error when checking Matcher.</bg #f8bbd0></r>"
-                    ),
-                }
-            ):
-                priority_budget = _new_dispatch_budget()
-                if activation_available:
-                    try:
-                        activation_result = _HANDLER_ACTIVATION_INDEX.select_priority(
-                            priority,
-                            priority_matchers,
-                            activation_context,
-                            priority_budget,
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "HandlerActivationIndex 选择失败，当前 priority 回退",
-                            LOGGER_COMMAND,
-                            e=exc,
-                        )
-                        activation_result = None
-                else:
-                    activation_result = None
-
-                if activation_result is not None:
-                    selected_matchers = activation_result.selected
-                    _record_activation_result(activation_result)
-                    _debug_activation_shadow(
-                        priority=priority,
-                        activation_result=activation_result,
-                        context=dispatch_context,
-                    )
-                    if (
-                        activation_result.candidate_count
-                        > AUTH_OVERLOAD_SELECTED_THRESHOLD
-                    ):
-                        signal_overload(3.0)
-                else:
-                    selected_matchers = priority_matchers
-
-                async with anyio_mod.create_task_group() as tg:
-                    for matcher in selected_matchers:
-                        lane = _dispatch_lane_for_matcher(matcher, dispatch_context)
-                        if activation_result is None:
-                            descriptor = _HANDLER_ACTIVATION_INDEX.descriptor_for(
-                                matcher
-                            )
-                            if descriptor is not None:
-                                single_budget = dict(priority_budget)
-                                try:
-                                    single_result = (
-                                        _HANDLER_ACTIVATION_INDEX.select_priority(
-                                            priority,
-                                            [matcher],
-                                            activation_context,
-                                            single_budget,
-                                        )
-                                    )
-                                except Exception:
-                                    single_result = None
-                                if single_result is not None:
-                                    _record_activation_result(single_result)
-                                    _debug_activation_shadow(
-                                        priority=priority,
-                                        activation_result=single_result,
-                                        context=dispatch_context,
-                                    )
-                                    _merge_dispatch_budget(
-                                        priority_budget,
-                                        single_budget,
-                                    )
-                                    if not single_result.selected:
-                                        continue
-                        matcher_state = _build_matcher_state(state)
-                        tg.start_soon(
-                            run_coro_with_shield,
-                            _run_selected_matcher(
-                                matcher,
-                                bot,
-                                event,
-                                matcher_state,
-                                stack,
-                                dependency_cache,
-                                lane,
-                            ),
-                        )
-
-        if show_log:
-            logger_.debug("Checking for matchers completed")
-
-        await apply_event_postprocessors(bot, event, state, stack, dependency_cache)
+_SELECTOR_DEPS = HandleEventSelectorDependencies(
+    activation_index=_HANDLER_ACTIVATION_INDEX,
+    overload_selected_threshold=AUTH_OVERLOAD_SELECTED_THRESHOLD,
+    prepare_handle_event_state=_prepare_handle_event_state,
+    build_dispatch_context=_build_dispatch_context,
+    activation_context_from_dispatch=_activation_context_from_dispatch,
+    new_dispatch_budget=_new_dispatch_budget,
+    dispatch_lane_for_matcher=_dispatch_lane_for_matcher,
+    record_activation_result=_record_activation_result,
+    debug_activation_shadow=_debug_activation_shadow,
+    merge_dispatch_budget=_merge_dispatch_budget,
+    build_matcher_state=_build_matcher_state,
+    run_selected_matcher=_run_selected_matcher,
+)
 
 
 def _install_handle_event_selector() -> None:
-    global _HANDLE_EVENT_PATCHED, _ORIGINAL_HANDLE_EVENT
-    if _HANDLE_EVENT_PATCHED:
-        return
-    guard = validate_handle_event_patch()
-    if not guard.ok:
-        logger.warning(
-            f"权限事件分发选择器 patch 未安装，回退 NoneBot 原生分发: {guard.reason}",
-            LOGGER_COMMAND,
-        )
-        return
-    _ORIGINAL_HANDLE_EVENT = nb_message.handle_event
-    nb_message.handle_event = _patched_handle_event  # type: ignore[assignment]
-    for module_name in (
-        "nonebot.adapters.onebot.v11.bot",
-        "nonebot.adapters.onebot.v12.bot",
-        "onebug.mixin.process",
-    ):
-        with contextlib.suppress(Exception):
-            module = importlib.import_module(module_name)
-            current = getattr(module, "handle_event", None)
-            if current is not None:
-                _ORIGINAL_ADAPTER_HANDLE_EVENTS[module] = current
-                setattr(module, "handle_event", _patched_handle_event)
-    _HANDLE_EVENT_PATCHED = True
+    install_handle_event_selector(_SELECTOR_DEPS)
 
 
 def _uninstall_handle_event_selector() -> None:
-    global _HANDLE_EVENT_PATCHED, _ORIGINAL_HANDLE_EVENT
-    if not _HANDLE_EVENT_PATCHED:
-        return
-    if _ORIGINAL_HANDLE_EVENT is not None:
-        nb_message.handle_event = _ORIGINAL_HANDLE_EVENT  # type: ignore[assignment]
-    for module, original in list(_ORIGINAL_ADAPTER_HANDLE_EVENTS.items()):
-        with contextlib.suppress(Exception):
-            setattr(module, "handle_event", original)
-    _ORIGINAL_ADAPTER_HANDLE_EVENTS.clear()
-    _HANDLE_EVENT_PATCHED = False
-    _ORIGINAL_HANDLE_EVENT = None
+    uninstall_handle_event_selector()
 
 
 async def _get_route_context(text: str, event_cache: dict | None) -> set[str]:
@@ -2013,6 +1068,15 @@ async def _get_route_context(text: str, event_cache: dict | None) -> set[str]:
     return matched
 
 
+def _get_auth_route_precheck_deps() -> dict:
+    return {
+        "route_modules_with_commands": _ROUTE_MODULES_WITH_COMMANDS,
+        "get_route_context": _get_route_context,
+        "is_command_matcher_class": _is_command_matcher_class,
+        "matcher_has_alconna_shortcuts": _matcher_has_alconna_shortcuts,
+    }
+
+
 async def _cache_sweep_loop() -> None:
     while True:
         await asyncio.sleep(CACHE_SWEEP_INTERVAL)
@@ -2020,12 +1084,7 @@ async def _cache_sweep_loop() -> None:
             if EVENT_CACHE is not None:
                 _ = len(EVENT_CACHE)
             _ = len(_CHECK_MATCHER_ROUTE_CACHE)
-            for _mc in (
-                _MATCHER_COMMAND_TYPE_CACHE,
-                _MATCHER_COMMAND_LITERAL_CACHE,
-                _MATCHER_ALCONNA_SHORTCUT_CACHE,
-                _MATCHER_RULE_DESCRIPTOR_CACHE,
-            ):
+            for _mc in (_MATCHER_COMMAND_TYPE_CACHE,):
                 if len(_mc) > _MAX_MATCHER_CACHE:
                     _mc.clear()
 
@@ -2372,35 +1431,6 @@ async def _leave_hooks_section():
     HOOKS_ACTIVE_COUNT = max(HOOKS_ACTIVE_COUNT - 1, 0)
 
 
-async def route_precheck(
-    matcher: Matcher,
-    context: EventContext,
-) -> bool:
-    module = matcher.plugin_name or ""
-    if not module:
-        return False
-    if _is_hidden_plugin(matcher):
-        return False
-    if not _is_command_matcher_class(type(matcher)):
-        return False
-
-    route_modules = context.route_modules if context.route_modules_loaded else None
-    if route_modules is None:
-        route_modules = await _get_route_context(
-            context.plain_text,
-            context.event_cache,
-        )
-        set_route_modules(None, context, route_modules)
-
-    if module in _ROUTE_MODULES_WITH_COMMANDS and module not in route_modules:
-        if _matcher_has_alconna_shortcuts(type(matcher)):
-            return False
-        if context.event_cache is not None:
-            context.event_cache["route_skip"] = True
-        return True
-    return False
-
-
 async def _prepare_auth_state(
     *,
     module: str,
@@ -2486,64 +1516,6 @@ async def _prepare_auth_state(
     )
 
 
-def _apply_policy_precheck(
-    prep: AuthPreparation,
-    hook_recorder: HookTraceRecorder,
-) -> AuthPolicyFlags:
-    flags = AuthPolicyFlags()
-    snapshot = prep.snapshot
-    decision = _AUTH_PDP.decide(
-        principal_from_snapshot(snapshot),
-        action_from_snapshot(snapshot),
-        resource_from_snapshot(snapshot),
-        prep.policy_context,
-    )
-    if decision.deferred:
-        hook_recorder.set("auth_core", f"policy:{decision.reason}")
-    if decision.denied:
-        raise_for_policy(decision, _policy_skip_message(decision.reason))
-    if decision.allowed and decision.reason in {
-        "hidden_plugin_skip_auth",
-        "route_miss_skip_checks",
-    }:
-        flags.should_return_allowed = True
-        return flags
-
-    bot_decision = _AUTH_PDP.decide_bot(prep.policy_context)
-    if bot_decision.allowed:
-        hook_recorder.set("auth_bot", "policy")
-    elif bot_decision.denied:
-        raise_for_policy(bot_decision, _policy_skip_message(bot_decision.reason))
-    elif bot_decision.deferred:
-        raise PermissionExemption(f"auth_bot deferred: {bot_decision.reason}")
-
-    group_decision = _AUTH_PDP.decide_group(prep.policy_context)
-    if group_decision.allowed or group_decision.skipped:
-        hook_recorder.set("auth_group", f"policy:{group_decision.reason}")
-    elif group_decision.denied:
-        raise_for_policy(group_decision, _policy_skip_message(group_decision.reason))
-    elif group_decision.deferred:
-        raise PermissionExemption(f"auth_group deferred: {group_decision.reason}")
-
-    plugin_decision = _AUTH_PDP.decide_plugin(prep.policy_context)
-    if plugin_decision.allowed or plugin_decision.skipped:
-        hook_recorder.set("auth_plugin", f"policy:{plugin_decision.reason}")
-    elif plugin_decision.denied:
-        raise_for_policy(plugin_decision, _policy_skip_message(plugin_decision.reason))
-    else:
-        raise PermissionExemption(f"auth_plugin deferred: {plugin_decision.reason}")
-
-    admin_decision = _AUTH_PDP.decide_admin(prep.policy_context)
-    if admin_decision.allowed or admin_decision.skipped:
-        hook_recorder.set("auth_admin", f"policy:{admin_decision.reason}")
-    elif admin_decision.denied:
-        raise_for_policy(admin_decision, _policy_skip_message(admin_decision.reason))
-    else:
-        raise PermissionExemption(f"auth_admin deferred: {admin_decision.reason}")
-
-    return flags
-
-
 async def _prepare_auth_state_with_fallback(
     *,
     module: str,
@@ -2582,46 +1554,6 @@ async def _prepare_auth_state_with_fallback(
         state=state,
         session=session,
         allow_cache_load=True,
-    )
-
-
-async def _legacy_pure_auth_fallback(
-    *,
-    prep: AuthPreparation,
-    event: Event,
-    session: Uninfo,
-    text: str,
-) -> None:
-    """Compatibility fallback for cache-deferred pure permission checks."""
-    await auth_bot(
-        prep.plugin,
-        prep.snapshot.context.bot_id,
-        prep.snapshot.bot_data,
-        skip_fetch=prep.snapshot.bot_data is not None,
-        allow_sleep_bypass=prep.policy_context.allow_sleep_bypass,
-        context=prep.permission_context,
-    )
-    await auth_group(
-        prep.plugin,
-        prep.snapshot.group,
-        text,
-        prep.snapshot.group_id,
-        context=prep.permission_context,
-    )
-    await auth_plugin(
-        prep.plugin,
-        prep.snapshot.group,
-        session,
-        event,
-        context=prep.permission_context,
-        user_id=prep.snapshot.user_id,
-    )
-    await auth_admin(
-        prep.plugin,
-        session,
-        cached_levels=prep.snapshot.admin_levels,
-        context=prep.permission_context,
-        entity=prep.snapshot.context.entity,
     )
 
 
@@ -2771,225 +1703,6 @@ async def _run_auth_hooks(
     return time.time() - hooks_start
 
 
-async def _auth_pipeline_route_gate(ctx: AuthPipelineContext) -> None:
-    if not ctx.module:
-        ctx.stop(allowed=True, effect="allow", reason="empty_module")
-        return
-
-    ctx.side_effect_lock = ctx.side_effect_cache.lock_for(ctx.module)
-    await ctx.side_effect_lock.acquire()
-    ctx.entered_side_effect_lock = True
-
-    side_effect_cache = ctx.side_effect_cache
-    if side_effect_cache is None:
-        side_effect_cache = get_permission_side_effect_cache(
-            state=ctx.state,
-            event_cache=ctx.event_cache,
-        )
-        ctx.side_effect_cache = side_effect_cache
-    auth_result_cache = side_effect_cache.auth_results
-    ctx.auth_result_cache = auth_result_cache
-    cached_result = auth_result_cache.get(ctx.module)
-    if cached_result is not None:
-        allowed, reason = cached_result
-        if not allowed:
-            ctx.decision_effect = "skip"
-            ctx.decision_reason = reason or "auth_cached_skip"
-            raise SkipPluginException(reason or "auth cached skip")
-        ctx.stop(allowed=True, effect="allow", reason="auth_cached_allow")
-        return
-
-    if _is_hidden_plugin(ctx.matcher):
-        ctx.stop(allowed=True, effect="allow", reason="hidden_plugin")
-        return
-    if ctx.event_cache is not None and ctx.event_cache.get("ban_state") is True:
-        ctx.decision_effect = "skip"
-        ctx.decision_reason = "ban_cached"
-        raise SkipPluginException("user or group banned (cached)")
-
-    if ctx.route_modules is None:
-        ctx.route_modules = await _get_route_context(ctx.text, ctx.event_cache)
-        set_route_modules(ctx.state, ctx.event_context, ctx.route_modules)
-    ctx.route_skip_checks = (
-        ctx.is_command_matcher
-        and ctx.module in _ROUTE_MODULES_WITH_COMMANDS
-        and ctx.module not in ctx.route_modules
-        and not _matcher_has_alconna_shortcuts(type(ctx.matcher))
-    )
-    if ctx.route_skip_checks:
-        if ctx.event_cache is not None:
-            ctx.event_cache["route_skip"] = True
-        ctx.hook_recorder.set("route", "miss")
-        ctx.stop(allowed=True, effect="allow", reason="route_miss_skip_checks")
-
-
-async def _auth_pipeline_prepare_snapshot(ctx: AuthPipelineContext) -> None:
-    ctx.prep = await _prepare_auth_state_with_fallback(
-        module=ctx.module,
-        context=ctx.event_context,
-        bot=ctx.bot,
-        event_cache=ctx.event_cache,
-        route_skip_checks=ctx.route_skip_checks,
-        skip_ban=ctx.skip_ban,
-        hook_recorder=ctx.hook_recorder,
-        state=ctx.state,
-        session=ctx.session,
-    )
-    if ctx.prep is None:
-        ctx.stop(allowed=True, effect="allow", reason="prepare_timeout_allow")
-
-
-async def _auth_pipeline_policy_precheck(ctx: AuthPipelineContext) -> None:
-    try:
-        ctx.flags = _apply_policy_precheck(ctx.prep, ctx.hook_recorder)
-    except PermissionExemption as exc:
-        ctx.hook_recorder.set("policy_fallback", str(exc))
-        ctx.prep = await _prepare_auth_state(
-            module=ctx.module,
-            context=ctx.event_context,
-            bot=ctx.bot,
-            event_cache=ctx.event_cache,
-            route_skip_checks=ctx.route_skip_checks,
-            skip_ban=ctx.skip_ban,
-            hook_recorder=ctx.hook_recorder,
-            state=ctx.state,
-            session=ctx.session,
-            allow_cache_load=True,
-        )
-        if ctx.prep is None:
-            ctx.stop(allowed=True, effect="allow", reason="policy_fallback_timeout")
-            return
-        try:
-            ctx.flags = _apply_policy_precheck(ctx.prep, ctx.hook_recorder)
-        except PermissionExemption as fallback_exc:
-            ctx.hook_recorder.set("legacy_pure_auth", str(fallback_exc))
-            await _legacy_pure_auth_fallback(
-                prep=ctx.prep,
-                event=ctx.event,
-                session=ctx.session,
-                text=ctx.text,
-            )
-            ctx.flags = AuthPolicyFlags()
-    if ctx.flags.should_return_allowed:
-        ctx.stop(allowed=True, effect="allow", reason="policy_precheck_allow")
-        return
-    await _check_ban_from_snapshot(
-        prep=ctx.prep,
-        matcher=ctx.matcher,
-        event_cache=ctx.event_cache,
-        skip_ban=ctx.skip_ban,
-        hook_recorder=ctx.hook_recorder,
-        session=ctx.session,
-    )
-    ctx.cost_gold = await _resolve_cost_gold(
-        prep=ctx.prep,
-        route_skip_checks=ctx.route_skip_checks,
-        hook_recorder=ctx.hook_recorder,
-        session=ctx.session,
-    )
-
-
-async def _auth_pipeline_legacy_hook_adapter(ctx: AuthPipelineContext) -> None:
-    bot_filter(ctx.session, context=ctx.prep.permission_context)
-    ctx.hooks_time = await _run_auth_hooks(
-        prep=ctx.prep,
-        session=ctx.session,
-        event_cache=ctx.event_cache,
-        route_skip_checks=ctx.route_skip_checks,
-        lane_context=ctx.lane_context,
-        hook_recorder=ctx.hook_recorder,
-        side_effect_commit=ctx.side_effect_commit,
-    )
-    ctx.auth_allowed = True
-    ctx.decision_effect = "allow"
-    ctx.decision_reason = "auth_passed"
-
-
-async def _auth_pipeline_side_effect_commit(ctx: AuthPipelineContext) -> None:
-    if ctx.ignore_flag:
-        await ctx.side_effect_commit.rollback_all("auth_ignored")
-        return
-    if ctx.cost_gold <= 0:
-        if ctx.side_effect_commit.has_pending:
-            ctx.side_effect_cache.commits[ctx.module] = ctx.side_effect_commit
-        return
-    gold_start = time.time()
-    try:
-        reservation = await reserve_gold(
-            ctx.entity.user_id,
-            ctx.module,
-            ctx.cost_gold,
-            ctx.session,
-        )
-        await ctx.side_effect_commit.reserve_gold(
-            reservation,
-            amount=ctx.cost_gold,
-            metadata={"module": ctx.module},
-        )
-        ctx.hook_recorder.set("reserve_gold", f"{time.time() - gold_start:.3f}s")
-    except InsufficientGold:
-        logger.debug(
-            f"预扣金币失败，金币不足: {ctx.module}",
-            LOGGER_COMMAND,
-            session=ctx.session,
-        )
-        raise SkipPluginException(f"{ctx.module} 金币不足，已取消执行...") from None
-    except asyncio.TimeoutError:
-        logger.error(
-            f"预扣金币超时，模块: {ctx.module}",
-            LOGGER_COMMAND,
-            session=ctx.session,
-        )
-        raise
-    ctx.side_effect_cache.commits[ctx.module] = ctx.side_effect_commit
-
-
-async def _auth_pipeline_decision_log(ctx: AuthPipelineContext) -> None:
-    has_deferred_commit = (
-        ctx.side_effect_commit is not None and ctx.side_effect_commit.has_pending
-    )
-    if (
-        ctx.auth_result_cache is not None
-        and ctx.auth_allowed is not None
-        and not has_deferred_commit
-    ):
-        ctx.auth_result_cache[ctx.module] = (
-            ctx.auth_allowed,
-            None if ctx.auth_allowed else ctx.decision_reason,
-        )
-    side_effect_state = (
-        ctx.side_effect_commit.snapshot()
-        if ctx.side_effect_commit is not None
-        else None
-    )
-    shadow_effect = None
-    shadow_reason = None
-    if has_deferred_commit:
-        shadow_effect = "defer"
-        shadow_reason = "side_effect_pending:" + ",".join(
-            ctx.side_effect_commit.pending_kinds
-        )
-    if ctx.entered_side_effect_lock and ctx.side_effect_lock is not None:
-        with contextlib.suppress(Exception):
-            ctx.side_effect_lock.release()
-        ctx.entered_side_effect_lock = False
-    latency_ms = (time.time() - ctx.start_time) * 1000
-    await append_auth_decision_log(
-        bot_id=ctx.event_context.bot_id,
-        platform=ctx.event_context.platform,
-        group_id=ctx.entity.group_id,
-        user_id=ctx.entity.user_id,
-        module=ctx.module,
-        effect=ctx.decision_effect or "error",
-        reason=ctx.decision_reason,
-        shadow_effect=shadow_effect,
-        shadow_reason=shadow_reason,
-        side_effect_state=side_effect_state,
-        latency_ms=latency_ms,
-        overloaded=is_overloaded(),
-    )
-
-
 async def build_auth_decision_backpressure_report(
     *,
     hours: float = 24.0,
@@ -2997,15 +1710,28 @@ async def build_auth_decision_backpressure_report(
     return await build_auth_observability_report(hours=hours)
 
 
-_AUTH_PIPELINE = AuthPipeline(
-    [
-        AuthPipelineStage("route_gate", _auth_pipeline_route_gate),
-        AuthPipelineStage("prepare_snapshot", _auth_pipeline_prepare_snapshot),
-        AuthPipelineStage("policy_precheck", _auth_pipeline_policy_precheck),
-        AuthPipelineStage("legacy_hook_adapter", _auth_pipeline_legacy_hook_adapter),
-        AuthPipelineStage("side_effect_commit", _auth_pipeline_side_effect_commit),
-    ]
+_AUTH_PIPELINE_DEPS = AuthPipelineDependencies(
+    route_modules_with_commands=_ROUTE_MODULES_WITH_COMMANDS,
+    get_route_context=_get_route_context,
+    is_hidden_plugin=_is_hidden_plugin,
+    is_command_matcher_class=_is_command_matcher_class,
+    matcher_has_alconna_shortcuts=_matcher_has_alconna_shortcuts,
+    prepare_auth_state_with_fallback=_prepare_auth_state_with_fallback,
+    prepare_auth_state=_prepare_auth_state,
+    policy_decision_point=_AUTH_PDP,
+    policy_skip_message=_policy_skip_message,
+    legacy_pure_auth_fallback=legacy_pure_auth_fallback,
+    check_ban_from_snapshot=_check_ban_from_snapshot,
+    resolve_cost_gold=_resolve_cost_gold,
+    run_auth_hooks=_run_auth_hooks,
+    bot_filter=bot_filter,
+    reserve_gold=reserve_gold,
+    append_auth_decision_log=append_auth_decision_log,
+    insufficient_gold_error=InsufficientGold,
+    logger=logger,
+    log_command=LOGGER_COMMAND,
 )
+_AUTH_PIPELINE = build_auth_pipeline(_AUTH_PIPELINE_DEPS)
 
 
 async def auth(
@@ -3102,7 +1828,7 @@ async def auth(
         await side_effect_commit.rollback_all("auth_exception")
         raise
     finally:
-        await _auth_pipeline_decision_log(pipeline_context)
+        await decision_log_stage(pipeline_context, _AUTH_PIPELINE_DEPS)
 
     # 记录总执行时间
     total_time = time.time() - start_time

@@ -390,6 +390,52 @@ def matcher_has_custom_rule(matcher_cls: type[Matcher]) -> bool:
     return False
 
 
+def matcher_is_command_like(matcher_cls: type[Matcher]) -> bool:
+    rules = extract_matcher_rule_descriptors(matcher_cls)
+    if any(rule.command_like for rule in rules):
+        return True
+    if hasattr(matcher_cls, "command"):
+        return True
+    return extract_matcher_alconna_shortcuts(matcher_cls) is not None
+
+
+def matcher_has_deterministic_text_rule(matcher_cls: type[Matcher]) -> bool:
+    return any(
+        rule.deterministic_text
+        for rule in extract_matcher_rule_descriptors(matcher_cls)
+    )
+
+
+def classify_matcher_lane(
+    matcher_cls: type[Matcher],
+    *,
+    ai_route_modules: set[str] | None = None,
+) -> ActivationLane:
+    module = matcher_module_name(matcher_cls)
+    if ai_route_modules and any(
+        module.casefold() == route_module.casefold()
+        for route_module in ai_route_modules
+    ):
+        return "passive_ai"
+    rules = extract_matcher_rule_descriptors(matcher_cls)
+    command_like = any(rule.command_like for rule in rules)
+    deterministic = any(rule.deterministic_text for rule in rules)
+    if hasattr(matcher_cls, "command"):
+        command_like = True
+    commands = extract_matcher_command_literals(matcher_cls) or ()
+    shortcuts = extract_matcher_alconna_shortcuts(matcher_cls)
+    if shortcuts is not None:
+        command_like = True
+    return classify_lane(
+        matcher_cls,
+        module=module,
+        command_like=command_like,
+        deterministic_text=deterministic,
+        shortcuts=shortcuts,
+        commands=commands,
+    )
+
+
 def extract_matcher_rule_descriptors(
     matcher_cls: type[Matcher],
 ) -> tuple[ActivationRuleDescriptor, ...]:
@@ -1053,10 +1099,14 @@ __all__ = [
     "ActivationRuleDescriptor",
     "HandlerActivationIndex",
     "HandlerDescriptor",
+    "classify_matcher_lane",
     "command_matches",
     "extract_matcher_alconna_shortcuts",
     "extract_matcher_command_literals",
     "extract_matcher_rule_descriptors",
     "matcher_command_matches",
+    "matcher_has_custom_rule",
+    "matcher_has_deterministic_text_rule",
+    "matcher_is_command_like",
     "matcher_rule_matches_text",
 ]

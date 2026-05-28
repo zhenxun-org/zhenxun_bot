@@ -14,14 +14,6 @@ class AuthPatchGuardResult:
     reason: str = ""
 
 
-_CHECK_AND_RUN_MATCHER_PARAMS = {
-    "Matcher",
-    "bot",
-    "event",
-    "state",
-    "stack",
-    "dependency_cache",
-}
 _HANDLE_EVENT_PARAMS = {"bot", "event"}
 _HANDLE_EVENT_REQUIRED_ATTRS = (
     "escape_tag",
@@ -42,26 +34,6 @@ _HANDLE_EVENT_REQUIRED_ATTRS = (
 
 def _signature_param_names(func: Callable[..., Any]) -> set[str]:
     return set(inspect.signature(func).parameters)
-
-
-def validate_check_and_run_matcher_patch() -> AuthPatchGuardResult:
-    target = getattr(nb_message, "check_and_run_matcher", None)
-    if target is None:
-        return AuthPatchGuardResult(
-            False,
-            "missing nonebot.message.check_and_run_matcher",
-        )
-    try:
-        params = _signature_param_names(target)
-    except Exception as exc:
-        return AuthPatchGuardResult(False, f"inspect signature failed: {exc}")
-    missing = sorted(_CHECK_AND_RUN_MATCHER_PARAMS - params)
-    if missing:
-        return AuthPatchGuardResult(
-            False,
-            "check_and_run_matcher signature missing params: " + ", ".join(missing),
-        )
-    return AuthPatchGuardResult(True)
 
 
 def validate_handle_event_patch() -> AuthPatchGuardResult:
