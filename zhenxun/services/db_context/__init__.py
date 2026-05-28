@@ -341,6 +341,10 @@ async def init():
                     )
                 else:
                     logger.debug("迁移脚本无变化，跳过执行")
+        # Tortoise may emit column comments/index SQL during generate_schemas().
+        # On existing databases with newly added nullable fields, PostgreSQL can
+        # fail before the post-generate SchemaGuard gets a chance to repair drift.
+        await repair_safe_schema_drift()
         logger.debug("开始生成数据库表结构...")
         await Tortoise.generate_schemas()
         logger.debug("数据库表结构生成完毕!")
