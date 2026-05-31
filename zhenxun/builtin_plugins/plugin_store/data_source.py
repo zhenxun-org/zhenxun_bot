@@ -370,8 +370,6 @@ class StoreManager:
             download_files,
             branch,
             repo_type=repo_type,
-            sparse_path=replace_module_path,
-            target_dir=target_dir,
         )
         if not result.success:
             raise PluginStoreException(result.error_message)
