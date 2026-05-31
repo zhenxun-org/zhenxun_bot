@@ -5,6 +5,9 @@ from pydantic import BaseModel
 # 数据库操作超时设置（秒）
 DB_TIMEOUT_SECONDS = 3.0
 
+# 启动期自动补齐字段/索引可能需要等待数据库锁或扫描较大的表，单独放宽超时
+DB_SCHEMA_GUARD_TIMEOUT_SECONDS = 30.0
+
 # 性能监控阈值（秒）
 SLOW_QUERY_THRESHOLD = 0.5
 

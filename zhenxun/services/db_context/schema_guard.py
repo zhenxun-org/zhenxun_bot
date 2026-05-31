@@ -13,7 +13,7 @@ from tortoise.exceptions import OperationalError
 
 from zhenxun.services.log import logger
 
-from .config import DB_TIMEOUT_SECONDS, LOG_COMMAND
+from .config import DB_SCHEMA_GUARD_TIMEOUT_SECONDS, LOG_COMMAND
 
 Dialect = Literal["sqlite", "postgres", "mysql", "unknown"]
 
@@ -466,7 +466,7 @@ async def repair_safe_schema_drift() -> SchemaGuardResult:
             try:
                 await asyncio.wait_for(
                     connection.execute_query_dict(sql),
-                    timeout=DB_TIMEOUT_SECONDS,
+                    timeout=DB_SCHEMA_GUARD_TIMEOUT_SECONDS,
                 )
                 columns[source] = ColumnInfo(name=source, data_type="")
                 result.repaired_columns += 1
@@ -521,13 +521,23 @@ async def repair_safe_schema_drift() -> SchemaGuardResult:
             try:
                 await asyncio.wait_for(
                     connection.execute_query_dict(sql),
-                    timeout=DB_TIMEOUT_SECONDS,
+                    timeout=DB_SCHEMA_GUARD_TIMEOUT_SECONDS,
                 )
                 existing_indexes.add(index_columns)
                 result.repaired_indexes += 1
                 logger.debug(
                     f"SchemaGuard 已补齐索引: {table}.{index_columns}",
                     LOG_COMMAND,
+                )
+            except TimeoutError as exc:
+                result.warnings += 1
+                result.skipped_indexes += 1
+                logger.warning(
+                    "SchemaGuard 补齐索引超时，已跳过: "
+                    f"{table}.{index_columns} "
+                    f"({DB_SCHEMA_GUARD_TIMEOUT_SECONDS}s)",
+                    LOG_COMMAND,
+                    e=exc,
                 )
             except OperationalError as exc:
                 err = str(exc).lower()
