@@ -10,7 +10,6 @@ from nonebot.adapters import Bot, Event
 from nonebot.matcher import Matcher
 from nonebot_plugin_uninfo import Uninfo
 
-from zhenxun.services.message_load import is_overloaded
 from zhenxun.utils.utils import EntityIDs
 
 from .auth.context import (
@@ -149,7 +148,6 @@ class AuthPipelineDependencies:
     run_auth_hooks: Callable[..., Awaitable[float]]
     bot_filter: Callable[..., None]
     reserve_gold: Callable[..., Awaitable[Any]]
-    append_auth_decision_log: Callable[..., Awaitable[None]]
     insufficient_gold_error: type[Exception]
     logger: Any
     log_command: str
@@ -425,35 +423,12 @@ async def decision_log_stage(
             ctx.auth_allowed,
             None if ctx.auth_allowed else ctx.decision_reason,
         )
-    side_effect_state = commit.snapshot() if commit is not None else None
-    shadow_effect = None
-    shadow_reason = None
-    if has_deferred_commit:
-        shadow_effect = "defer"
-        shadow_reason = "side_effect_pending:" + ",".join(
-            commit.pending_kinds if commit is not None else ()
-        )
     if ctx.entered_side_effect_lock and ctx.side_effect_lock is not None:
         try:
             ctx.side_effect_lock.release()
         except Exception:
             pass
         ctx.entered_side_effect_lock = False
-    latency_ms = (time.time() - ctx.start_time) * 1000
-    await deps.append_auth_decision_log(
-        bot_id=ctx.event_context.bot_id,
-        platform=ctx.event_context.platform,
-        group_id=_entity(ctx).group_id,
-        user_id=_entity(ctx).user_id,
-        module=ctx.module,
-        effect=ctx.decision_effect or "error",
-        reason=ctx.decision_reason,
-        shadow_effect=shadow_effect,
-        shadow_reason=shadow_reason,
-        side_effect_state=side_effect_state,
-        latency_ms=latency_ms,
-        overloaded=is_overloaded(),
-    )
 
 
 def build_auth_pipeline(deps: AuthPipelineDependencies) -> AuthPipeline:

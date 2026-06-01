@@ -15,11 +15,6 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.configs.utils import PluginExtraData
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.user_console import UserConsole
-from zhenxun.services.auth_observability import (
-    append_auth_decision_log,
-    append_runtime_backpressure_log,
-    build_auth_observability_report,
-)
 from zhenxun.services.cache.cache_containers import CacheDict
 from zhenxun.services.cache.runtime_cache import (
     PluginInfoMemoryCache,
@@ -1384,14 +1379,12 @@ async def _record_backpressure(
     action: str,
     duration_ms: float = 0.0,
 ) -> None:
-    await append_runtime_backpressure_log(
-        scope_key=lane_context.scope_key,
-        reason=reason,
-        lane=lane_context.lane,
-        action=action,
-        queue_size=lane_context.queue_size,
-        active_count=HOOKS_ACTIVE_COUNT,
-        duration_ms=duration_ms,
+    logger.debug(
+        "auth backpressure: "
+        f"scope={lane_context.scope_key}, lane={lane_context.lane}, "
+        f"reason={reason}, action={action}, queue={lane_context.queue_size}, "
+        f"active={HOOKS_ACTIVE_COUNT}, duration_ms={duration_ms:.1f}",
+        LOGGER_COMMAND,
     )
 
 
@@ -1703,13 +1696,6 @@ async def _run_auth_hooks(
     return time.time() - hooks_start
 
 
-async def build_auth_decision_backpressure_report(
-    *,
-    hours: float = 24.0,
-) -> dict:
-    return await build_auth_observability_report(hours=hours)
-
-
 _AUTH_PIPELINE_DEPS = AuthPipelineDependencies(
     route_modules_with_commands=_ROUTE_MODULES_WITH_COMMANDS,
     get_route_context=_get_route_context,
@@ -1726,7 +1712,6 @@ _AUTH_PIPELINE_DEPS = AuthPipelineDependencies(
     run_auth_hooks=_run_auth_hooks,
     bot_filter=bot_filter,
     reserve_gold=reserve_gold,
-    append_auth_decision_log=append_auth_decision_log,
     insufficient_gold_error=InsufficientGold,
     logger=logger,
     log_command=LOGGER_COMMAND,

@@ -69,7 +69,6 @@ class ActivationContext:
 @dataclass(slots=True)
 class ActivationResult:
     selected: list[type[Matcher]]
-    fallback_required: bool = False
     selected_by_lane: dict[str, int] = field(default_factory=dict)
     skipped_by_lane: dict[str, int] = field(default_factory=dict)
     selected_by_reason: dict[str, int] = field(default_factory=dict)
@@ -90,10 +89,10 @@ class ActivationResult:
 class HandlerActivationIndex:
     """In-memory matcher activation index.
 
-    The index is intentionally fail-open: only proven misses are rejected before
-    matcher task creation. Unknown custom rules, incomplete command metadata,
-    and Alconna shortcut misses stay selected so plugin compatibility wins over
-    dispatch aggressiveness.
+    The index is intentionally fail-open: only known NoneBot rule misses are
+    rejected before matcher task creation. Custom rules, incomplete command
+    metadata, and Alconna shortcut misses stay selected so plugin compatibility
+    wins over dispatch aggressiveness.
     """
 
     def __init__(self) -> None:
@@ -165,14 +164,6 @@ class HandlerActivationIndex:
         for descriptor in descriptors:
             decision = self._select_descriptor(descriptor, context)
             lane = descriptor.lane
-            if decision == "fallback":
-                result.fallback_required = True
-                if not _consume_uncertain_budget(descriptor, budget):
-                    result.mark_skipped(lane, "fallback_budget_exhausted")
-                    continue
-                result.selected.append(descriptor.matcher)
-                result.mark_selected(lane, "fallback_budgeted")
-                continue
             if decision == "miss":
                 result.mark_skipped(lane, _miss_reason(descriptor, context))
                 continue
@@ -181,13 +172,13 @@ class HandlerActivationIndex:
                 result.deterministic_selected.add(descriptor.matcher)
                 result.mark_selected(lane, "deterministic")
                 continue
-            if not _selection_is_guaranteed(descriptor, context):
-                if not _consume_uncertain_budget(descriptor, budget):
-                    result.mark_skipped(lane, "unknown_budget_exhausted")
+            if _is_throttleable_broad_passive(descriptor, context):
+                if not _consume_broad_passive_budget(descriptor, budget):
+                    result.mark_skipped(lane, "broad_passive_budget_exhausted")
                     continue
-                selected_reason = "unknown_budgeted"
+                selected_reason = "broad_passive_budgeted"
             else:
-                selected_reason = "guaranteed"
+                selected_reason = "fail_open"
             result.selected.append(descriptor.matcher)
             result.mark_selected(lane, selected_reason)
         result.candidate_count = len(result.selected)
@@ -197,7 +188,7 @@ class HandlerActivationIndex:
         self,
         descriptor: HandlerDescriptor,
         context: ActivationContext,
-    ) -> Literal["select", "miss", "fallback", "deterministic"]:
+    ) -> Literal["select", "miss", "deterministic"]:
         if descriptor.temp:
             return "select"
         matcher_type = descriptor.matcher_type
@@ -224,7 +215,7 @@ class HandlerActivationIndex:
         self,
         descriptor: HandlerDescriptor,
         context: ActivationContext,
-    ) -> Literal["select", "miss", "fallback", "deterministic"]:
+    ) -> Literal["select", "miss", "deterministic"]:
         texts = text_match_candidates(
             context.plain_text,
             context.raw_text,
@@ -266,7 +257,11 @@ class HandlerActivationIndex:
             event=context.event,
             to_me=context.to_me,
         )
-        if rule_match == "match":
+        if (
+            rule_match == "match"
+            and not descriptor.has_custom_rule
+            and descriptor.shortcuts is None
+        ):
             command_matched = True
         elif rule_match == "miss":
             return "miss"
@@ -274,7 +269,7 @@ class HandlerActivationIndex:
             not (descriptor.commands or descriptor.shortcuts is not None)
             and not command_matched
         ):
-            return "fallback"
+            return "select"
 
         if (
             context.ai_route_modules
@@ -284,7 +279,7 @@ class HandlerActivationIndex:
                 return "select"
 
         if command_matched:
-            return "deterministic"
+            return "select" if descriptor.has_custom_rule else "deterministic"
         return "select"
 
     def _build_descriptor(
@@ -437,11 +432,6 @@ def extract_matcher_rule_descriptors(
     matcher_cls: type[Matcher],
 ) -> tuple[ActivationRuleDescriptor, ...]:
     descriptors: list[ActivationRuleDescriptor] = []
-    if hasattr(matcher_cls, "command"):
-        descriptors.append(
-            ActivationRuleDescriptor("matcher_command", command_like=True)
-        )
-
     rule = getattr(matcher_cls, "rule", None)
     checkers = getattr(rule, "checkers", ()) or ()
     for checker in checkers:
@@ -530,46 +520,8 @@ def extract_matcher_rule_descriptors(
         ):
             descriptors.append(ActivationRuleDescriptor("alconna", command_like=True))
         else:
-            descriptors.append(_custom_rule_descriptor(call))
+            descriptors.append(ActivationRuleDescriptor("custom"))
     return tuple(descriptors)
-
-
-def _custom_rule_descriptor(call: object) -> ActivationRuleDescriptor:
-    keyword_regex = _extract_keyword_regex_pairs(call)
-    if keyword_regex:
-        return ActivationRuleDescriptor(
-            "keyword_regex",
-            keyword_regex,
-            deterministic_text=True,
-        )
-    return ActivationRuleDescriptor("custom")
-
-
-def _extract_keyword_regex_pairs(
-    call: object,
-) -> tuple[tuple[str, str, int], ...]:
-    """Recognize generic keyword + regex custom rules without plugin coupling."""
-
-    source = getattr(call, "key_pattern_list", None)
-    if source is None:
-        source = getattr(call, "keyword_patterns", None)
-    if source is None:
-        source = getattr(call, "patterns", None)
-    if not isinstance(source, Iterable) or isinstance(source, str):
-        return ()
-
-    pairs: list[tuple[str, str, int]] = []
-    for item in source:
-        if not isinstance(item, tuple | list) or len(item) < 2:
-            continue
-        keyword = str(item[0] or "").strip()
-        pattern_obj = item[1]
-        pattern = getattr(pattern_obj, "pattern", pattern_obj)
-        if not keyword or not isinstance(pattern, str) or not pattern:
-            continue
-        flags = int(getattr(pattern_obj, "flags", 0) or 0)
-        pairs.append((keyword, pattern, flags))
-    return tuple(pairs)
 
 
 def normalize_rule_string_tuple(value: object) -> tuple[str, ...]:
@@ -625,6 +577,9 @@ def matcher_rule_matches_text(
     event: object | None = None,
     to_me: bool = False,
 ) -> ActivationDecision:
+    has_unknown = any(
+        descriptor.kind in {"custom", "alconna"} for descriptor in descriptors
+    )
     matched_any = False
     saw_deterministic = False
     saw_unknown = False
@@ -633,14 +588,43 @@ def matcher_rule_matches_text(
 
     for descriptor in descriptors:
         kind = descriptor.kind
-        if kind == "regex":
+        if kind in {"custom", "alconna"}:
+            saw_unknown = True
+            continue
+        if kind in {"command", "shell_command"}:
+            saw_deterministic = True
+            commands: set[str] = set()
+            collect_command_literals(descriptor.value, commands)
+            normalized_commands = {
+                normalized
+                for item in commands
+                if (normalized := normalize_command(item))
+            }
+            if any(
+                matcher_command_matches(text, command)
+                for text in plain_candidates
+                for command in normalized_commands
+            ):
+                matched_any = True
+            elif has_unknown:
+                return "unknown"
+            else:
+                return "miss"
+        elif kind in {"regex", "regex_fullmatch"}:
             saw_deterministic = True
             pattern = str(descriptor.value or "")
             if not pattern:
                 continue
             try:
-                if re.search(pattern, message_text, descriptor.flags):
+                matched = (
+                    re.fullmatch(pattern, message_text, descriptor.flags)
+                    if kind == "regex_fullmatch"
+                    else re.search(pattern, message_text, descriptor.flags)
+                )
+                if matched:
                     matched_any = True
+                elif has_unknown:
+                    return "unknown"
                 else:
                     return "miss"
             except re.error:
@@ -662,6 +646,8 @@ def matcher_rule_matches_text(
                 text.startswith(item) for text in texts for item in candidates if item
             ):
                 matched_any = True
+            elif has_unknown:
+                return "unknown"
             else:
                 return "miss"
         elif kind == "endswith":
@@ -681,6 +667,8 @@ def matcher_rule_matches_text(
                 text.endswith(item) for text in texts for item in candidates if item
             ):
                 matched_any = True
+            elif has_unknown:
+                return "unknown"
             else:
                 return "miss"
         elif kind == "fullmatch":
@@ -698,6 +686,8 @@ def matcher_rule_matches_text(
             )
             if any(text in candidates for text in texts):
                 matched_any = True
+            elif has_unknown:
+                return "unknown"
             else:
                 return "miss"
         elif kind == "keywords":
@@ -707,17 +697,14 @@ def matcher_rule_matches_text(
                 item and item in text for text in plain_candidates for item in values
             ):
                 matched_any = True
-            else:
-                return "miss"
-        elif kind == "keyword_regex":
-            saw_deterministic = True
-            values = descriptor.value if isinstance(descriptor.value, tuple) else ()
-            if _keyword_regex_matches(values, plain_candidates):
-                matched_any = True
+            elif has_unknown:
+                return "unknown"
             else:
                 return "miss"
         elif kind == "to_me":
             if not to_me:
+                if has_unknown:
+                    return "unknown"
                 return "miss"
         elif kind == "is_type":
             if event is None:
@@ -725,45 +712,21 @@ def matcher_rule_matches_text(
             types = descriptor.value
             if isinstance(types, type):
                 if not isinstance(event, types):
+                    if has_unknown:
+                        return "unknown"
                     return "miss"
             elif isinstance(types, tuple) and types:
                 if not isinstance(event, types):
+                    if has_unknown:
+                        return "unknown"
                     return "miss"
-        elif kind in {"custom", "alconna", "matcher_command"}:
-            saw_unknown = True
-
     if matched_any:
-        return "match"
-    if saw_deterministic:
-        return "miss"
+        return "unknown" if saw_unknown else "match"
     if saw_unknown:
         return "unknown"
+    if saw_deterministic:
+        return "miss"
     return "unknown"
-
-
-def _keyword_regex_matches(
-    values: object,
-    candidates: tuple[str, ...],
-) -> bool:
-    if not isinstance(values, tuple):
-        return False
-    for item in values:
-        if not isinstance(item, tuple | list) or len(item) < 3:
-            continue
-        keyword, pattern, flags = item[:3]
-        keyword_text = str(keyword or "")
-        pattern_text = str(pattern or "")
-        if not keyword_text or not pattern_text:
-            continue
-        for text in candidates:
-            if keyword_text not in text:
-                continue
-            try:
-                if re.search(pattern_text, text, int(flags or 0)):
-                    return True
-            except re.error:
-                return False
-    return False
 
 
 def extract_matcher_command_literals(
@@ -1072,21 +1035,27 @@ def matcher_matches_ai_route_heads(
     return False
 
 
-def _selection_is_guaranteed(
+def _is_throttleable_broad_passive(
     descriptor: HandlerDescriptor,
     context: ActivationContext,
 ) -> bool:
-    """Return True for candidates that must not be budget-throttled."""
+    """Only broad, no-rule passive message matchers may be budget-throttled."""
 
-    if descriptor.temp or descriptor.lane == "system":
-        return True
     if context.event_type != "message":
-        return not descriptor.command_like
+        return False
+    if descriptor.temp or descriptor.lane == "system":
+        return False
+    if not descriptor.lane.startswith("passive_"):
+        return False
+    if descriptor.command_like or descriptor.deterministic_text:
+        return False
+    if descriptor.has_custom_rule or descriptor.rules:
+        return False
     if descriptor.lane == "passive_http" and (
         context.has_url or _looks_like_rich_message(context.raw_text)
     ):
-        return True
-    return False
+        return False
+    return True
 
 
 def _looks_like_rich_message(text: str) -> bool:
@@ -1117,23 +1086,11 @@ def _miss_reason(descriptor: HandlerDescriptor, context: ActivationContext) -> s
     return "rule_miss"
 
 
-def _uncertain_budget_lane(descriptor: HandlerDescriptor) -> str:
-    lane = descriptor.lane
-    if lane.startswith("passive_"):
-        return lane
-    # Unknown command-like matchers are fail-open for compatibility, but they
-    # should not fan out as unbounded command tasks when no deterministic signal
-    # matched. Put them into the cheapest passive bucket.
-    if lane.startswith("command_"):
-        return "passive_light"
-    return lane
-
-
-def _consume_uncertain_budget(
+def _consume_broad_passive_budget(
     descriptor: HandlerDescriptor,
     budget: dict[str, int],
 ) -> bool:
-    lane = _uncertain_budget_lane(descriptor)
+    lane = descriptor.lane
     if lane not in budget:
         return True
     if budget[lane] <= 0:

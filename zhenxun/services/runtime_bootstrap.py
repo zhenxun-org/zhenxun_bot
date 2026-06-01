@@ -140,9 +140,6 @@ def register_runtime_bootstrap(_driver) -> None:
         global _thread_executor
         await _stop_launcher_watchdog()
         await stop_send_queue()
-        from zhenxun.models._bot_message_buffer import stop_bot_message_store_buffer
-
-        await stop_bot_message_store_buffer()
         await stop_memory_governor()
         executor = _thread_executor
         _thread_executor = None
