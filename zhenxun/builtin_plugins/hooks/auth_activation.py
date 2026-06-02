@@ -24,6 +24,20 @@ ActivationLane = Literal[
     "passive_render",
 ]
 
+KNOWN_SAFE_RULE_NAMES = frozenset(
+    {
+        "CommandRule",
+        "ShellCommandRule",
+        "RegexRule",
+        "StartswithRule",
+        "EndswithRule",
+        "FullmatchRule",
+        "KeywordsRule",
+        "IsTypeRule",
+        "ToMeRule",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ActivationRuleDescriptor:
@@ -70,6 +84,8 @@ class AlconnaDescriptor:
     skip_for_unmatch: bool = True
     before_rule_count: int = 0
     after_rule_count: int = 0
+    before_rule_known_safe: bool = True
+    after_rule_known_safe: bool = True
     input_rewrite_extensions: tuple[str, ...] = ()
 
     @property
@@ -987,6 +1003,12 @@ def _build_alconna_descriptor(call: Any, command: Any) -> AlconnaDescriptor | No
         skip_for_unmatch=bool(getattr(call, "skip", True)),
         before_rule_count=_rule_checker_count(getattr(call, "before_rules", None)),
         after_rule_count=_rule_checker_count(getattr(call, "after_rules", None)),
+        before_rule_known_safe=_alconna_rule_is_known_safe(
+            getattr(call, "before_rules", None)
+        ),
+        after_rule_known_safe=_alconna_rule_is_known_safe(
+            getattr(call, "after_rules", None)
+        ),
         input_rewrite_extensions=_extract_alconna_input_rewrite_extensions(call),
     )
 
@@ -996,6 +1018,28 @@ def _rule_checker_count(rule: Any) -> int:
     with contextlib.suppress(TypeError):
         return len(checkers)
     return 1
+
+
+def _alconna_rule_is_known_safe(rule: Any) -> bool:
+    """Whether Alconna before/after Rule can be reasoned about statically.
+
+    We still do not execute these rules here. A rule is considered safe only
+    when every checker is an official NoneBot rule whose negative result can be
+    reproduced by the selector. Custom rules stay fail-open.
+    """
+
+    checkers = getattr(rule, "checkers", ()) or ()
+    for checker in checkers:
+        call = getattr(checker, "call", None)
+        if call is None:
+            return False
+        call_module = call.__class__.__module__
+        call_name = call.__class__.__name__
+        if not call_module.startswith("nonebot.rule"):
+            return False
+        if call_name not in KNOWN_SAFE_RULE_NAMES:
+            return False
+    return True
 
 
 def _extract_alconna_shortcut_descriptors(
@@ -1058,7 +1102,7 @@ def _extract_alconna_input_rewrite_extensions(call: Any) -> tuple[str, ...]:
 def _alconna_can_prefilter(alconna: AlconnaDescriptor) -> bool:
     if not (alconna.command or alconna.aliases or alconna.shortcuts):
         return False
-    if alconna.before_rule_count or alconna.after_rule_count:
+    if not (alconna.before_rule_known_safe and alconna.after_rule_known_safe):
         return False
     if any(name != "ReplyMergeExtension" for name in alconna.input_rewrite_extensions):
         return False
