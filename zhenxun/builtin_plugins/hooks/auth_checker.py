@@ -1417,6 +1417,17 @@ async def _resolve_cost_gold(
         return 0
     cost_start = time.time()
     try:
+        if prep.user is None:
+            user_start = time.time()
+            prep.user = await with_timeout(
+                UserConsole.get_user(
+                    prep.permission_context.user_id,
+                    PlatformUtils.get_platform(session),
+                ),
+                name="get_cost_user",
+            )
+            prep.permission_context.user = prep.user
+            hook_recorder.set("get_cost_user", f"{time.time() - user_start:.3f}s")
         cost_gold = await with_timeout(
             get_plugin_cost(
                 prep.user,
