@@ -26,13 +26,11 @@ from .auth.context import (
 )
 from .auth_checker import (
     LimitManager,
-    _get_auth_route_precheck_deps,
     _get_route_context,
     auth,
     start_auth_runtime_tasks,
     stop_auth_runtime_tasks,
 )
-from .auth_route import route_precheck
 
 _SKIP_AUTH_PLUGINS = {"chat_history", "chat_message"}
 _BOT_CONNECT_TS: float | None = None
@@ -112,9 +110,6 @@ async def _auth_preprocessor(
             event_context.event_cache,
         )
         set_route_modules(state, event_context, route_modules)
-
-    if await route_precheck(matcher, event_context, **_get_auth_route_precheck_deps()):
-        return
 
     try:
         await auth(

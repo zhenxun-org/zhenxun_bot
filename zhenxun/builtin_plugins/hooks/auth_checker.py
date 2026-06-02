@@ -863,15 +863,6 @@ async def _get_route_context(text: str, event_cache: dict | None) -> set[str]:
     return matched
 
 
-def _get_auth_route_precheck_deps() -> dict:
-    return {
-        "route_modules_with_commands": _ROUTE_MODULES_WITH_COMMANDS,
-        "get_route_context": _get_route_context,
-        "is_command_matcher_class": _is_command_matcher_class,
-        "matcher_has_alconna_shortcuts": _matcher_has_alconna_shortcuts,
-    }
-
-
 async def _cache_sweep_loop() -> None:
     while True:
         await asyncio.sleep(CACHE_SWEEP_INTERVAL)
@@ -1230,7 +1221,6 @@ async def _prepare_auth_state(
     context: EventContext,
     bot: Bot,
     event_cache: dict | None,
-    route_skip_checks: bool,
     skip_ban: bool,
     hook_recorder: HookTraceRecorder,
     state: dict | None,
@@ -1295,7 +1285,6 @@ async def _prepare_auth_state(
 
     policy_context = PolicyContext(
         snapshot=snapshot,
-        route_skip_checks=route_skip_checks,
         allow_sleep_bypass=_is_bot_wake_command(module, context.plain_text),
         allow_group_sleep_bypass=_is_group_wake_command(plugin, context.plain_text),
     )
@@ -1315,7 +1304,6 @@ async def _prepare_auth_state_with_fallback(
     context: EventContext,
     bot: Bot,
     event_cache: dict | None,
-    route_skip_checks: bool,
     skip_ban: bool,
     hook_recorder: HookTraceRecorder,
     state: dict | None,
@@ -1326,7 +1314,6 @@ async def _prepare_auth_state_with_fallback(
         context=context,
         bot=bot,
         event_cache=event_cache,
-        route_skip_checks=route_skip_checks,
         skip_ban=skip_ban,
         hook_recorder=hook_recorder,
         state=state,
@@ -1341,7 +1328,6 @@ async def _prepare_auth_state_with_fallback(
         context=context,
         bot=bot,
         event_cache=event_cache,
-        route_skip_checks=route_skip_checks,
         skip_ban=skip_ban,
         hook_recorder=hook_recorder,
         state=state,
@@ -1407,12 +1393,11 @@ async def _reserve_limit_side_effect(
 async def _resolve_cost_gold(
     *,
     prep: AuthPreparation,
-    route_skip_checks: bool,
     hook_recorder: HookTraceRecorder,
     session: Uninfo,
 ) -> int:
     plugin = prep.plugin
-    if route_skip_checks or prep.profile.cost_gold <= 0:
+    if prep.profile.cost_gold <= 0:
         hook_recorder.set("cost_gold", "skipped")
         return 0
     cost_start = time.time()
@@ -1453,7 +1438,6 @@ async def _run_auth_hooks(
     prep: AuthPreparation,
     session: Uninfo,
     event_cache: dict | None,
-    route_skip_checks: bool,
     lane_context: AuthLaneContext,
     hook_recorder: HookTraceRecorder,
     side_effect_commit: SideEffectCommit,
@@ -1464,26 +1448,23 @@ async def _run_auth_hooks(
     await _enter_hooks_section(lane_context)
     hook_tasks = []
     try:
-        if not route_skip_checks:
-            has_limits = await _has_limits_cached(
-                profile.module,
-                event_cache,
-                known=profile.has_limit,
-            )
-            if has_limits:
-                hook_tasks.append(
-                    time_hook(
-                        _reserve_limit_side_effect(
-                            prep=prep,
-                            session=session,
-                            side_effect_commit=side_effect_commit,
-                        ),
-                        "auth_limit",
-                        hook_recorder,
-                    )
+        has_limits = await _has_limits_cached(
+            profile.module,
+            event_cache,
+            known=profile.has_limit,
+        )
+        if has_limits:
+            hook_tasks.append(
+                time_hook(
+                    _reserve_limit_side_effect(
+                        prep=prep,
+                        session=session,
+                        side_effect_commit=side_effect_commit,
+                    ),
+                    "auth_limit",
+                    hook_recorder,
                 )
-            else:
-                hook_recorder.set("auth_limit", "skipped")
+            )
         else:
             hook_recorder.set("auth_limit", "skipped")
 

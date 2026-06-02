@@ -60,7 +60,6 @@ class PolicyResource:
 @dataclass(frozen=True, slots=True)
 class PolicyContext:
     snapshot: AuthSnapshot
-    route_skip_checks: bool = False
     allow_sleep_bypass: bool = False
     allow_group_sleep_bypass: bool = False
 
@@ -101,8 +100,6 @@ class PolicyDecisionPoint:
         profile = resource.profile
         if profile.hidden:
             return PolicyDecision("allow", "hidden_plugin_skip_auth")
-        if context.route_skip_checks:
-            return PolicyDecision("allow", "route_miss_skip_checks")
         if snapshot.ban_state is True and not principal.is_superuser:
             return PolicyDecision("deny", "user_or_group_banned")
         if profile.superuser_only and not principal.is_superuser:

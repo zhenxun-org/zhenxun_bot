@@ -219,6 +219,7 @@ class UserConsole(Model):
             )
             if not updated:
                 raise InsufficientGold()
+        await cls.invalidate_user_cache(user_id)
         return GoldReservation(
             user_id=user_id,
             gold=gold,
