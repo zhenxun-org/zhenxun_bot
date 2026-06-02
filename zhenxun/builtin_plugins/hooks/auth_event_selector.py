@@ -31,8 +31,6 @@ class HandleEventSelectorDependencies:
     activation_context_from_dispatch: Callable[[EventDispatchContext, Event], Any]
     new_dispatch_budget: Callable[[], dict[str, int]]
     dispatch_lane_for_matcher: Callable[[type[Matcher], EventDispatchContext], str]
-    record_activation_result: Callable[[Any], None]
-    debug_activation_shadow: Callable[..., None]
     merge_dispatch_budget: Callable[[dict[str, int], dict[str, int]], None]
     build_matcher_state: Callable[[dict], dict]
     run_selected_matcher: Callable[..., Awaitable[None]]
@@ -153,12 +151,6 @@ async def patched_handle_event(
 
                 if activation_result is not None:
                     selected_matchers = activation_result.selected
-                    deps.record_activation_result(activation_result)
-                    deps.debug_activation_shadow(
-                        priority=priority,
-                        activation_result=activation_result,
-                        context=dispatch_context,
-                    )
                     if (
                         activation_result.candidate_count
                         > deps.overload_selected_threshold
@@ -186,12 +178,6 @@ async def patched_handle_event(
                                 except Exception:
                                     single_result = None
                                 if single_result is not None:
-                                    deps.record_activation_result(single_result)
-                                    deps.debug_activation_shadow(
-                                        priority=priority,
-                                        activation_result=single_result,
-                                        context=dispatch_context,
-                                    )
                                     deps.merge_dispatch_budget(
                                         priority_budget,
                                         single_budget,
