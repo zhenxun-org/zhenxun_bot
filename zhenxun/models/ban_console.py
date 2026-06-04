@@ -3,6 +3,7 @@ from typing import ClassVar
 from typing_extensions import Self
 
 from tortoise import fields
+from tortoise.expressions import Q
 
 from zhenxun.services.cache import CacheException, CacheRegistry, CacheRoot
 from zhenxun.services.cache.runtime_cache import BanMemoryCache
@@ -89,15 +90,18 @@ class BanConsole(Model):
         cls._ensure_cache_registered()
         if not user_id and not group_id:
             raise UserAndGroupIsNone()
-        dao = DataAccess(cls)
         if user_id:
+            dao = DataAccess(cls)
             return (
                 await dao.safe_get_or_none(user_id=user_id, group_id=group_id)
                 if group_id
                 else await dao.safe_get_or_none(user_id=user_id, group_id__isnull=True)
             )
         else:
-            return await dao.safe_get_or_none(user_id="", group_id=group_id)
+            return await cls.safe_get_or_none(
+                Q(user_id__isnull=True) | Q(user_id=""),
+                group_id=group_id,
+            )
 
     @classmethod
     async def check_ban_level(

@@ -173,10 +173,12 @@ class TaskStrategy(SwitchStrategy):
 
     async def set_all_default_status(self, status: bool) -> None:
         await TaskInfo.all().update(default_status=status)
+        # Bulk updates bypass model save hooks; keep TaskInfoMemoryCache in sync.
         await self.refresh_cache()
 
     async def set_all_global_status(self, status: bool) -> None:
         await TaskInfo.all().update(status=status)
+        # Bulk updates bypass model save hooks; keep TaskInfoMemoryCache in sync.
         await self.refresh_cache()
 
     async def refresh_cache(self) -> None:

@@ -8,7 +8,7 @@ from nonebot_plugin_apscheduler import scheduler
 from zhenxun.configs.utils import PluginExtraData, Task
 from zhenxun.models.group_console import GroupConsole
 from zhenxun.models.task_info import TaskInfo
-from zhenxun.services.cache.runtime_cache import TaskInfoMemoryCache
+from zhenxun.services.cache.runtime_cache import GroupMemoryCache, TaskInfoMemoryCache
 from zhenxun.services.log import logger
 from zhenxun.utils.common_utils import CommonUtils
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
@@ -63,6 +63,8 @@ async def update_to_group(create_list: list[tuple[bool, TaskInfo]]):
                 )
                 group.block_task = CommonUtils.convert_module_format(block_tasks)
             await GroupConsole.bulk_update(group_list, ["block_task"], 10)
+            for group in group_list:
+                await GroupMemoryCache.upsert_from_model(group)
 
 
 async def to_db(
@@ -146,8 +148,10 @@ async def _():
     for plugin in get_loaded_plugins():
         await _handle_setting(plugin, task_info_list, task_list)
     if not task_info_list:
-        await TaskInfo.all().update(load_status=False)
-        await TaskInfoMemoryCache.refresh()
+        logger.warning(
+            "未扫描到任何被动技能，跳过 TaskInfo.load_status 全量关闭，"
+            "避免插件加载异常时误关闭全部被动技能。",
+        )
         return
     module_dict = {t[1]: t[0] for t in await TaskInfo.all().values_list("id", "module")}
     load_task = []

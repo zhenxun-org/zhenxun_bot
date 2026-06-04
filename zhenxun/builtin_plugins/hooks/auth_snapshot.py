@@ -4,16 +4,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from zhenxun.services.cache.runtime_cache import (
-    BanMemoryCache,
-    BotMemoryCache,
     BotSnapshot,
-    GroupMemoryCache,
     GroupSnapshot,
-    LevelUserMemoryCache,
     LevelUserSnapshot,
 )
 
 from .auth.context import EventContext
+from .auth.data_provider import (
+    DEFAULT_PERMISSION_DATA_PROVIDER,
+    PermissionDataProvider,
+)
 from .auth_profile import PluginAuthProfile
 
 if TYPE_CHECKING:
@@ -72,6 +72,7 @@ async def build_auth_snapshot(
     bot: "Bot",
     skip_ban: bool = False,
     allow_cache_load: bool = False,
+    provider: PermissionDataProvider = DEFAULT_PERMISSION_DATA_PROVIDER,
 ) -> AuthSnapshot:
     event_cache = context.event_cache
     entity = context.entity
@@ -85,15 +86,15 @@ async def build_auth_snapshot(
     ):
         bot_data = event_cache.get("bot_data")
     else:
-        bot_data = BotMemoryCache.get_if_ready(bot.self_id)
+        bot_data = provider.get_bot_if_ready(bot.self_id)
         if bot_data is None:
             if allow_cache_load:
-                bot_data = await BotMemoryCache.get(bot.self_id)
-            elif not BotMemoryCache.is_loaded():
+                bot_data = await provider.get_bot(bot.self_id)
+            elif not provider.bot_cache_loaded():
                 cache_misses.add("bot")
         if event_cache is not None:
             event_cache["bot_data"] = bot_data
-            event_cache["bot_cache_ready"] = BotMemoryCache.is_loaded()
+            event_cache["bot_cache_ready"] = provider.bot_cache_loaded()
 
     group = None
     if entity.group_id:
@@ -104,14 +105,14 @@ async def build_auth_snapshot(
         ):
             group = event_cache.get("group")
         else:
-            group = GroupMemoryCache.get_if_ready(entity.group_id, entity.channel_id)
-            if group is None and not GroupMemoryCache.is_loaded():
+            group = provider.get_group_if_ready(entity.group_id, entity.channel_id)
+            if group is None and not provider.group_cache_loaded():
                 cache_misses.add("group")
             elif group is None and allow_cache_load:
-                group = await GroupMemoryCache.get(entity.group_id, entity.channel_id)
+                group = await provider.get_group(entity.group_id, entity.channel_id)
             if event_cache is not None:
                 event_cache["group"] = group
-                event_cache["group_cache_ready"] = GroupMemoryCache.is_loaded()
+                event_cache["group_cache_ready"] = provider.group_cache_loaded()
 
     admin_levels = None
     if profile.need_admin:
@@ -122,13 +123,13 @@ async def build_auth_snapshot(
         ):
             admin_levels = event_cache.get("admin_levels")
         else:
-            admin_levels = LevelUserMemoryCache.get_levels_if_ready(
+            admin_levels = provider.get_admin_levels_if_ready(
                 entity.user_id,
                 entity.group_id,
             )
             if admin_levels is None:
                 if allow_cache_load:
-                    admin_levels = await LevelUserMemoryCache.get_levels(
+                    admin_levels = await provider.get_admin_levels(
                         entity.user_id,
                         entity.group_id,
                     )
@@ -136,19 +137,19 @@ async def build_auth_snapshot(
                     cache_misses.add("admin_levels")
             if event_cache is not None:
                 event_cache["admin_levels"] = admin_levels
-                event_cache["admin_cache_ready"] = LevelUserMemoryCache.is_loaded()
+                event_cache["admin_cache_ready"] = provider.admin_cache_loaded()
 
     ban_state = None
     if not skip_ban:
         if event_cache is not None and "ban_state" in event_cache:
             ban_state = event_cache.get("ban_state")
-        elif BanMemoryCache.is_loaded():
-            ban_state = BanMemoryCache.is_banned(entity.user_id, entity.group_id)
+        elif provider.ban_cache_loaded():
+            ban_state = provider.is_banned(entity.user_id, entity.group_id)
             if event_cache is not None:
                 event_cache["ban_state"] = ban_state
         elif allow_cache_load:
-            await BanMemoryCache.ensure_loaded()
-            ban_state = BanMemoryCache.is_banned(entity.user_id, entity.group_id)
+            await provider.ensure_ban_loaded()
+            ban_state = provider.is_banned(entity.user_id, entity.group_id)
             if event_cache is not None:
                 event_cache["ban_state"] = ban_state
         else:
@@ -174,6 +175,7 @@ async def get_or_build_auth_snapshot(
     bot: "Bot",
     skip_ban: bool = False,
     allow_cache_load: bool = False,
+    provider: PermissionDataProvider = DEFAULT_PERMISSION_DATA_PROVIDER,
 ) -> AuthSnapshot:
     event_cache = context.event_cache
     module = profile.module
@@ -190,6 +192,7 @@ async def get_or_build_auth_snapshot(
         bot=bot,
         skip_ban=skip_ban,
         allow_cache_load=allow_cache_load,
+        provider=provider,
     )
     if event_cache is not None:
         event_cache.setdefault("auth_snapshots", {})[module] = snapshot

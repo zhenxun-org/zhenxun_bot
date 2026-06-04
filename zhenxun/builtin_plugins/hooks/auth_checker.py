@@ -16,11 +16,6 @@ from zhenxun.configs.utils import PluginExtraData
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.user_console import UserConsole
 from zhenxun.services.cache.cache_containers import CacheDict
-from zhenxun.services.cache.runtime_cache import (
-    PluginInfoMemoryCache,
-    PluginLimitMemoryCache,
-)
-from zhenxun.services.data_access import DataAccess
 from zhenxun.services.log import logger
 from zhenxun.services.message_load import signal_overload
 from zhenxun.utils.enum import GoldHandle, PluginType
@@ -43,6 +38,7 @@ from .auth.context import (
     set_route_modules,
     store_permission_context,
 )
+from .auth.data_provider import DEFAULT_PERMISSION_DATA_PROVIDER
 from .auth.exception import (
     IsSuperuserException,
     PermissionExemption,
@@ -931,7 +927,8 @@ async def _has_limits_cached(
         if event_cache is not None:
             event_cache.setdefault("module_limits_ready", {})[module] = True
         return has_limits
-    limit_entries = PluginLimitMemoryCache.get_limits_if_ready(module)
+    provider = DEFAULT_PERMISSION_DATA_PROVIDER
+    limit_entries = provider.get_module_limits_if_ready(module)
     if limit_entries is not None:
         has_limits = bool(limit_entries)
         module_limit_cache[module] = has_limits
@@ -1064,16 +1061,17 @@ async def _get_plugin_cache_first(
     *,
     allow_cache_load: bool,
 ) -> tuple[PluginInfo | None, bool]:
+    provider = DEFAULT_PERMISSION_DATA_PROVIDER
     plugin = None
     if event_cache is not None:
         plugin_cache = event_cache.setdefault("plugin_cache", {})
         if module in plugin_cache:
             return cast(PluginInfo | None, plugin_cache[module]), False
 
-    plugin = PluginInfoMemoryCache.get_by_module_if_ready(module)
-    cache_miss = plugin is None and not PluginInfoMemoryCache.is_loaded()
+    plugin = provider.get_plugin_if_ready(module)
+    cache_miss = plugin is None and not provider.plugin_cache_loaded()
     if plugin is None and allow_cache_load:
-        plugin = await PluginInfoMemoryCache.get_by_module(module)
+        plugin = await provider.get_plugin(module)
         cache_miss = False
     if event_cache is not None:
         event_cache.setdefault("plugin_cache", {})[module] = plugin
@@ -1137,7 +1135,6 @@ async def reserve_gold(
         )
     except InsufficientGold:
         raise
-    await DataAccess(UserConsole).clear_cache(user_id=user_id)
     logger.debug(f"预扣功能花费金币: {cost_gold}", LOGGER_COMMAND, session=session)
     return reservation
 

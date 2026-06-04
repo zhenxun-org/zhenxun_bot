@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from zhenxun.services.cache.runtime_cache import (
-    PluginLimitMemoryCache,
+from zhenxun.utils.enum import BlockType, PluginType
+
+from .auth.data_provider import (
+    DEFAULT_PERMISSION_DATA_PROVIDER,
+    PermissionDataProvider,
     PluginLimitSnapshot,
 )
-from zhenxun.utils.enum import BlockType, PluginType
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +83,7 @@ async def get_plugin_auth_profile(
     *,
     event_cache: dict | None = None,
     allow_cache_load: bool = True,
+    provider: PermissionDataProvider = DEFAULT_PERMISSION_DATA_PROVIDER,
 ) -> PluginAuthProfile:
     module = str(getattr(plugin, "module", "") or "")
     profile_cache: dict[str, PluginAuthProfile] = {}
@@ -98,10 +101,10 @@ async def get_plugin_auth_profile(
             limits = limit_cache[module]
             limits_ready = True
     if limits is None:
-        limits = PluginLimitMemoryCache.get_limits_if_ready(module)
+        limits = provider.get_module_limits_if_ready(module)
         limits_ready = limits is not None
     if limits is None and allow_cache_load:
-        limits = await PluginLimitMemoryCache.get_limits(module)
+        limits = await provider.get_module_limits(module)
         limits_ready = True
     if limits is None:
         limits = []

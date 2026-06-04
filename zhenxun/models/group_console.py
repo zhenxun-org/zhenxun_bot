@@ -326,6 +326,7 @@ class GroupConsole(Model):
         module: str,
         is_superuser: bool = False,
         platform: str | None = None,
+        channel_id: str | None = None,
     ):
         """禁用群组插件
 
@@ -336,7 +337,9 @@ class GroupConsole(Model):
             platform: 平台
         """
         group, _ = await cls.get_or_create(
-            group_id=group_id, defaults={"platform": platform}
+            group_id=group_id,
+            channel_id=channel_id,
+            defaults={"platform": platform},
         )
         update_fields = []
         if is_superuser:
@@ -365,6 +368,7 @@ class GroupConsole(Model):
         module: str,
         is_superuser: bool = False,
         platform: str | None = None,
+        channel_id: str | None = None,
     ):
         """禁用群组插件
 
@@ -375,7 +379,9 @@ class GroupConsole(Model):
             platform: 平台
         """
         group, _ = await cls.get_or_create(
-            group_id=group_id, defaults={"platform": platform}
+            group_id=group_id,
+            channel_id=channel_id,
+            defaults={"platform": platform},
         )
         update_fields = []
         if is_superuser:
@@ -447,6 +453,7 @@ class GroupConsole(Model):
         task: str,
         is_superuser: bool = False,
         platform: str | None = None,
+        channel_id: str | None = None,
     ):
         """禁用群组插件
 
@@ -457,12 +464,14 @@ class GroupConsole(Model):
             platform: 平台
         """
         group, _ = await cls.get_or_create(
-            group_id=group_id, defaults={"platform": platform}
+            group_id=group_id,
+            channel_id=channel_id,
+            defaults={"platform": platform},
         )
         update_fields = []
         if is_superuser:
             superuser_block_task = convert_module_format(group.superuser_block_task)
-            if task not in group.superuser_block_task:
+            if task not in superuser_block_task:
                 superuser_block_task.append(task)
                 group.superuser_block_task = convert_module_format(superuser_block_task)
                 update_fields.append("superuser_block_task")
@@ -484,6 +493,7 @@ class GroupConsole(Model):
         task: str,
         is_superuser: bool = False,
         platform: str | None = None,
+        channel_id: str | None = None,
     ):
         """禁用群组插件
 
@@ -494,7 +504,9 @@ class GroupConsole(Model):
             platform: 平台
         """
         group, _ = await cls.get_or_create(
-            group_id=group_id, defaults={"platform": platform}
+            group_id=group_id,
+            channel_id=channel_id,
+            defaults={"platform": platform},
         )
         update_fields = []
         if is_superuser:

@@ -7,7 +7,6 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.configs.config import Config
 from zhenxun.models.ban_console import BanConsole
 from zhenxun.models.plugin_info import PluginInfo
-from zhenxun.services.cache.runtime_cache import BanMemoryCache
 from zhenxun.services.db_context import DB_TIMEOUT_SECONDS
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import PluginType
@@ -15,6 +14,7 @@ from zhenxun.utils.utils import EntityIDs, get_entity_ids
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .context import PermissionContext
+from .data_provider import DEFAULT_PERMISSION_DATA_PROVIDER
 from .exception import SkipPluginException
 from .utils import freq
 
@@ -60,9 +60,10 @@ async def is_ban(user_id: str | None, group_id: str | None) -> int:
     """
     if not user_id and not group_id:
         return 0
-    if not BanMemoryCache.is_loaded():
+    provider = DEFAULT_PERMISSION_DATA_PROVIDER
+    if not provider.ban_cache_loaded():
         return 0
-    return BanMemoryCache.remaining_time(user_id, group_id)
+    return provider.get_ban_remaining_time(user_id, group_id)
 
 
 def check_plugin_type(matcher: Matcher) -> bool:

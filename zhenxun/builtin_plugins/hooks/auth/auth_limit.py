@@ -10,10 +10,6 @@ from pydantic import BaseModel
 
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.plugin_limit import PluginLimit
-from zhenxun.services.cache.runtime_cache import (
-    PluginLimitMemoryCache,
-    PluginLimitSnapshot,
-)
 from zhenxun.services.db_context import DB_TIMEOUT_SECONDS
 from zhenxun.services.log import logger
 from zhenxun.utils.enum import LimitWatchType, PluginLimitType
@@ -25,6 +21,10 @@ from zhenxun.utils.utils import EntityIDs, get_entity_ids
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .context import PermissionContext
+from .data_provider import (
+    DEFAULT_PERMISSION_DATA_PROVIDER,
+    PluginLimitSnapshot,
+)
 from .exception import SkipPluginException
 
 driver = nonebot.get_driver()
@@ -106,11 +106,10 @@ class LimitManager:
     block_limit: ClassVar[dict[str, Limit]] = {}
     count_limit: ClassVar[dict[str, Limit]] = {}
 
-    # 模块限制缓存，避免频繁查询数据库
-    module_limit_cache: ClassVar[
-        dict[str, tuple[float, list[PluginLimitSnapshot], bool]]
+    # 只缓存异常短路结果；正常 limit 列表统一从 PluginLimitMemoryCache 读取。
+    module_limit_error_cache: ClassVar[
+        dict[str, tuple[float, list[PluginLimitSnapshot]]]
     ] = {}
-    module_cache_ttl: ClassVar[float] = 60  # 模块缓存有效期（秒）
     module_cache_error_ttl: ClassVar[float] = 5  # 超时缓存有效期（秒）
 
     @classmethod
@@ -132,15 +131,16 @@ class LimitManager:
         cls.is_updating = True
         try:
             start_time = time.time()
-            await PluginLimitMemoryCache.ensure_loaded()
-            limit_list = PluginLimitMemoryCache.get_all_limits()
+            provider = DEFAULT_PERMISSION_DATA_PROVIDER
+            await provider.ensure_module_limits_loaded()
+            limit_list = await provider.get_all_module_limits()
 
             # 清空旧数据
             cls.add_module = []
             cls.cd_limit = {}
             cls.block_limit = {}
             cls.count_limit = {}
-            cls.module_limit_cache.clear()
+            cls.module_limit_error_cache.clear()
             # 添加新数据
             for limit in limit_list:
                 cls.add_limit(limit)
@@ -216,22 +216,21 @@ class LimitManager:
         """
         current_time = time.time()
 
-        # 检查缓存
-        if module in cls.module_limit_cache:
-            cache_time, limits, is_error = cls.module_limit_cache[module]
-            ttl = cls.module_cache_error_ttl if is_error else cls.module_cache_ttl
-            if current_time - cache_time < ttl:
+        # 正常路径不再二次缓存列表，避免与 PluginLimitMemoryCache 形成双真源。
+        if module in cls.module_limit_error_cache:
+            cache_time, limits = cls.module_limit_error_cache[module]
+            if current_time - cache_time < cls.module_cache_error_ttl:
                 return limits
+            cls.module_limit_error_cache.pop(module, None)
 
         # 缓存不存在或已过期，从内存缓存获取
         try:
-            await PluginLimitMemoryCache.ensure_loaded()
-            limits = await PluginLimitMemoryCache.get_limits(module)
-            cls.module_limit_cache[module] = (current_time, limits, False)
-            return limits
+            provider = DEFAULT_PERMISSION_DATA_PROVIDER
+            await provider.ensure_module_limits_loaded()
+            return await provider.get_module_limits(module)
         except Exception as exc:
             logger.error(f"get module limits failed: {module}", LOGGER_COMMAND, e=exc)
-            cls.module_limit_cache[module] = (current_time, [], True)
+            cls.module_limit_error_cache[module] = (current_time, [])
             return []
 
     @classmethod

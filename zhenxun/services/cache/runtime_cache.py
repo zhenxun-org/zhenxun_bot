@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 import json
 import os
@@ -35,6 +36,8 @@ def _coerce_int(value, default: int) -> int:
 
 # RuntimeCache 以模型 save/delete 主动失效为主，周期 refresh 只做兜底。
 # 这些默认值避免低压力运行时频繁全量扫表。
+# 权限检查热路径以 RuntimeCache/AuthSnapshot 为唯一数据入口；普通业务的
+# DataAccess/CacheRoot 缓存不能替代这里的运行态快照。
 PLUGININFO_MEM_REFRESH_INTERVAL = 3600  # 60分钟
 BAN_MEM_REFRESH_INTERVAL = 300
 BAN_MEM_CLEAN_INTERVAL = 60
@@ -52,10 +55,16 @@ LIMIT_MEM_REFRESH_INTERVAL = 900  # 15分钟
 LIMIT_MEM_NEGATIVE_TTL = 30
 RUNTIME_CACHE_SYNC_ENABLED = True
 RUNTIME_CACHE_SYNC_CHANNEL = "ZHENXUN_RUNTIME_CACHE_SYNC"
+RUNTIME_CACHE_LOAD_RETRY_SECONDS = 1.0
+RUNTIME_CACHE_STARTUP_REFRESH_SKIP_SECONDS = 5.0
 
 
 INSTANCE_ID = uuid.uuid4().hex
 _CACHE_READY_EVENT = asyncio.Event()
+_APPLYING_REMOTE_CACHE_EVENT: ContextVar[bool] = ContextVar(
+    "APPLYING_REMOTE_RUNTIME_CACHE_EVENT",
+    default=False,
+)
 
 
 def _env_get(name: str, default: str | None = None) -> str | None:
@@ -179,6 +188,65 @@ class PluginInfoSnapshot:
         )
         plugin._saved_in_db = True
         return plugin
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "module": self.module,
+            "module_path": self.module_path,
+            "name": self.name,
+            "status": self.status,
+            "block_type": self.block_type.value if self.block_type else None,
+            "load_status": self.load_status,
+            "author": self.author,
+            "version": self.version,
+            "level": self.level,
+            "default_status": self.default_status,
+            "limit_superuser": self.limit_superuser,
+            "menu_type": self.menu_type,
+            "plugin_type": self.plugin_type.value if self.plugin_type else None,
+            "cost_gold": self.cost_gold,
+            "admin_level": self.admin_level,
+            "ignore_prompt": self.ignore_prompt,
+            "is_delete": self.is_delete,
+            "parent": self.parent,
+            "is_show": self.is_show,
+            "ignore_statistics": self.ignore_statistics,
+            "impression": self.impression,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "PluginInfoSnapshot":
+        block_type = payload.get("block_type")
+        if block_type is not None and not isinstance(block_type, BlockType):
+            block_type = BlockType(block_type)
+        plugin_type = payload.get("plugin_type")
+        if plugin_type is not None and not isinstance(plugin_type, PluginType):
+            plugin_type = PluginType(plugin_type)
+        return cls(
+            id=int(payload.get("id", 0) or 0),
+            module=str(payload.get("module", "") or ""),
+            module_path=str(payload.get("module_path", "") or ""),
+            name=str(payload.get("name", "") or ""),
+            status=bool(payload.get("status", True)),
+            block_type=block_type,
+            load_status=bool(payload.get("load_status", True)),
+            author=payload.get("author"),
+            version=payload.get("version"),
+            level=int(payload.get("level", 0) or 0),
+            default_status=bool(payload.get("default_status", True)),
+            limit_superuser=bool(payload.get("limit_superuser", False)),
+            menu_type=str(payload.get("menu_type", "") or ""),
+            plugin_type=plugin_type,
+            cost_gold=int(payload.get("cost_gold", 0) or 0),
+            admin_level=payload.get("admin_level"),
+            ignore_prompt=bool(payload.get("ignore_prompt", False)),
+            is_delete=bool(payload.get("is_delete", False)),
+            parent=payload.get("parent"),
+            is_show=bool(payload.get("is_show", True)),
+            ignore_statistics=bool(payload.get("ignore_statistics", False)),
+            impression=float(payload.get("impression", 0) or 0),
+        )
 
 
 @dataclass(frozen=True)
@@ -648,18 +716,87 @@ class RuntimeCacheSync:
         cache_type = payload.get("type")
         action = payload.get("action")
         data = payload.get("data") or {}
-        if cache_type == "bot":
-            await BotMemoryCache.apply_sync_event(action, data)
-        elif cache_type == "group":
-            await GroupMemoryCache.apply_sync_event(action, data)
-        elif cache_type == "ban":
-            await BanMemoryCache.apply_sync_event(action, data)
-        elif cache_type == "level":
-            await LevelUserMemoryCache.apply_sync_event(action, data)
-        elif cache_type == "task":
-            await TaskInfoMemoryCache.apply_sync_event(action, data)
-        elif cache_type == "plugin_limit":
-            await PluginLimitMemoryCache.apply_sync_event(action, data)
+        token = _APPLYING_REMOTE_CACHE_EVENT.set(True)
+        try:
+            if cache_type == "bot":
+                await BotMemoryCache.apply_sync_event(action, data)
+            elif cache_type == "group":
+                await GroupMemoryCache.apply_sync_event(action, data)
+            elif cache_type == "ban":
+                await BanMemoryCache.apply_sync_event(action, data)
+            elif cache_type == "level":
+                await LevelUserMemoryCache.apply_sync_event(action, data)
+            elif cache_type == "task":
+                await TaskInfoMemoryCache.apply_sync_event(action, data)
+            elif cache_type == "plugin_limit":
+                await PluginLimitMemoryCache.apply_sync_event(action, data)
+            elif cache_type == "plugin":
+                await PluginInfoMemoryCache.apply_sync_event(action, data)
+        finally:
+            _APPLYING_REMOTE_CACHE_EVENT.reset(token)
+
+
+class RuntimeCacheMutation:
+    """Small helpers for runtime cache mutation bookkeeping.
+
+    Cache classes still own their storage layout. This helper centralizes the
+    shared mutation side effects: health markers, negative-cache cleanup and
+    cross-process publish.
+    """
+
+    _load_locks: ClassVar[dict[str, asyncio.Lock]] = {}
+    _retry_after: ClassVar[dict[str, float]] = {}
+
+    @classmethod
+    async def ensure_loaded(cls, cache_cls: type, label: str) -> None:
+        if getattr(cache_cls, "_loaded", False):
+            return
+        now = time.monotonic()
+        if cls._retry_after.get(label, 0.0) > now:
+            return
+        lock = cls._load_locks.setdefault(label, asyncio.Lock())
+        async with lock:
+            if getattr(cache_cls, "_loaded", False):
+                return
+            now = time.monotonic()
+            if cls._retry_after.get(label, 0.0) > now:
+                return
+            try:
+                await cache_cls.refresh()
+            except Exception as exc:
+                cls.mark_error(cache_cls, exc)
+                cls._retry_after[label] = (
+                    time.monotonic() + RUNTIME_CACHE_LOAD_RETRY_SECONDS
+                )
+                raise
+
+    @staticmethod
+    def mark_refreshed(cache_cls: type) -> None:
+        setattr(cache_cls, "_loaded", True)
+        setattr(cache_cls, "_last_refresh", time.time())
+        setattr(cache_cls, "_last_error", None)
+
+    @staticmethod
+    def mark_error(cache_cls: type, exc: Exception) -> None:
+        setattr(cache_cls, "_last_error", f"{type(exc).__name__}: {exc}")
+
+    @staticmethod
+    def clear_negative_key(cache_cls: type, key: object) -> None:
+        negative = getattr(cache_cls, "_negative", None)
+        if isinstance(negative, dict):
+            negative.pop(key, None)
+
+    @staticmethod
+    def clear_negative_all(cache_cls: type) -> None:
+        negative = getattr(cache_cls, "_negative", None)
+        if isinstance(negative, dict):
+            negative.clear()
+
+    @staticmethod
+    def publish(cache_type: str, action: str, data: dict[str, Any]) -> None:
+        if _APPLYING_REMOTE_CACHE_EVENT.get():
+            return
+        RuntimeCacheSync.publish_event(cache_type, action, data)
 
 
 class PluginInfoMemoryCache:
@@ -669,6 +806,7 @@ class PluginInfoMemoryCache:
     _loaded: ClassVar[bool] = False
     _refresh_task: ClassVar[asyncio.Task | None] = None
     _last_refresh: ClassVar[float] = 0.0
+    _last_error: ClassVar[str | None] = None
 
     @classmethod
     def _to_model(cls, snapshot: PluginInfoSnapshot | None) -> "PluginInfo | None":
@@ -687,6 +825,10 @@ class PluginInfoMemoryCache:
                 cls._by_module.pop(old.module, None)
             cls._by_module_path[snapshot.module_path] = snapshot
 
+    @staticmethod
+    def _module_snapshot_rank(snapshot: PluginInfoSnapshot) -> tuple[int, int]:
+        return (1 if snapshot.load_status else 0, snapshot.id)
+
     @classmethod
     async def refresh(cls) -> None:
         from zhenxun.models.plugin_info import PluginInfo
@@ -698,13 +840,16 @@ class PluginInfoMemoryCache:
             for plugin in plugins:
                 snapshot = PluginInfoSnapshot.from_model(plugin)
                 if snapshot.module:
-                    by_module[snapshot.module] = snapshot
+                    current = by_module.get(snapshot.module)
+                    if current is None or cls._module_snapshot_rank(
+                        snapshot
+                    ) >= cls._module_snapshot_rank(current):
+                        by_module[snapshot.module] = snapshot
                 if snapshot.module_path:
                     by_module_path[snapshot.module_path] = snapshot
             cls._by_module = by_module
             cls._by_module_path = by_module_path
-            cls._loaded = True
-            cls._last_refresh = time.time()
+            RuntimeCacheMutation.mark_refreshed(cls)
             logger.debug(
                 f"plugin cache refreshed: {len(by_module)} entries", LOG_COMMAND
             )
@@ -713,7 +858,7 @@ class PluginInfoMemoryCache:
     async def ensure_loaded(cls) -> None:
         if cls._loaded:
             return
-        await cls.refresh()
+        await RuntimeCacheMutation.ensure_loaded(cls, "plugin")
 
     @classmethod
     def is_loaded(cls) -> bool:
@@ -749,8 +894,6 @@ class PluginInfoMemoryCache:
             return
         snapshot = PluginInfoSnapshot.from_model(plugin)
         cls._store_snapshot(snapshot)
-        cls._loaded = True
-        cls._last_refresh = time.time()
 
     @classmethod
     def remove_by_module(cls, module: str) -> None:
@@ -765,8 +908,16 @@ class PluginInfoMemoryCache:
         async with cls._lock:
             snapshot = PluginInfoSnapshot.from_model(plugin)
             cls._store_snapshot(snapshot)
-            cls._loaded = True
-            cls._last_refresh = time.time()
+        RuntimeCacheMutation.publish("plugin", "upsert", snapshot.to_payload())
+
+    @classmethod
+    async def upsert_from_payload(cls, payload: dict[str, Any]) -> None:
+        try:
+            snapshot = PluginInfoSnapshot.from_payload(payload)
+        except Exception:
+            return
+        async with cls._lock:
+            cls._store_snapshot(snapshot)
 
     @classmethod
     async def remove(
@@ -783,6 +934,20 @@ class PluginInfoMemoryCache:
                 snapshot = cls._by_module_path.pop(module_path, None)
                 if snapshot and snapshot.module:
                     cls._by_module.pop(snapshot.module, None)
+        RuntimeCacheMutation.publish(
+            "plugin",
+            "delete",
+            {"module": module, "module_path": module_path},
+        )
+
+    @classmethod
+    async def apply_sync_event(cls, action: str, data: dict[str, Any]) -> None:
+        if action == "upsert":
+            await cls.upsert_from_payload(data)
+        elif action == "delete":
+            await cls.remove(data.get("module"), data.get("module_path"))
+        elif action == "refresh":
+            await cls.refresh()
 
     @classmethod
     async def _refresh_loop(cls, interval: int) -> None:
@@ -815,6 +980,8 @@ class BotMemoryCache:
     _negative: ClassVar[dict[str, float]] = {}
     _loaded: ClassVar[bool] = False
     _refresh_task: ClassVar[asyncio.Task | None] = None
+    _last_refresh: ClassVar[float] = 0.0
+    _last_error: ClassVar[str | None] = None
 
     @classmethod
     def _normalize(cls, bot_id: str | None) -> str | None:
@@ -833,7 +1000,7 @@ class BotMemoryCache:
         if not expire_at:
             return False
         if expire_at <= time.time():
-            cls._negative.pop(bot_id, None)
+            RuntimeCacheMutation.clear_negative_key(cls, bot_id)
             return False
         return True
 
@@ -851,15 +1018,15 @@ class BotMemoryCache:
         async with cls._lock:
             records = await BotConsole.all()
             cls._by_id = {str(r.bot_id): BotSnapshot.from_model(r) for r in records}
-            cls._negative = {}
-            cls._loaded = True
+            RuntimeCacheMutation.clear_negative_all(cls)
+            RuntimeCacheMutation.mark_refreshed(cls)
             logger.debug(f"bot cache refreshed: {len(cls._by_id)} entries", LOG_COMMAND)
 
     @classmethod
     async def ensure_loaded(cls) -> None:
         if cls._loaded:
             return
-        await cls.refresh()
+        await RuntimeCacheMutation.ensure_loaded(cls, "bot")
 
     @classmethod
     def is_loaded(cls) -> bool:
@@ -918,15 +1085,16 @@ class BotMemoryCache:
                 available_tasks=entry.available_tasks,
             )
             cls._by_id[bot_id] = updated
-        RuntimeCacheSync.publish_event("bot", "upsert", updated.to_payload())
+            RuntimeCacheMutation.clear_negative_key(cls, bot_id)
+        RuntimeCacheMutation.publish("bot", "upsert", updated.to_payload())
 
     @classmethod
     async def upsert_from_model(cls, record) -> None:
         entry = BotSnapshot.from_model(record)
         async with cls._lock:
             cls._by_id[entry.bot_id] = entry
-            cls._negative.pop(entry.bot_id, None)
-        RuntimeCacheSync.publish_event("bot", "upsert", entry.to_payload())
+            RuntimeCacheMutation.clear_negative_key(cls, entry.bot_id)
+        RuntimeCacheMutation.publish("bot", "upsert", entry.to_payload())
 
     @classmethod
     async def upsert_from_payload(cls, payload: dict[str, Any]) -> None:
@@ -935,7 +1103,7 @@ class BotMemoryCache:
             return
         async with cls._lock:
             cls._by_id[entry.bot_id] = entry
-            cls._negative.pop(entry.bot_id, None)
+            RuntimeCacheMutation.clear_negative_key(cls, entry.bot_id)
 
     @classmethod
     async def remove(cls, bot_id: str | None) -> None:
@@ -944,7 +1112,8 @@ class BotMemoryCache:
             return
         async with cls._lock:
             cls._by_id.pop(bot_id, None)
-        RuntimeCacheSync.publish_event("bot", "delete", {"bot_id": bot_id})
+            RuntimeCacheMutation.clear_negative_key(cls, bot_id)
+        RuntimeCacheMutation.publish("bot", "delete", {"bot_id": bot_id})
 
     @classmethod
     async def apply_sync_event(cls, action: str, data: dict[str, Any]) -> None:
@@ -986,6 +1155,8 @@ class GroupMemoryCache:
     _negative: ClassVar[dict[tuple[str, str], float]] = {}
     _loaded: ClassVar[bool] = False
     _refresh_task: ClassVar[asyncio.Task | None] = None
+    _last_refresh: ClassVar[float] = 0.0
+    _last_error: ClassVar[str | None] = None
 
     @classmethod
     def _normalize(cls, value: str | None) -> str | None:
@@ -1014,7 +1185,7 @@ class GroupMemoryCache:
         if not expire_at:
             return False
         if expire_at <= time.time():
-            cls._negative.pop(key, None)
+            RuntimeCacheMutation.clear_negative_key(cls, key)
             return False
         return True
 
@@ -1038,15 +1209,15 @@ class GroupMemoryCache:
                 if key:
                     by_key[key] = entry
             cls._by_key = by_key
-            cls._negative = {}
-            cls._loaded = True
+            RuntimeCacheMutation.clear_negative_all(cls)
+            RuntimeCacheMutation.mark_refreshed(cls)
             logger.debug(f"group cache refreshed: {len(by_key)} entries", LOG_COMMAND)
 
     @classmethod
     async def ensure_loaded(cls) -> None:
         if cls._loaded:
             return
-        await cls.refresh()
+        await RuntimeCacheMutation.ensure_loaded(cls, "group")
 
     @classmethod
     def is_loaded(cls) -> bool:
@@ -1094,8 +1265,8 @@ class GroupMemoryCache:
             return
         async with cls._lock:
             cls._by_key[key] = entry
-            cls._negative.pop(key, None)
-        RuntimeCacheSync.publish_event("group", "upsert", entry.to_payload())
+            RuntimeCacheMutation.clear_negative_key(cls, key)
+        RuntimeCacheMutation.publish("group", "upsert", entry.to_payload())
 
     @classmethod
     async def upsert_from_payload(cls, payload: dict[str, Any]) -> None:
@@ -1105,7 +1276,7 @@ class GroupMemoryCache:
             return
         async with cls._lock:
             cls._by_key[key] = entry
-            cls._negative.pop(key, None)
+            RuntimeCacheMutation.clear_negative_key(cls, key)
 
     @classmethod
     async def remove(cls, group_id: str | None, channel_id: str | None = None) -> None:
@@ -1114,7 +1285,8 @@ class GroupMemoryCache:
             return
         async with cls._lock:
             cls._by_key.pop(key, None)
-        RuntimeCacheSync.publish_event(
+            RuntimeCacheMutation.clear_negative_key(cls, key)
+        RuntimeCacheMutation.publish(
             "group", "delete", {"group_id": key[0], "channel_id": key[1] or None}
         )
 
@@ -1186,7 +1358,7 @@ class LevelUserMemoryCache:
         if not expire_at:
             return False
         if expire_at <= time.time():
-            cls._negative.pop(key, None)
+            RuntimeCacheMutation.clear_negative_key(cls, key)
             return False
         return True
 
@@ -1215,16 +1387,15 @@ class LevelUserMemoryCache:
                         by_user_max[entry.user_id] = entry.user_level
             cls._by_key = by_key
             cls._by_user_max = by_user_max
-            cls._negative = {}
-            cls._loaded = True
-            cls._last_refresh = time.time()
+            RuntimeCacheMutation.clear_negative_all(cls)
+            RuntimeCacheMutation.mark_refreshed(cls)
             logger.debug(f"level cache refreshed: {len(by_key)} entries", LOG_COMMAND)
 
     @classmethod
     async def ensure_loaded(cls) -> None:
         if cls._loaded:
             return
-        await cls.refresh()
+        await RuntimeCacheMutation.ensure_loaded(cls, "level")
 
     @classmethod
     def is_loaded(cls) -> bool:
@@ -1310,13 +1481,13 @@ class LevelUserMemoryCache:
         async with cls._lock:
             prev = cls._by_key.get(key)
             cls._by_key[key] = entry
-            cls._negative.pop(key, None)
             current = cls._by_user_max.get(entry.user_id, 0)
             if entry.user_level >= current:
                 cls._by_user_max[entry.user_id] = entry.user_level
             elif prev and prev.user_level == current and entry.user_level < current:
                 cls._recalc_user_max(entry.user_id)
-        RuntimeCacheSync.publish_event("level", "upsert", entry.to_payload())
+            RuntimeCacheMutation.clear_negative_key(cls, key)
+        RuntimeCacheMutation.publish("level", "upsert", entry.to_payload())
 
     @classmethod
     async def upsert_from_payload(cls, payload: dict[str, Any]) -> None:
@@ -1327,12 +1498,12 @@ class LevelUserMemoryCache:
         async with cls._lock:
             prev = cls._by_key.get(key)
             cls._by_key[key] = entry
-            cls._negative.pop(key, None)
             current = cls._by_user_max.get(entry.user_id, 0)
             if entry.user_level >= current:
                 cls._by_user_max[entry.user_id] = entry.user_level
             elif prev and prev.user_level == current and entry.user_level < current:
                 cls._recalc_user_max(entry.user_id)
+            RuntimeCacheMutation.clear_negative_key(cls, key)
 
     @classmethod
     async def remove(cls, user_id: str | None, group_id: str | None) -> None:
@@ -1343,7 +1514,8 @@ class LevelUserMemoryCache:
             removed = cls._by_key.pop(key, None)
             if removed and cls._by_user_max.get(removed.user_id) == removed.user_level:
                 cls._recalc_user_max(removed.user_id)
-        RuntimeCacheSync.publish_event(
+            RuntimeCacheMutation.clear_negative_key(cls, key)
+        RuntimeCacheMutation.publish(
             "level", "delete", {"user_id": key[0], "group_id": key[1] or None}
         )
 
@@ -1399,6 +1571,8 @@ class TaskInfoMemoryCache:
     _negative: ClassVar[dict[str, float]] = {}
     _loaded: ClassVar[bool] = False
     _refresh_task: ClassVar[asyncio.Task | None] = None
+    _last_refresh: ClassVar[float] = 0.0
+    _last_error: ClassVar[str | None] = None
 
     @classmethod
     def _normalize(cls, module: str | None) -> str | None:
@@ -1417,7 +1591,7 @@ class TaskInfoMemoryCache:
         if not expire_at:
             return False
         if expire_at <= time.time():
-            cls._negative.pop(module, None)
+            RuntimeCacheMutation.clear_negative_key(cls, module)
             return False
         return True
 
@@ -1443,8 +1617,8 @@ class TaskInfoMemoryCache:
                     by_name[entry.name] = entry
             cls._by_module = by_module
             cls._by_name = by_name
-            cls._negative = {}
-            cls._loaded = True
+            RuntimeCacheMutation.clear_negative_all(cls)
+            RuntimeCacheMutation.mark_refreshed(cls)
             logger.debug(
                 f"task info cache refreshed: {len(cls._by_module)} entries",
                 LOG_COMMAND,
@@ -1454,7 +1628,7 @@ class TaskInfoMemoryCache:
     async def ensure_loaded(cls) -> None:
         if cls._loaded:
             return
-        await cls.refresh()
+        await RuntimeCacheMutation.ensure_loaded(cls, "task")
 
     @classmethod
     async def get(cls, module: str | None) -> TaskInfoSnapshot | None:
@@ -1488,10 +1662,21 @@ class TaskInfoMemoryCache:
 
     @classmethod
     async def is_disabled(cls, module: str | None) -> bool:
+        """Backward-compatible runtime disabled check for passive tasks."""
+        return await cls.is_runtime_disabled(module)
+
+    @classmethod
+    async def is_runtime_disabled(cls, module: str | None) -> bool:
+        """Return whether a passive task is unavailable at runtime.
+
+        Runtime passive availability is defined by TaskInfo.status and
+        TaskInfo.load_status. Bot/group scoped block lists are checked by
+        CommonUtils.task_is_block().
+        """
         entry = await cls.get(module)
         if not entry:
             return False
-        return not entry.status
+        return not entry.status or not entry.load_status
 
     @classmethod
     async def upsert_from_model(cls, record) -> None:
@@ -1500,8 +1685,8 @@ class TaskInfoMemoryCache:
             cls._by_module[entry.module] = entry
             if entry.name:
                 cls._by_name[entry.name] = entry
-            cls._negative.pop(entry.module, None)
-        RuntimeCacheSync.publish_event("task", "upsert", entry.to_payload())
+            RuntimeCacheMutation.clear_negative_key(cls, entry.module)
+        RuntimeCacheMutation.publish("task", "upsert", entry.to_payload())
 
     @classmethod
     async def upsert_from_payload(cls, payload: dict[str, Any]) -> None:
@@ -1512,7 +1697,7 @@ class TaskInfoMemoryCache:
             cls._by_module[entry.module] = entry
             if entry.name:
                 cls._by_name[entry.name] = entry
-            cls._negative.pop(entry.module, None)
+            RuntimeCacheMutation.clear_negative_key(cls, entry.module)
 
     @classmethod
     async def remove(cls, module: str | None) -> None:
@@ -1525,7 +1710,8 @@ class TaskInfoMemoryCache:
                 current = cls._by_name.get(removed.name)
                 if current and current.module == removed.module:
                     cls._by_name.pop(removed.name, None)
-        RuntimeCacheSync.publish_event("task", "delete", {"module": module})
+            RuntimeCacheMutation.clear_negative_key(cls, module)
+        RuntimeCacheMutation.publish("task", "delete", {"module": module})
 
     @classmethod
     async def apply_sync_event(cls, action: str, data: dict[str, Any]) -> None:
@@ -1568,6 +1754,8 @@ class PluginLimitMemoryCache:
     _negative: ClassVar[dict[str, float]] = {}
     _loaded: ClassVar[bool] = False
     _refresh_task: ClassVar[asyncio.Task | None] = None
+    _last_refresh: ClassVar[float] = 0.0
+    _last_error: ClassVar[str | None] = None
 
     @classmethod
     def _normalize(cls, value: str | None) -> str | None:
@@ -1586,7 +1774,7 @@ class PluginLimitMemoryCache:
         if not expire_at:
             return False
         if expire_at <= time.time():
-            cls._negative.pop(module, None)
+            RuntimeCacheMutation.clear_negative_key(cls, module)
             return False
         return True
 
@@ -1611,8 +1799,8 @@ class PluginLimitMemoryCache:
                 by_module.setdefault(entry.module, []).append(entry)
             cls._by_id = by_id
             cls._by_module = by_module
-            cls._negative = {}
-            cls._loaded = True
+            RuntimeCacheMutation.clear_negative_all(cls)
+            RuntimeCacheMutation.mark_refreshed(cls)
             logger.debug(
                 f"plugin limit cache refreshed: {len(by_id)} entries",
                 LOG_COMMAND,
@@ -1622,7 +1810,7 @@ class PluginLimitMemoryCache:
     async def ensure_loaded(cls) -> None:
         if cls._loaded:
             return
-        await cls.refresh()
+        await RuntimeCacheMutation.ensure_loaded(cls, "plugin_limit")
 
     @classmethod
     def is_loaded(cls) -> bool:
@@ -1668,7 +1856,7 @@ class PluginLimitMemoryCache:
     async def upsert_from_model(cls, record) -> None:
         entry = PluginLimitSnapshot.from_model(record)
         await cls._upsert_entry(entry)
-        RuntimeCacheSync.publish_event("plugin_limit", "upsert", entry.to_payload())
+        RuntimeCacheMutation.publish("plugin_limit", "upsert", entry.to_payload())
 
     @classmethod
     async def upsert_from_payload(cls, payload: dict[str, Any]) -> None:
@@ -1695,6 +1883,7 @@ class PluginLimitMemoryCache:
                     for item in cls._by_module.get(entry.module, [])
                     if item.id != entry.id
                 ]
+                RuntimeCacheMutation.clear_negative_key(cls, entry.module)
                 return
             cls._by_id[entry.id] = entry
             module_limits = [
@@ -1704,7 +1893,7 @@ class PluginLimitMemoryCache:
             ]
             module_limits.append(entry)
             cls._by_module[entry.module] = module_limits
-            cls._negative.pop(entry.module, None)
+            RuntimeCacheMutation.clear_negative_key(cls, entry.module)
 
     @classmethod
     async def remove_by_id(cls, limit_id: int | None) -> None:
@@ -1718,7 +1907,8 @@ class PluginLimitMemoryCache:
                     for item in cls._by_module.get(entry.module, [])
                     if item.id != entry.id
                 ]
-        RuntimeCacheSync.publish_event("plugin_limit", "delete", {"id": int(limit_id)})
+                RuntimeCacheMutation.clear_negative_key(cls, entry.module)
+        RuntimeCacheMutation.publish("plugin_limit", "delete", {"id": int(limit_id)})
 
     @classmethod
     async def apply_sync_event(cls, action: str, data: dict[str, Any]) -> None:
@@ -1764,6 +1954,8 @@ class BanMemoryCache:
     _refresh_task: ClassVar[asyncio.Task | None] = None
     _cleanup_task: ClassVar[asyncio.Task | None] = None
     _remove_tasks: ClassVar[set[asyncio.Task]] = set()
+    _last_refresh: ClassVar[float] = 0.0
+    _last_error: ClassVar[str | None] = None
 
     @classmethod
     def _normalize_id(cls, value: str | None) -> str | None:
@@ -1788,7 +1980,7 @@ class BanMemoryCache:
         if not expire_at:
             return False
         if expire_at <= time.time():
-            cls._negative.pop(key, None)
+            RuntimeCacheMutation.clear_negative_key(cls, key)
             return False
         return True
 
@@ -1842,8 +2034,8 @@ class BanMemoryCache:
             cls._by_user = by_user
             cls._by_group = by_group
             cls._by_user_group = by_user_group
-            cls._negative = {}
-            cls._loaded = True
+            RuntimeCacheMutation.clear_negative_all(cls)
+            RuntimeCacheMutation.mark_refreshed(cls)
             logger.debug(
                 "ban cache refreshed: "
                 f"user={len(by_user)} group={len(by_group)} "
@@ -1855,7 +2047,7 @@ class BanMemoryCache:
     async def ensure_loaded(cls) -> None:
         if cls._loaded:
             return
-        await cls.refresh()
+        await RuntimeCacheMutation.ensure_loaded(cls, "ban")
 
     @classmethod
     def is_loaded(cls) -> bool:
@@ -1873,13 +2065,13 @@ class BanMemoryCache:
                 cls._by_user[entry.user_id] = entry
             elif entry.group_id:
                 cls._by_group[entry.group_id] = entry
-            cls._negative = {}
-        RuntimeCacheSync.publish_event("ban", "upsert", entry.to_payload())
+            RuntimeCacheMutation.clear_negative_all(cls)
+        RuntimeCacheMutation.publish("ban", "upsert", entry.to_payload())
 
     @classmethod
     async def remove(cls, user_id: str | None, group_id: str | None) -> None:
         await cls._remove_local(user_id, group_id)
-        RuntimeCacheSync.publish_event(
+        RuntimeCacheMutation.publish(
             "ban", "delete", {"user_id": user_id, "group_id": group_id}
         )
 
@@ -1894,7 +2086,7 @@ class BanMemoryCache:
                 cls._by_user.pop(user_id, None)
             elif group_id:
                 cls._by_group.pop(group_id, None)
-            cls._negative = {}
+            RuntimeCacheMutation.clear_negative_all(cls)
 
     @classmethod
     def _get_entry(cls, user_id: str | None, group_id: str | None) -> BanEntry | None:
@@ -1995,7 +2187,7 @@ class BanMemoryCache:
                 elif entry.group_id:
                     cls._by_group.pop(entry.group_id, None)
             if expired:
-                cls._negative = {}
+                RuntimeCacheMutation.clear_negative_all(cls)
         if not delete_db or not expired:
             return
         from tortoise.expressions import Q
@@ -2064,7 +2256,7 @@ class BanMemoryCache:
                 cls._by_user[entry.user_id] = entry
             elif entry.group_id:
                 cls._by_group[entry.group_id] = entry
-            cls._negative = {}
+            RuntimeCacheMutation.clear_negative_all(cls)
 
     @classmethod
     async def apply_sync_event(cls, action: str, data: dict[str, Any]) -> None:
@@ -2078,10 +2270,124 @@ class BanMemoryCache:
 
 async def _safe_refresh(cache_cls: type, label: str) -> None:
     """安全地刷新单个缓存，异常不影响其他缓存。"""
+    if getattr(cache_cls, "_loaded", False):
+        last_refresh = float(getattr(cache_cls, "_last_refresh", 0.0) or 0.0)
+        if time.time() - last_refresh <= RUNTIME_CACHE_STARTUP_REFRESH_SKIP_SECONDS:
+            logger.debug(f"{label} cache startup refresh skipped", LOG_COMMAND)
+            return
     try:
         await cache_cls.refresh()
     except Exception as exc:
+        RuntimeCacheMutation.mark_error(cache_cls, exc)
         logger.error(f"{label} cache init failed", LOG_COMMAND, e=exc)
+
+
+def _cache_health(
+    cache_cls: type,
+    *,
+    entry_count: int,
+    negative_count: int = 0,
+) -> dict[str, Any]:
+    return {
+        "loaded": bool(getattr(cache_cls, "_loaded", False)),
+        "entry_count": entry_count,
+        "last_refresh": float(getattr(cache_cls, "_last_refresh", 0.0) or 0.0),
+        "negative_count": negative_count,
+        "last_error": getattr(cache_cls, "_last_error", None),
+    }
+
+
+def health_snapshot() -> dict[str, dict[str, Any]]:
+    """Return in-memory runtime cache health without touching the database."""
+    return {
+        "plugin": _cache_health(
+            PluginInfoMemoryCache,
+            entry_count=len(PluginInfoMemoryCache._by_module),
+        ),
+        "bot": _cache_health(
+            BotMemoryCache,
+            entry_count=len(BotMemoryCache._by_id),
+            negative_count=len(BotMemoryCache._negative),
+        ),
+        "group": _cache_health(
+            GroupMemoryCache,
+            entry_count=len(GroupMemoryCache._by_key),
+            negative_count=len(GroupMemoryCache._negative),
+        ),
+        "level": _cache_health(
+            LevelUserMemoryCache,
+            entry_count=len(LevelUserMemoryCache._by_key),
+            negative_count=len(LevelUserMemoryCache._negative),
+        ),
+        "task": _cache_health(
+            TaskInfoMemoryCache,
+            entry_count=len(TaskInfoMemoryCache._by_module),
+            negative_count=len(TaskInfoMemoryCache._negative),
+        ),
+        "plugin_limit": _cache_health(
+            PluginLimitMemoryCache,
+            entry_count=len(PluginLimitMemoryCache._by_id),
+            negative_count=len(PluginLimitMemoryCache._negative),
+        ),
+        "ban": _cache_health(
+            BanMemoryCache,
+            entry_count=(
+                len(BanMemoryCache._by_user)
+                + len(BanMemoryCache._by_group)
+                + len(BanMemoryCache._by_user_group)
+            ),
+            negative_count=len(BanMemoryCache._negative),
+        ),
+    }
+
+
+def passive_status_snapshot(max_modules: int = 50) -> dict[str, Any]:
+    """Return passive-task state from in-memory caches only.
+
+    This is a local diagnostic helper: it does not query or write the database,
+    and it is not used by runtime decisions.
+    """
+    tasks = list(TaskInfoMemoryCache._by_module.values())
+    disabled = sorted(task.module for task in tasks if not task.status)
+    unloaded = sorted(task.module for task in tasks if not task.load_status)
+    runtime_enabled = [
+        task.module for task in tasks if task.status and task.load_status
+    ]
+    bot_block_total = sum(
+        len(_parse_block_modules(bot.block_tasks))
+        for bot in BotMemoryCache._by_id.values()
+    )
+    group_block_total = sum(
+        len(group.block_task_set) + len(group.superuser_block_task_set)
+        for group in GroupMemoryCache._by_key.values()
+    )
+    return {
+        "cache": health_snapshot(),
+        "passive_tasks": {
+            "total": len(tasks),
+            "status_enabled": sum(1 for task in tasks if task.status),
+            "load_status_enabled": sum(1 for task in tasks if task.load_status),
+            "runtime_enabled": len(runtime_enabled),
+            "disabled_modules": disabled[:max_modules],
+            "disabled_modules_total": len(disabled),
+            "unloaded_modules": unloaded[:max_modules],
+            "unloaded_modules_total": len(unloaded),
+        },
+        "scoped_blocks": {
+            "bot_block_tasks_total": bot_block_total,
+            "group_block_tasks_total": group_block_total,
+        },
+        "semantics": {
+            "available_tasks": "management_display_mirror_not_runtime_whitelist",
+            "runtime_truth": [
+                "TaskInfo.status",
+                "TaskInfo.load_status",
+                "BotConsole.block_tasks",
+                "GroupConsole.block_task",
+                "GroupConsole.superuser_block_task",
+            ],
+        },
+    }
 
 
 @PriorityLifecycle.on_startup(priority=6)

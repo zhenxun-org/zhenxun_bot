@@ -26,7 +26,7 @@ class BotConsole(Model):
     available_plugins = fields.TextField(default="", description="可用插件")
     """可用插件"""
     available_tasks = fields.TextField(default="", description="可用被动技能")
-    """可用被动技能"""
+    """可用被动技能管理镜像，不作为运行白名单。"""
 
     class Meta:  # pyright: ignore [reportIncompatibleVariableOverride]
         table = "bot_console"
@@ -87,7 +87,11 @@ class BotConsole(Model):
     @classmethod
     async def get_tasks(cls, bot_id: str | None = None, status: bool | None = True):
         """
-        获取bot被动技能
+        获取bot被动技能管理镜像。
+
+        available_tasks 只服务管理命令和展示，不参与运行白名单判断。
+        被动运行真源是 TaskInfo.status/load_status、BotConsole.block_tasks、
+        GroupConsole.block_task/superuser_block_task。
 
         参数:
             bot_id (str | None, optional): bot_id. Defaults to None.

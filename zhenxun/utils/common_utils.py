@@ -23,29 +23,31 @@ class CommonUtils:
     async def task_is_block(
         cls, session: Uninfo | Bot, module: str, group_id: str | None = None
     ) -> bool:
-        """判断被动技能是否可以发送
+        """判断被动技能是否被阻断。
+
+        运行真源固定为 TaskInfo.status/load_status、BotConsole.block_tasks、
+        GroupConsole.block_task/superuser_block_task，以及 bot/group ban 状态。
+        BotConsole.available_tasks 只用于管理展示，不作为运行白名单。
 
         参数:
             module: 被动技能模块名
             group_id: 群组id
 
         返回:
-            bool: 是否可以发送
+            bool: True 表示被动技能应被阻断，False 表示允许继续执行
         """
         if isinstance(session, Bot):
             if interface := get_interface(session):
                 info = interface.basic_info()
                 if info["scope"] == SupportScope.qq_api:
                     logger.info("q官bot放弃所有被动技能发言...")
-                    """q官bot放弃所有被动技能发言"""
-                    return False
-        if session.scene == SupportScope.qq_api:
-            """q官bot放弃所有被动技能发言"""
+                    return True
+        if isinstance(session, Session) and session.scope == SupportScope.qq_api:
             logger.info("q官bot放弃所有被动技能发言...")
-            return False
+            return True
         if not group_id and isinstance(session, Session):
             group_id = session.group.id if session.group else None
-        if await TaskInfoMemoryCache.is_disabled(module):
+        if await TaskInfoMemoryCache.is_runtime_disabled(module):
             """被动全局状态"""
             return True
         bot_snapshot = await BotMemoryCache.get(session.self_id)

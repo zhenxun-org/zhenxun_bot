@@ -5,12 +5,12 @@ from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun.models.level_user import LevelUser
 from zhenxun.models.plugin_info import PluginInfo
-from zhenxun.services.cache.runtime_cache import LevelUserMemoryCache, LevelUserSnapshot
 from zhenxun.services.log import logger
 from zhenxun.utils.utils import EntityIDs, get_entity_ids
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .context import PermissionContext
+from .data_provider import DEFAULT_PERMISSION_DATA_PROVIDER, LevelUserSnapshot
 from .exception import SkipPluginException
 
 
@@ -50,7 +50,10 @@ async def auth_admin(
         if cached_levels is not None:
             global_user, group_users = cached_levels
         else:
-            global_user, group_users = await LevelUserMemoryCache.get_levels(
+            (
+                global_user,
+                group_users,
+            ) = await DEFAULT_PERMISSION_DATA_PROVIDER.get_admin_levels(
                 entity.user_id, entity.group_id
             )
 

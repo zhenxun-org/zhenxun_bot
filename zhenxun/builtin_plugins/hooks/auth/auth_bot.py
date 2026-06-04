@@ -2,12 +2,12 @@ import time
 
 from zhenxun.models.bot_console import BotConsole
 from zhenxun.models.plugin_info import PluginInfo
-from zhenxun.services.cache.runtime_cache import BotMemoryCache, BotSnapshot
 from zhenxun.services.log import logger
 from zhenxun.utils.common_utils import CommonUtils
 
 from .config import LOGGER_COMMAND, WARNING_THRESHOLD
 from .context import PermissionContext
+from .data_provider import DEFAULT_PERMISSION_DATA_PROVIDER, BotSnapshot
 from .exception import SkipPluginException
 
 
@@ -33,12 +33,13 @@ async def auth_bot(
     start_time = time.time()
 
     try:
+        provider = DEFAULT_PERMISSION_DATA_PROVIDER
         if context is not None:
             bot_id = context.event.bot_id
             bot_data = context.bot_data
         bot: BotConsole | BotSnapshot | None = bot_data
         if bot is None and not skip_fetch:
-            bot = await BotMemoryCache.get(bot_id)
+            bot = await provider.get_bot(bot_id)
 
         if bot is None:
             raise SkipPluginException("Bot不存在，阻断权限检测...")
