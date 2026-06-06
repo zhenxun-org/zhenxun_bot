@@ -1,0 +1,4 @@
+nonebot2
+nonebot-plugin-htmlrender
+httpx
+tortoise-orm
