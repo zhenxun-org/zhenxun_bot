@@ -1,3 +1,4 @@
+import asyncio
 from typing import TYPE_CHECKING, Any, ClassVar, cast, overload
 from typing_extensions import Self
 
@@ -103,6 +104,8 @@ class GroupConsole(Model):
     """缓存键字段"""
     enable_lock: ClassVar[list[DbLockType]] = [DbLockType.CREATE, DbLockType.UPSERT]
     """开启锁"""
+    _root_group_locks: ClassVar[dict[str, asyncio.Lock]] = {}
+    """普通群记录应用层锁，规避 channel_id=NULL 唯一键语义差异。"""
 
     @classmethod
     async def _get_task_modules(cls, *, default_status: bool) -> list[str]:
@@ -250,6 +253,143 @@ class GroupConsole(Model):
 
         return group, is_create
 
+    @classmethod
+    def _clean_root_group_defaults(cls, defaults: dict | None) -> dict[str, Any]:
+        cleaned = {}
+        for field, value in (defaults or {}).items():
+            if field in {"id", "group_id", "channel_id", "channel_id__isnull"}:
+                continue
+            if value is None:
+                continue
+            cleaned[field] = value
+        return cleaned
+
+    @classmethod
+    def _root_group_score(cls, group: Self) -> tuple[int, int]:
+        score = 0
+        score += 8 if group.group_name else 0
+        score += 4 if group.max_member_count else 0
+        score += 4 if group.member_count else 0
+        score += 4 if group.group_flag else 0
+        score += 4 if group.is_super else 0
+        score += 3 if not group.status else 0
+        score += 3 if group.level != 5 else 0
+        score += len(convert_module_format(group.block_plugin))
+        score += len(convert_module_format(group.superuser_block_plugin))
+        score += len(convert_module_format(group.block_task))
+        score += len(convert_module_format(group.superuser_block_task))
+        return score, int(group.id or 0)
+
+    @classmethod
+    def _merge_module_field(cls, groups: list[Self], field: str) -> str:
+        modules: list[str] = []
+        seen = set()
+        for group in groups:
+            value = getattr(group, field, "") or ""
+            for module in cast(list[str], convert_module_format(value)):
+                if module not in seen:
+                    seen.add(module)
+                    modules.append(module)
+        return cast(str, convert_module_format(modules))
+
+    @classmethod
+    async def _deduplicate_root_group_records(cls, groups: list[Self]) -> Self:
+        if len(groups) == 1:
+            return groups[0]
+
+        keep = max(groups, key=cls._root_group_score)
+        newest_first = sorted(
+            groups, key=lambda group: int(group.id or 0), reverse=True
+        )
+
+        merged = {
+            "group_name": next(
+                (g.group_name for g in newest_first if g.group_name), ""
+            ),
+            "max_member_count": max(g.max_member_count for g in groups),
+            "member_count": max(g.member_count for g in groups),
+            "status": all(g.status for g in groups),
+            "level": min(g.level for g in groups),
+            "is_super": any(g.is_super for g in groups),
+            "group_flag": max(g.group_flag for g in groups),
+            "block_plugin": cls._merge_module_field(groups, "block_plugin"),
+            "superuser_block_plugin": cls._merge_module_field(
+                groups, "superuser_block_plugin"
+            ),
+            "block_task": cls._merge_module_field(groups, "block_task"),
+            "superuser_block_task": cls._merge_module_field(
+                groups, "superuser_block_task"
+            ),
+            "platform": next((g.platform for g in newest_first if g.platform), "qq"),
+        }
+
+        update_fields = []
+        for field, value in merged.items():
+            if getattr(keep, field) != value:
+                setattr(keep, field, value)
+                update_fields.append(field)
+        if update_fields:
+            await keep.save(update_fields=update_fields)
+
+        for group in groups:
+            if group.id != keep.id:
+                await group.delete()
+        await GroupMemoryCache.upsert_from_model(keep)
+        return keep
+
+    @classmethod
+    async def get_or_create_root_group(
+        cls,
+        group_id: str | int,
+        defaults: dict | None = None,
+        *,
+        update_defaults: bool = False,
+    ) -> tuple[Self, bool]:
+        """获取或创建普通群记录，并收敛 channel_id=NULL 重复数据。
+
+        普通群固定使用 ``channel_id IS NULL``；频道记录必须继续显式传
+        ``channel_id`` 走原有 get_or_create/update_or_create。
+        """
+        gid = str(group_id).strip()
+        if not gid:
+            raise ValueError("group_id cannot be empty")
+
+        lock = cls._root_group_locks.setdefault(gid, asyncio.Lock())
+        async with lock:
+            defaults = cls._clean_root_group_defaults(defaults)
+            records = await cls.filter(group_id=gid, channel_id__isnull=True).all()
+            if records:
+                group = await cls._deduplicate_root_group_records(records)
+                if update_defaults:
+                    update_fields = []
+                    for field, value in defaults.items():
+                        if hasattr(group, field) and getattr(group, field) != value:
+                            setattr(group, field, value)
+                            update_fields.append(field)
+                    if update_fields:
+                        await group.save(update_fields=update_fields)
+                await GroupMemoryCache.upsert_from_model(group)
+                return group, False
+
+            group = await cls.create(group_id=gid, channel_id=None, **defaults)
+            return group, True
+
+    @classmethod
+    async def _get_or_create_group_for_write(
+        cls,
+        group_id: str,
+        channel_id: str | None,
+        defaults: dict | None = None,
+    ) -> tuple[Self, bool]:
+        defaults = cls._clean_root_group_defaults(defaults)
+        if channel_id:
+            return await cls.get_or_create(
+                group_id=group_id,
+                channel_id=channel_id,
+                defaults=defaults,
+            )
+        return await cls.get_or_create_root_group(group_id, defaults=defaults)
+
     async def save(self, *args, **kwargs):
         await super().save(*args, **kwargs)
         await GroupMemoryCache.upsert_from_model(self)
@@ -336,7 +476,7 @@ class GroupConsole(Model):
             is_superuser: 是否为超级用户
             platform: 平台
         """
-        group, _ = await cls.get_or_create(
+        group, _ = await cls._get_or_create_group_for_write(
             group_id=group_id,
             channel_id=channel_id,
             defaults={"platform": platform},
@@ -378,7 +518,7 @@ class GroupConsole(Model):
             is_superuser: 是否为超级用户
             platform: 平台
         """
-        group, _ = await cls.get_or_create(
+        group, _ = await cls._get_or_create_group_for_write(
             group_id=group_id,
             channel_id=channel_id,
             defaults={"platform": platform},
@@ -463,7 +603,7 @@ class GroupConsole(Model):
             is_superuser: 是否为超级用户
             platform: 平台
         """
-        group, _ = await cls.get_or_create(
+        group, _ = await cls._get_or_create_group_for_write(
             group_id=group_id,
             channel_id=channel_id,
             defaults={"platform": platform},
@@ -503,7 +643,7 @@ class GroupConsole(Model):
             is_superuser: 是否为超级用户
             platform: 平台
         """
-        group, _ = await cls.get_or_create(
+        group, _ = await cls._get_or_create_group_for_write(
             group_id=group_id,
             channel_id=channel_id,
             defaults={"platform": platform},

@@ -41,11 +41,81 @@ _ORIGINAL_HANDLE_EVENT: Callable[..., Awaitable[None]] | None = None
 _ORIGINAL_ADAPTER_HANDLE_EVENTS: dict[object, object] = {}
 
 
+def _trim_leading_text(message: Any) -> None:
+    if not message:
+        return
+    segment = message[0]
+    if getattr(segment, "type", None) != "text":
+        return
+    data = getattr(segment, "data", None)
+    if not isinstance(data, dict):
+        return
+    data["text"] = str(data.get("text", "")).lstrip("\xa0").lstrip()
+    if not data["text"]:
+        del message[0]
+
+
+def _is_self_mention_segment(segment: Any, bot: Bot) -> bool:
+    segment_type = getattr(segment, "type", None)
+    if segment_type not in {"mention_user", "group_mention_user"}:
+        return False
+    data = getattr(segment, "data", None)
+    if not isinstance(data, dict):
+        return False
+    if data.get("is_you") or data.get("is_bot"):
+        return True
+    user_id = data.get("user_id")
+    return user_id is not None and str(user_id) == str(bot.self_id)
+
+
+def _ensure_nonempty_qq_message(message: Any) -> None:
+    if message:
+        return
+    with contextlib.suppress(Exception):
+        from nonebot.adapters.qq.message import MessageSegment
+
+        message.append(MessageSegment.text(""))
+
+
+def _normalize_qq_self_at_message(bot: Bot, event: Event) -> None:
+    """Remove the leading bot mention left by QQ official @ events.
+
+    nonebot-adapter-qq's @ event branches can mark ``to_me`` but keep the
+    synthetic leading mention segment. Alconna command heads then see
+    ``<@bot>命令`` and fail to match, while regular ``event.get_plaintext()``
+    still looks correct. Normalizing here keeps the runtime behavior aligned
+    with OneBot/standard to_me preprocessing without changing plugin code or
+    database state.
+    """
+    if event.__class__.__name__ not in {
+        "AtMessageCreateEvent",
+        "GroupAtMessageCreateEvent",
+    }:
+        return
+    adapter = getattr(bot, "adapter", None)
+    adapter_name = ""
+    get_name = getattr(adapter, "get_name", None)
+    if callable(get_name):
+        with contextlib.suppress(Exception):
+            adapter_name = str(get_name()).lower()
+    if adapter_name != "qq":
+        return
+    with contextlib.suppress(Exception):
+        message = event.get_message()
+        if not message or not _is_self_mention_segment(message[0], bot):
+            return
+        message.pop(0)
+        setattr(event, "to_me", True)
+        _trim_leading_text(message)
+        _ensure_nonempty_qq_message(message)
+
+
 async def patched_handle_event(
     bot: Bot,
     event: Event,
     deps: HandleEventSelectorDependencies,
 ) -> None:
+    _normalize_qq_self_at_message(bot, event)
     show_log = True
     escape_tag = getattr(nb_message, "escape_tag")
     logger_ = getattr(nb_message, "logger")

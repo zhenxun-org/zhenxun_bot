@@ -10,6 +10,9 @@ from nonebot.log import logger
 _PATCHED = False
 _ORIGINAL_FETCH: Callable[..., Awaitable[Any]] | None = None
 _ORIGINAL_ONEBOT11_GROUP_MESSAGE: Callable[..., Awaitable[dict[str, Any]]] | None = None
+_ORIGINAL_QQ_C2C_MESSAGE: Callable[..., Awaitable[dict[str, Any]]] | None = None
+_ORIGINAL_QQ_GROUP_AT_MESSAGE: Callable[..., Awaitable[dict[str, Any]]] | None = None
+_ORIGINAL_QQ_GUILD_MESSAGE: Callable[..., Awaitable[dict[str, Any]]] | None = None
 
 
 def _sender_value(sender: Any, key: str, default: Any = None) -> Any:
@@ -81,6 +84,88 @@ async def _fast_onebot11_group_message(bot: Bot, event: Event) -> dict[str, Any]
     }
 
 
+def _qq_bot_app_id(bot: Bot) -> str:
+    bot_info = getattr(bot, "bot_info", None)
+    app_id = getattr(bot_info, "id", None)
+    return str(app_id or getattr(bot, "self_id", ""))
+
+
+async def _fast_qq_c2c_message(bot: Bot, event: Event) -> dict[str, Any]:
+    """Build Uninfo session for QQ official C2C messages from event fields."""
+
+    author = _event_value(event, "author")
+    user_id = str(
+        _sender_value(author, "user_openid")
+        or _sender_value(author, "id")
+        or _event_value(event, "user_id", "")
+    )
+    username = str(_sender_value(author, "username", "") or "")
+    return {
+        "user_id": user_id,
+        "name": username,
+        "nickname": username,
+        "avatar": f"https://q.qlogo.cn/qqapp/{_qq_bot_app_id(bot)}/{user_id}/100",
+    }
+
+
+async def _fast_qq_group_at_message(bot: Bot, event: Event) -> dict[str, Any]:
+    """Build Uninfo session for QQ official group-at messages from event fields."""
+
+    author = _event_value(event, "author")
+    user_id = str(
+        _sender_value(author, "member_openid")
+        or _sender_value(author, "id")
+        or _event_value(event, "user_id", "")
+    )
+    username = str(_sender_value(author, "username", "") or "")
+    group_id = str(
+        _event_value(event, "group_openid") or _event_value(event, "group_id") or ""
+    )
+    return {
+        "user_id": user_id,
+        "name": username,
+        "nickname": username,
+        "avatar": f"https://q.qlogo.cn/qqapp/{_qq_bot_app_id(bot)}/{user_id}/100",
+        "group_id": group_id,
+    }
+
+
+async def _fast_qq_guild_message(bot: Bot, event: Event) -> dict[str, Any]:
+    """Build Uninfo session for QQ official guild/channel messages locally.
+
+    nonebot-plugin-uninfo enriches guild messages through remote guild/channel
+    APIs. Runtime auth only needs stable scene/user ids, so avoid remote calls
+    during matcher fanout.
+    """
+
+    author = _event_value(event, "author")
+    member = _event_value(event, "member")
+    guild_id = str(_event_value(event, "guild_id", "") or "")
+    channel_id = str(_event_value(event, "channel_id", "") or "")
+    user_id = str(_sender_value(author, "id", "") or "")
+    nickname = str(_sender_value(member, "nick", "") or "")
+    username = str(_sender_value(author, "username", "") or "")
+    base: dict[str, Any] = {
+        "user_id": user_id,
+        "name": username,
+        "nickname": nickname or username,
+        "avatar": _sender_value(author, "avatar"),
+        "guild_id": guild_id,
+        "channel_id": channel_id,
+        "guild_name": "",
+        "guild_avatar": None,
+        "channel_name": "",
+        "channel_type": -1,
+    }
+    roles = _sender_value(member, "roles")
+    if roles is not None:
+        base["roles"] = roles
+    joined_at = _sender_value(member, "joined_at")
+    if joined_at is not None:
+        base["joined_at"] = joined_at
+    return base
+
+
 async def _singleflight_fetch(self: Any, bot: Bot, event: Event) -> Any:
     original = _ORIGINAL_FETCH
     if original is None:
@@ -114,6 +199,8 @@ async def _singleflight_fetch(self: Any, bot: Bot, event: Event) -> Any:
 
 def apply_uninfo_onebot11_patch() -> None:
     global _ORIGINAL_FETCH, _ORIGINAL_ONEBOT11_GROUP_MESSAGE, _PATCHED
+    global _ORIGINAL_QQ_C2C_MESSAGE, _ORIGINAL_QQ_GROUP_AT_MESSAGE
+    global _ORIGINAL_QQ_GUILD_MESSAGE
     if _PATCHED:
         return
 
@@ -128,6 +215,54 @@ def apply_uninfo_onebot11_patch() -> None:
             )
             setattr(_fast_onebot11_group_message, "__zhenxun_fast_onebot11__", True)
             fetcher.endpoint[GroupMessageEvent] = _fast_onebot11_group_message
+
+    with contextlib.suppress(Exception):
+        from nonebot.adapters.qq.event import (
+            AtMessageCreateEvent,
+            C2CMessageCreateEvent,
+            DirectMessageCreateEvent,
+            GroupAtMessageCreateEvent,
+            GroupMessageCreateEvent,
+            MessageCreateEvent,
+        )
+        from nonebot_plugin_uninfo.adapters.qq.main import fetcher as qq_fetcher
+
+        original_c2c = qq_fetcher.endpoint.get(C2CMessageCreateEvent)
+        if not getattr(original_c2c, "__zhenxun_fast_qq__", False):
+            _ORIGINAL_QQ_C2C_MESSAGE = cast(
+                Callable[..., Awaitable[dict[str, Any]]] | None,
+                original_c2c,
+            )
+            setattr(_fast_qq_c2c_message, "__zhenxun_fast_qq__", True)
+            qq_fetcher.endpoint[C2CMessageCreateEvent] = _fast_qq_c2c_message
+
+        for event_type in (GroupMessageCreateEvent, GroupAtMessageCreateEvent):
+            original_group_at = qq_fetcher.endpoint.get(event_type)
+            if getattr(original_group_at, "__zhenxun_fast_qq__", False):
+                continue
+            if _ORIGINAL_QQ_GROUP_AT_MESSAGE is None and original_group_at is not None:
+                _ORIGINAL_QQ_GROUP_AT_MESSAGE = cast(
+                    Callable[..., Awaitable[dict[str, Any]]],
+                    original_group_at,
+                )
+            setattr(_fast_qq_group_at_message, "__zhenxun_fast_qq__", True)
+            qq_fetcher.endpoint[event_type] = _fast_qq_group_at_message
+
+        for event_type in (
+            MessageCreateEvent,
+            AtMessageCreateEvent,
+            DirectMessageCreateEvent,
+        ):
+            original_guild = qq_fetcher.endpoint.get(event_type)
+            if getattr(original_guild, "__zhenxun_fast_qq__", False):
+                continue
+            if _ORIGINAL_QQ_GUILD_MESSAGE is None and original_guild is not None:
+                _ORIGINAL_QQ_GUILD_MESSAGE = cast(
+                    Callable[..., Awaitable[dict[str, Any]]],
+                    original_guild,
+                )
+            setattr(_fast_qq_guild_message, "__zhenxun_fast_qq__", True)
+            qq_fetcher.endpoint[event_type] = _fast_qq_guild_message
 
     try:
         from nonebot_plugin_uninfo.fetch import InfoFetcher
@@ -146,4 +281,4 @@ def apply_uninfo_onebot11_patch() -> None:
     setattr(_singleflight_fetch, "__zhenxun_singleflight__", True)
     setattr(InfoFetcher, "fetch", _singleflight_fetch)
     _PATCHED = True
-    logger.debug("Uninfo OneBot11 fast fetch and singleflight patch applied")
+    logger.debug("Uninfo fast fetch and singleflight patch applied")

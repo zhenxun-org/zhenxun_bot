@@ -52,8 +52,8 @@ async def _():
                     if last_message:
                         now = datetime.now(pytz.timezone("Asia/Shanghai"))
                         if now - timedelta(days=2) > last_message.create_time:
-                            _group, _ = await GroupConsole.get_or_create(
-                                group_id=group.group_id, channel_id__isnull=True
+                            _group, _ = await GroupConsole.get_or_create_root_group(
+                                group.group_id
                             )
                             modules = [f"<{module}" for module in modules]
                             _group.block_task = ",".join(modules) + ","  # type: ignore

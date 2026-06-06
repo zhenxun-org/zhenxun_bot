@@ -213,9 +213,10 @@ async def _(param: HandleRequest) -> Result:
                 group.group_flag = 1
                 await group.save(update_fields=["group_flag"])
             else:
-                await GroupConsole.update_or_create(
+                await GroupConsole.get_or_create_root_group(
                     group_id=req.group_id,
                     defaults={"group_flag": 1},
+                    update_defaults=True,
                 )
         try:
             await FgRequest.approve(bot, param.id)

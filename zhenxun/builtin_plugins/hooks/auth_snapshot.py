@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
+import time
 from typing import TYPE_CHECKING
 
 from zhenxun.services.cache.runtime_cache import (
@@ -8,7 +10,9 @@ from zhenxun.services.cache.runtime_cache import (
     GroupSnapshot,
     LevelUserSnapshot,
 )
+from zhenxun.services.log import logger
 
+from .auth.config import LOGGER_COMMAND
 from .auth.context import EventContext
 from .auth.data_provider import (
     DEFAULT_PERMISSION_DATA_PROVIDER,
@@ -18,6 +22,10 @@ from .auth_profile import PluginAuthProfile
 
 if TYPE_CHECKING:
     from nonebot.adapters import Bot
+
+QQ_CLIENT_GROUP_REPAIR_TTL = 60
+_QQ_CLIENT_GROUP_REPAIR_FAILURES: dict[tuple[str, str], float] = {}
+_QQ_CLIENT_GROUP_REPAIR_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
 
 
 def _build_runtime_group_snapshot(context: EventContext) -> GroupSnapshot | None:
@@ -40,6 +48,72 @@ def _build_runtime_group_snapshot(context: EventContext) -> GroupSnapshot | None
         superuser_block_task="",
         platform=context.platform,
     )
+
+
+def _qq_client_group_repair_key(context: EventContext) -> tuple[str, str] | None:
+    if context.platform_scope != "qq_client" or not context.group_id:
+        return None
+    return (context.group_id, context.channel_id or "")
+
+
+def _qq_client_group_repair_on_cooldown(key: tuple[str, str]) -> bool:
+    expire_at = _QQ_CLIENT_GROUP_REPAIR_FAILURES.get(key)
+    if not expire_at:
+        return False
+    if expire_at <= time.time():
+        _QQ_CLIENT_GROUP_REPAIR_FAILURES.pop(key, None)
+        return False
+    return True
+
+
+async def _repair_missing_qq_client_group(
+    context: EventContext,
+    *,
+    provider: PermissionDataProvider,
+) -> GroupSnapshot | None:
+    """Persist a minimal OneBot group when startup group sync returned empty."""
+    key = _qq_client_group_repair_key(context)
+    if key is None or not provider.group_cache_loaded():
+        return None
+    group_id, _ = key
+    if _qq_client_group_repair_on_cooldown(key):
+        return None
+
+    try:
+        from zhenxun.models.group_console import GroupConsole
+
+        lock = _QQ_CLIENT_GROUP_REPAIR_LOCKS.setdefault(key, asyncio.Lock())
+        async with lock:
+            existing = provider.get_group_if_ready(
+                group_id,
+                context.channel_id,
+            )
+            if existing is not None:
+                return existing
+            defaults = {
+                "group_name": "",
+                "max_member_count": 0,
+                "member_count": 0,
+                "group_flag": 1,
+                "platform": context.platform,
+            }
+            group, _ = await GroupConsole.get_or_create_root_group(
+                group_id=group_id,
+                defaults=defaults,
+            )
+        from zhenxun.services.cache.runtime_cache import GroupMemoryCache
+
+        await GroupMemoryCache.upsert_from_model(group)
+        return GroupSnapshot.from_model(group)
+    except Exception as exc:
+        _QQ_CLIENT_GROUP_REPAIR_FAILURES[key] = time.time() + QQ_CLIENT_GROUP_REPAIR_TTL
+        logger.warning(
+            "协议端群记录缺失自愈失败，已短期跳过重复修复",
+            LOGGER_COMMAND,
+            group_id=context.group_id,
+            e=exc,
+        )
+        return None
 
 
 @dataclass(slots=True)
@@ -135,6 +209,11 @@ async def build_auth_snapshot(
             if event_cache is not None:
                 event_cache["group"] = group
                 event_cache["group_cache_ready"] = provider.group_cache_loaded()
+        if group is None:
+            group = await _repair_missing_qq_client_group(
+                context,
+                provider=provider,
+            )
         if group is None and (runtime_group := _build_runtime_group_snapshot(context)):
             group = runtime_group
             cache_misses.discard("group")
@@ -142,6 +221,11 @@ async def build_auth_snapshot(
                 event_cache["group"] = group
                 event_cache["group_cache_ready"] = True
                 event_cache["group_runtime_virtual"] = True
+        elif group is not None:
+            cache_misses.discard("group")
+            if event_cache is not None:
+                event_cache["group"] = group
+                event_cache["group_cache_ready"] = True
 
     admin_levels = None
     if profile.need_admin:

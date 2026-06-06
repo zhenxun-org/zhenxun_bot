@@ -87,7 +87,7 @@ class PluginManager:
 
         for gid in groups_to_open | groups_to_close:
             platform = bot.adapter.get_name() if bot else "qq"
-            await GroupConsole.get_or_create(
+            await GroupConsole.get_or_create_root_group(
                 group_id=gid, defaults={"platform": platform}
             )
 

@@ -109,7 +109,7 @@ class MemberUpdateManage:
             members = await interface.get_members(SceneType.GROUP, group_scene.id)
 
             try:
-                group_console, _ = await GroupConsole.get_or_create(
+                group_console, _ = await GroupConsole.get_or_create_root_group(
                     group_id=group_id, defaults={"platform": platform}
                 )
                 group_console.member_count = len(members)

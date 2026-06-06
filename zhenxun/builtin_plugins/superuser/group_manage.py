@@ -147,7 +147,7 @@ def CheckGroupId():
 @_matcher.assign("modify-level", parameterless=[CheckGroupId()])
 async def _(session: EventSession, arparma: Arparma, state: T_State, level: int):
     gid = state["group_id"]
-    group, _ = await GroupConsole.get_or_create(group_id=gid)
+    group, _ = await GroupConsole.get_or_create_root_group(gid)
     old_level = group.level
     group.level = level
     await group.save(update_fields=["level"])
@@ -176,10 +176,10 @@ async def _(session: EventSession, arparma: Arparma, state: T_State):
 @_matcher.assign("auth-handle", parameterless=[CheckGroupId()])
 async def _(session: EventSession, arparma: Arparma, state: T_State):
     gid = state["group_id"]
-    await GroupConsole.update_or_create(
+    await GroupConsole.get_or_create_root_group(
         group_id=gid,
-        channel_id__isnull=True,
         defaults={"group_flag": 0 if arparma.find("delete") else 1},
+        update_defaults=True,
     )
     s = "删除" if arparma.find("delete") else "添加"
     await MessageUtils.build_message(f"{s}群认证成功!").send(reply_to=True)

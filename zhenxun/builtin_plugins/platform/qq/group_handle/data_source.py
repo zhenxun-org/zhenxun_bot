@@ -124,7 +124,7 @@ class GroupManager:
                     group_id=group_id,
                 )
                 return
-            await GroupConsole.update_or_create(
+            await GroupConsole.get_or_create_root_group(
                 group_id=group_info["group_id"],
                 defaults={
                     "group_name": group_info["group_name"],
@@ -134,6 +134,7 @@ class GroupManager:
                     "block_plugin": block_plugin,
                     "platform": "qq",
                 },
+                update_defaults=True,
             )
 
     @classmethod

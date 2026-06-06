@@ -203,7 +203,7 @@ async def _(bot: v12Bot | v11Bot, event: GroupRequestEvent, session: EventSessio
                 session=event.user_id,
                 target=event.group_id,
             )
-            group, _ = await GroupConsole.update_or_create(
+            group, _ = await GroupConsole.get_or_create_root_group(
                 group_id=str(event.group_id),
                 defaults={
                     "group_name": "",
@@ -211,6 +211,7 @@ async def _(bot: v12Bot | v11Bot, event: GroupRequestEvent, session: EventSessio
                     "member_count": 0,
                     "group_flag": 1,
                 },
+                update_defaults=True,
             )
             await bot.set_group_add_request(
                 flag=event.flag, sub_type="invite", approve=True

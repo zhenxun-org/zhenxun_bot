@@ -151,8 +151,10 @@ class FgRequest(Model):
                             "添加好友自动发送BOT自我介绍图片", session=req.user_id
                         )
             else:
-                await GroupConsole.update_or_create(
-                    group_id=req.group_id, defaults={"group_flag": 1}
+                await GroupConsole.get_or_create_root_group(
+                    group_id=req.group_id,
+                    defaults={"group_flag": 1},
+                    update_defaults=True,
                 )
                 if req.flag == "0":
                     # 用户手动申请入群，创建群认证后提醒用户拉群

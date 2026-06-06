@@ -44,6 +44,13 @@ async def _(bot: Bot):
         )
         return
 
+    if not current_group_list:
+        logger.warning(
+            f"Bot: {bot.self_id} 未获取到任何群组，"
+            "本次不会创建群认证；后续群消息将尝试按事件自愈。",
+            "群认证同步",
+        )
+
     db_group_list: list[str] = await GroupConsole.all().values_list(
         "group_id", flat=True
     )  # pyright: ignore[reportAssignmentType]
