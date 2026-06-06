@@ -224,6 +224,7 @@ def install_handle_event_selector(deps: HandleEventSelectorDependencies) -> None
     for module_name in (
         "nonebot.adapters.onebot.v11.bot",
         "nonebot.adapters.onebot.v12.bot",
+        "nonebot.adapters.qq.bot",
         "onebug.mixin.process",
     ):
         with contextlib.suppress(Exception):

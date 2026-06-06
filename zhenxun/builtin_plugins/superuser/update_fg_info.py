@@ -54,6 +54,11 @@ async def _(
     arparma: Arparma,
 ):
     try:
+        if PlatformUtils.get_platform_scope(bot) != "qq_client":
+            await MessageUtils.build_message(
+                "当前平台不支持旧群组信息同步，仅 OneBot 协议端可用。"
+            ).send()
+            return
         num = await PlatformUtils.update_group(bot)
         logger.info(
             f"更新群聊信息完成，共更新了 {num} 个群组的信息!",
@@ -75,6 +80,11 @@ async def _(
     arparma: Arparma,
 ):
     try:
+        if PlatformUtils.get_platform_scope(bot) != "qq_client":
+            await MessageUtils.build_message(
+                "当前平台不支持旧好友信息同步，仅 OneBot 协议端可用。"
+            ).send()
+            return
         num = await PlatformUtils.update_friend(bot)
         logger.info(
             f"更新好友信息完成，共更新了 {num} 个好友的信息!",

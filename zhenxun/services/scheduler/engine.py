@@ -27,6 +27,7 @@ from zhenxun.services.log import logger
 from zhenxun.services.message_load import should_pause_tasks
 from zhenxun.utils.common_utils import CommonUtils
 from zhenxun.utils.decorator.retry import Retry
+from zhenxun.utils.platform import PlatformUtils
 from zhenxun.utils.pydantic_compat import parse_as
 
 from .repository import ScheduleRepository
@@ -35,6 +36,37 @@ from .types import ExecutionPolicy, ScheduleContext
 JOB_PREFIX = "zhenxun_schedule_"
 SCHEDULE_CONCURRENCY_KEY = "all_groups_concurrency_limit"
 _LAST_PRESSURE_SKIP = 0.0
+
+
+def _resolve_scheduler_bot(bot_id: str | None, log_target: str) -> Bot | None:
+    if bot_id:
+        try:
+            return nonebot.get_bot(bot_id)
+        except KeyError:
+            logger.warning(f"{log_target} 需要的 Bot {bot_id} 不在线，本次执行跳过。")
+            return None
+
+    bots = list(nonebot.get_bots().values())
+    if not bots:
+        logger.warning(f"{log_target} 当前没有可用 Bot，本次执行跳过。")
+        return None
+    if len(bots) == 1:
+        return bots[0]
+
+    qq_client_bots = [
+        bot for bot in bots if PlatformUtils.get_platform_scope(bot) == "qq_client"
+    ]
+    if len(qq_client_bots) == 1:
+        bot = qq_client_bots[0]
+        logger.warning(
+            f"{log_target} 未指定 Bot，多 Bot 在线，自动选择 OneBot {bot.self_id}。"
+        )
+        return bot
+
+    logger.warning(
+        f"{log_target} 未指定 Bot 且多 Bot 在线，无法安全选择，" "本次执行跳过。"
+    )
+    return None
 
 
 class APSchedulerAdapter:
@@ -343,7 +375,12 @@ async def _execute_job(
             return
 
         try:
-            bot = nonebot.get_bot()
+            bot = _resolve_scheduler_bot(
+                context_override.bot_id,
+                f"临时任务 {plugin_name}",
+            )
+            if bot is None:
+                return
             logger.info(f"开始执行临时任务: {plugin_name}")
             injected_params = {"context": context_override}
             state: T_State = {ScheduleContext: context_override}
@@ -380,18 +417,9 @@ async def _execute_job(
             logger.warning(f"定时任务 {schedule_id} 不存在或已禁用，跳过执行。")
             return
 
-        try:
-            bot = (
-                nonebot.get_bot(schedule.bot_id)
-                if schedule.bot_id
-                else nonebot.get_bot()
-            )
-        except (KeyError, ValueError):
-            logger.warning(
-                f"任务 {schedule_id} 需要的 Bot {schedule.bot_id} "
-                f"不在线，本次执行跳过。"
-            )
-            raise
+        bot = _resolve_scheduler_bot(schedule.bot_id, f"任务 {schedule_id}")
+        if bot is None:
+            return
 
         resolver = scheduler_manager._target_resolvers.get(schedule.target_type)
         if not resolver:

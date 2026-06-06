@@ -240,8 +240,7 @@ async def _(param: HandleRequest) -> Result:
 async def _(param: LeaveGroup) -> Result:
     try:
         bot = nonebot.get_bot(param.bot_id)
-        platform = PlatformUtils.get_platform(bot)
-        if platform != "qq":
+        if PlatformUtils.get_platform_scope(bot) != "qq_client":
             return Result.warning_("该平台不支持退群操作...")
         group_list, _ = await PlatformUtils.get_group_list(bot)
         if param.group_id not in [g.group_id for g in group_list]:
@@ -265,8 +264,7 @@ async def _(param: LeaveGroup) -> Result:
 async def _(param: DeleteFriend) -> Result:
     try:
         bot = nonebot.get_bot(param.bot_id)
-        platform = PlatformUtils.get_platform(bot)
-        if platform != "qq":
+        if PlatformUtils.get_platform_scope(bot) != "qq_client":
             return Result.warning_("该平台不支持删除好友操作...")
         friend_list, _ = await PlatformUtils.get_friend_list(bot)
         if param.user_id not in [f.user_id for f in friend_list]:

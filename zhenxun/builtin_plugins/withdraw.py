@@ -40,7 +40,7 @@ def reply_check() -> Rule:
         if event.get_type() == "message":
             return (
                 bool(await reply_fetch(event, bot))
-                and PlatformUtils.get_platform(session) == "qq"
+                and PlatformUtils.get_platform_scope(session) == "qq_client"
             )
         return False
 

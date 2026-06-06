@@ -20,6 +20,28 @@ if TYPE_CHECKING:
     from nonebot.adapters import Bot
 
 
+def _build_runtime_group_snapshot(context: EventContext) -> GroupSnapshot | None:
+    """Provide a non-persistent default group for QQ official runtime auth."""
+    if context.platform_scope != "qq_api" or not context.group_id:
+        return None
+    return GroupSnapshot(
+        group_id=context.group_id,
+        channel_id=context.channel_id,
+        group_name="",
+        max_member_count=0,
+        member_count=0,
+        status=True,
+        level=5,
+        is_super=False,
+        group_flag=0,
+        block_plugin="",
+        superuser_block_plugin="",
+        block_task="",
+        superuser_block_task="",
+        platform=context.platform,
+    )
+
+
 @dataclass(slots=True)
 class AuthSnapshot:
     context: EventContext
@@ -113,6 +135,13 @@ async def build_auth_snapshot(
             if event_cache is not None:
                 event_cache["group"] = group
                 event_cache["group_cache_ready"] = provider.group_cache_loaded()
+        if group is None and (runtime_group := _build_runtime_group_snapshot(context)):
+            group = runtime_group
+            cache_misses.discard("group")
+            if event_cache is not None:
+                event_cache["group"] = group
+                event_cache["group_cache_ready"] = True
+                event_cache["group_runtime_virtual"] = True
 
     admin_levels = None
     if profile.need_admin:

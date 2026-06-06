@@ -18,6 +18,8 @@ async def _():
         return
     bots = nonebot.get_bots()
     for bot in bots.values():
+        if PlatformUtils.get_platform_scope(bot) != "qq_client":
+            continue
         try:
             await PlatformUtils.update_group(bot)
         except Exception as e:
@@ -36,6 +38,8 @@ async def _():
         return
     bots = nonebot.get_bots()
     for bot in bots.values():
+        if PlatformUtils.get_platform_scope(bot) != "qq_client":
+            continue
         try:
             await PlatformUtils.update_friend(bot)
         except Exception as e:

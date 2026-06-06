@@ -40,10 +40,10 @@ class CommonUtils:
             if interface := get_interface(session):
                 info = interface.basic_info()
                 if info["scope"] == SupportScope.qq_api:
-                    logger.info("q官bot放弃所有被动技能发言...")
+                    logger.debug("q官bot放弃所有被动技能发言...")
                     return True
         if isinstance(session, Session) and session.scope == SupportScope.qq_api:
-            logger.info("q官bot放弃所有被动技能发言...")
+            logger.debug("q官bot放弃所有被动技能发言...")
             return True
         if not group_id and isinstance(session, Session):
             group_id = session.group.id if session.group else None

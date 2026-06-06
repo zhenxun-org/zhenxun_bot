@@ -4,6 +4,7 @@ from nonebot.adapters import Bot
 
 from zhenxun.configs.config import Config
 from zhenxun.services.log import logger
+from zhenxun.utils.platform import PlatformUtils
 
 Config.add_plugin_config(
     "catchphrase",
@@ -16,6 +17,8 @@ Config.add_plugin_config(
 
 @Bot.on_calling_api
 async def handle_api_call(bot: Bot, api: str, data: dict[str, Any]):
+    if PlatformUtils.get_platform_scope(bot) != "qq_client":
+        return
     if api == "send_msg":
         catchphrase = Config.get_config("catchphrase", "CATCHPHRASE")
         if catchphrase and (message := data.get("message")):

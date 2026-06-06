@@ -30,7 +30,7 @@ async def _(bot: Bot):
     参数:
         bot: Bot
     """
-    if PlatformUtils.get_platform(bot) != "qq":
+    if PlatformUtils.get_platform_scope(bot) != "qq_client":
         return
 
     logger.debug(f"更新Bot: {bot.self_id} 的群认证...", "群认证同步")

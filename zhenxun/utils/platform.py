@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+import contextlib
 import random
 from typing import cast
 
@@ -37,6 +38,23 @@ def _adapter_name(bot: Bot) -> str:
     return adapter.__class__.__name__.lower()
 
 
+def _scope_name(scope: object) -> str:
+    """Normalize uninfo/alconna scope values without changing legacy platform."""
+    if scope is None:
+        return ""
+    raw = getattr(scope, "name", None) or getattr(scope, "value", scope)
+    text = str(raw or "").strip().lower()
+    if not text:
+        text = str(getattr(scope, "name", "") or "").strip().lower()
+    text = text.replace("-", "_").replace(" ", "_")
+    compact = "".join(ch for ch in text if ch.isalnum())
+    if compact.endswith("qqclient"):
+        return "qq_client"
+    if compact.endswith("qqapi"):
+        return "qq_api"
+    return text
+
+
 class UserData(BaseModel):
     name: str
     """昵称"""
@@ -58,6 +76,31 @@ class UserData(BaseModel):
 
 class PlatformUtils:
     @classmethod
+    def _resolve_unique_qq_client_bot(cls, log_cmd: str | None = None) -> Bot | None:
+        bots = list(nonebot.get_bots().values())
+        if not bots:
+            logger.warning("当前没有可用的 OneBot 协议端 Bot，已跳过。", log_cmd)
+            return None
+        qq_client_bots = [
+            bot for bot in bots if cls.get_platform_scope(bot) == "qq_client"
+        ]
+        if len(qq_client_bots) == 1:
+            bot = qq_client_bots[0]
+            if len(bots) > 1:
+                logger.warning(
+                    f"多 Bot 在线且未指定 Bot，自动选择 OneBot {bot.self_id}。",
+                    log_cmd,
+                )
+            return bot
+        if not qq_client_bots:
+            logger.warning("未找到 OneBot 协议端 Bot，已跳过。", log_cmd)
+        else:
+            logger.warning(
+                "存在多个 OneBot 协议端 Bot，无法安全选择，已跳过。", log_cmd
+            )
+        return None
+
+    @classmethod
     def is_qbot(cls, session: Uninfo | Bot) -> bool:
         """判断bot是否为qq官bot
 
@@ -68,7 +111,11 @@ class PlatformUtils:
             bool: 是否为官bot
         """
         if isinstance(session, Bot):
+            if cls.get_platform_scope(session) == "qq_api":
+                return True
             return bool(BotConfig.get_qbot_uid(session.self_id))
+        if cls.get_platform_scope(session) == "qq_api":
+            return True
         if BotConfig.get_qbot_uid(session.self_id):
             return True
         return session.scope == SupportScope.qq_api
@@ -83,7 +130,7 @@ class PlatformUtils:
             group_id: 群组id
             duration: 禁言时长(分钟)
         """
-        if cls.get_platform(bot) == "qq":
+        if cls.get_platform_scope(bot) == "qq_client":
             await bot.set_group_ban(
                 group_id=int(group_id),
                 user_id=int(user_id),
@@ -111,7 +158,9 @@ class PlatformUtils:
             Receipt | None: Receipt
         """
         if not bot:
-            bot = nonebot.get_bot()
+            bot = cls._resolve_unique_qq_client_bot("PlatformUtils:send_superuser")
+            if bot is None:
+                return []
         superuser_ids = []
         if superuser_id:
             superuser_ids.append(superuser_id)
@@ -397,6 +446,11 @@ class PlatformUtils:
     def get_platform_scope(cls, t: Bot | Uninfo | object) -> str:
         """获取细粒度平台作用域，不改变旧 get_platform 返回值。"""
         if isinstance(t, Bot):
+            if interface := get_interface(t):
+                with contextlib.suppress(Exception):
+                    scope = _scope_name(interface.basic_info().get("scope"))
+                    if scope:
+                        return scope
             adapter_name = _adapter_name(t)
             if "onebot" in adapter_name:
                 return "qq_client"
@@ -406,17 +460,13 @@ class PlatformUtils:
                 return "qq_api"
             return adapter_name or cls.get_platform(t)
 
-        scope = str(getattr(t, "scope", "") or "").lower()
+        scope = _scope_name(getattr(t, "scope", "") or "")
         if not scope:
             basic = getattr(t, "basic", None)
             if isinstance(basic, dict):
-                scope = str(basic.get("scope") or "").lower()
-        if "qq_client" in scope:
-            return "qq_client"
-        if "qq_api" in scope:
-            return "qq_api"
-        if scope.startswith("qq"):
-            return "qq"
+                scope = _scope_name(basic.get("scope"))
+        if scope:
+            return scope
 
         adapter = getattr(t, "adapter", None)
         if adapter is not None:
@@ -499,6 +549,9 @@ class PlatformUtils:
         返回:
             int: 更新个数
         """
+        if cls.get_platform_scope(bot) == "qq_api":
+            logger.warning("QQ 官方适配器不支持旧好友同步，已跳过。", "更新好友信息")
+            return 0
         create_list = []
         friend_list, platform = await cls.get_friend_list(bot)
         if friend_list:
@@ -521,6 +574,11 @@ class PlatformUtils:
         返回:
             list[FriendUser]: 好友列表
         """
+        if cls.get_platform_scope(bot) == "qq_api":
+            logger.warning(
+                "QQ 官方适配器不支持旧好友列表查询，已返回空列表。", "好友列表"
+            )
+            return [], cls.get_platform(bot)
         if interface := get_interface(bot):
             user_list = await interface.get_users()
             return [
@@ -602,14 +660,9 @@ class BroadcastEngine:
                 except KeyError:
                     logger.warning(f"Bot:{i} 对象未连接或不存在", log_cmd)
         if not self.bot_list:
-            try:
-                bot = nonebot.get_bot()
+            bot = PlatformUtils._resolve_unique_qq_client_bot(log_cmd)
+            if bot is not None:
                 self.bot_list.append(bot)
-                logger.warning(
-                    f"广播任务未传入Bot对象，使用默认Bot {bot.self_id}", log_cmd
-                )
-            except Exception as e:
-                raise ValueError("当前没有可用的Bot对象...", log_cmd) from e
 
     async def call_check(self, bot: Bot, group_id: str) -> bool:
         """运行发送检测函数

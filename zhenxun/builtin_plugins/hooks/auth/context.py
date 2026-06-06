@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 class EventContext:
     bot_id: str
     platform: str
+    platform_scope: str
     event_type: str
     message_id: str | int | None
     entity: EntityIDs
@@ -170,6 +171,7 @@ def event_cache_key(
     *,
     bot_id: str,
     platform: str,
+    platform_scope: str | None = None,
     entity: EntityIDs,
 ) -> str:
     msg_id = _event_message_id(event)
@@ -177,7 +179,11 @@ def event_cache_key(
         msg_id = id(event)
     group_id = entity.group_id or ""
     channel_id = entity.channel_id or ""
-    return f"{platform}:{bot_id}:{entity.user_id}:{group_id}:{channel_id}:{msg_id}"
+    scope = platform_scope or platform
+    return (
+        f"{scope}:{platform}:{bot_id}:{entity.user_id}:"
+        f"{group_id}:{channel_id}:{msg_id}"
+    )
 
 
 def get_event_cache(
@@ -185,11 +191,18 @@ def get_event_cache(
     *,
     bot_id: str,
     platform: str,
+    platform_scope: str | None = None,
     entity: EntityIDs,
 ) -> dict[str, Any] | None:
     if not EVENT_CACHE:
         return None
-    key = event_cache_key(event, bot_id=bot_id, platform=platform, entity=entity)
+    key = event_cache_key(
+        event,
+        bot_id=bot_id,
+        platform=platform,
+        platform_scope=platform_scope,
+        entity=entity,
+    )
     try:
         return EVENT_CACHE[key]
     except KeyError:
@@ -255,6 +268,7 @@ def get_or_create_event_context(
         entity = resolve_entity_ids(event, session)
 
     platform = PlatformUtils.get_platform(session)
+    platform_scope = PlatformUtils.get_platform_scope(session)
     bot_id = str(bot.self_id)
     event_cache = state.get(STATE_EVENT_CACHE)
     if not isinstance(event_cache, dict):
@@ -262,6 +276,7 @@ def get_or_create_event_context(
             event,
             bot_id=bot_id,
             platform=platform,
+            platform_scope=platform_scope,
             entity=entity,
         )
 
@@ -292,6 +307,7 @@ def get_or_create_event_context(
     context = EventContext(
         bot_id=bot_id,
         platform=platform,
+        platform_scope=platform_scope,
         event_type=event.get_type(),
         message_id=_event_message_id(event),
         entity=entity,

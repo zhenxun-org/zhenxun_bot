@@ -39,6 +39,11 @@ _matcher = on_alconna(
 async def _(bot: Bot, session: EventSession, arparma: Arparma):
     logger.info("更新群组信息", arparma.header_result, session=session)
     try:
+        if PlatformUtils.get_platform_scope(bot) != "qq_client":
+            await MessageUtils.build_message(
+                "当前平台不支持旧群组信息同步，仅 OneBot 协议端可用。"
+            ).send(reply_to=True)
+            return
         await PlatformUtils.update_group(bot)
         await MessageUtils.build_message("已经成功更新了群组信息!").send(reply_to=True)
     except Exception:
