@@ -3,18 +3,25 @@ nonebot-plugin-weather
 Zhenxun Bot weather subscription and warning push plugin.
 """
 
-from nonebot import on_command, require, logger, get_bot
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, GroupMessageEvent, MessageSegment
-from nonebot.params import CommandArg
-from nonebot.adapters import Message
-from nonebot.plugin import PluginMetadata
-from nonebot.permission import SUPERUSER
-from zhenxun.configs.config import Config
-from zhenxun.configs.utils import PluginExtraData, RegisterConfig
 from datetime import datetime
 import json
-import re
 from pathlib import Path
+import re
+
+from nonebot import get_bot, logger, on_command, require
+from nonebot.adapters import Message
+from nonebot.adapters.onebot.v11 import (
+    Bot,
+    GroupMessageEvent,
+    MessageEvent,
+    MessageSegment,
+)
+from nonebot.params import CommandArg
+from nonebot.permission import SUPERUSER
+from nonebot.plugin import PluginMetadata
+
+from zhenxun.configs.config import Config
+from zhenxun.configs.utils import PluginExtraData, RegisterConfig
 
 from . import api
 
@@ -28,21 +35,27 @@ __plugin_meta__ = PluginMetadata(
         configs=[
             RegisterConfig(
                 module="nonebot_plugin_weather",
-                key="API_KEY", value="",
+                key="API_KEY",
+                value="",
                 help="和风天气 API Key（必填），申请地址：https://dev.qweather.com/",
-                default_value="", type=str,
+                default_value="",
+                type=str,
             ),
             RegisterConfig(
                 module="nonebot_plugin_weather",
-                key="API_HOST", value="",
+                key="API_HOST",
+                value="",
                 help="和风天气专属 API Host（必填），例如 devapi.qweather.com",
-                default_value="", type=str,
+                default_value="",
+                type=str,
             ),
             RegisterConfig(
                 module="nonebot_plugin_weather",
-                key="DEFAULT_CITY", value="北京",
+                key="DEFAULT_CITY",
+                value="北京",
                 help="默认查询城市",
-                default_value="北京", type=str,
+                default_value="北京",
+                type=str,
             ),
         ],
     ).dict(),
@@ -54,16 +67,18 @@ weather_cmd = on_command("天气", priority=5, block=True)
 SUBSCRIPTION_FILE = Path(__file__).parent / "subscriptions.json"
 _subscriptions: dict[str, dict] = {}
 
+
 def _load_subscriptions():
     global _subscriptions
     if SUBSCRIPTION_FILE.exists():
         try:
-            with open(SUBSCRIPTION_FILE, "r", encoding="utf-8") as f:
+            with open(SUBSCRIPTION_FILE, encoding="utf-8") as f:
                 _subscriptions = json.load(f)
         except Exception:
             _subscriptions = {}
     else:
         _subscriptions = {}
+
 
 def _save_subscriptions():
     try:
@@ -72,8 +87,10 @@ def _save_subscriptions():
     except Exception as e:
         logger.error(f"[Weather] 保存订阅失败: {e}")
 
+
 def _get_user_id(event) -> str:
     return str(event.get_user_id())
+
 
 def _parse_time(time_str: str):
     time_str = time_str.strip()
@@ -84,15 +101,30 @@ def _parse_time(time_str: str):
         return True, f"{time_str[:2]}:{time_str[2:]}"
     return False, "时间格式错误，请使用 HH:MM 或 HHMM"
 
+
 _load_subscriptions()
 
 # ============ 图标 & Emoji ============
 WEATHER_ICON = {
-    "晴": "100", "多云": "101", "阴": "104", "小雨": "305", "中雨": "306",
-    "大雨": "307", "暴雨": "310", "雷阵雨": "302", "雪": "499", "小雪": "400",
-    "中雪": "401", "大雪": "402", "雾": "501", "霾": "502", "沙": "503", "尘": "504",
+    "晴": "100",
+    "多云": "101",
+    "阴": "104",
+    "小雨": "305",
+    "中雨": "306",
+    "大雨": "307",
+    "暴雨": "310",
+    "雷阵雨": "302",
+    "雪": "499",
+    "小雪": "400",
+    "中雪": "401",
+    "大雪": "402",
+    "雾": "501",
+    "霾": "502",
+    "沙": "503",
+    "尘": "504",
     "风": "999",
 }
+
 
 def get_icon(weather: str) -> str:
     for k, v in WEATHER_ICON.items():
@@ -100,16 +132,33 @@ def get_icon(weather: str) -> str:
             return v
     return "100"
 
+
 def get_emoji(weather: str) -> str:
     em = {
-        "晴": "☀️", "多云": "⛅", "阴": "☁️", "小雨": "🌦️", "中雨": "🌧️",
-        "大雨": "⛈️", "暴雨": "⛈️", "雷阵雨": "⛈️", "雪": "🌨️", "小雪": "🌨️",
-        "中雪": "❄️", "大雪": "❄️", "雾": "🌫️", "霾": "😷", "沙": "💨", "尘": "💨", "风": "🍃",
+        "晴": "☀️",
+        "多云": "⛅",
+        "阴": "☁️",
+        "小雨": "🌦️",
+        "中雨": "🌧️",
+        "大雨": "⛈️",
+        "暴雨": "⛈️",
+        "雷阵雨": "⛈️",
+        "雪": "🌨️",
+        "小雪": "🌨️",
+        "中雪": "❄️",
+        "大雪": "❄️",
+        "雾": "🌫️",
+        "霾": "😷",
+        "沙": "💨",
+        "尘": "💨",
+        "风": "🍃",
     }
     for k, v in em.items():
         if k in weather:
             return v
     return "🌡️"
+
+
 # ... existing code ...
 def get_weekday(date_str: str) -> str:
     try:
@@ -118,6 +167,7 @@ def get_weekday(date_str: str) -> str:
         return weekdays[dt.weekday()]
     except Exception:
         return ""
+
 
 # Deleted:def get_warning_color(level: str):
 # Deleted:    colors = {
@@ -154,10 +204,18 @@ def generate_now_html(data: api.WeatherData, air: api.AirQuality = None) -> str:
     if air:
         try:
             aqi_val = float(air.aqi) if air.aqi != "--" else 0
-            aqi_color = "#4CAF50" if aqi_val <= 50 else "#FFC107" if aqi_val <= 100 else "#FF9800" if aqi_val <= 150 else "#F44336"
+            aqi_color = (
+                "#4CAF50"
+                if aqi_val <= 50
+                else "#FFC107"
+                if aqi_val <= 100
+                else "#FF9800"
+                if aqi_val <= 150
+                else "#F44336"
+            )
         except Exception:
             aqi_color = "#9E9E9E"
-        aqi_html = f'''<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 14px; margin-top: 14px; color: white;">
+        aqi_html = f"""<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 14px; margin-top: 14px; color: white;">
             <div style="text-align: center; margin-bottom: 10px;">
                 <span style="display: inline-block; background: rgba(255,255,255,0.2); padding: 4px 16px; border-radius: 16px; font-size: 14px; font-weight: bold;">{air.aqi} {air.level}</span>
             </div>
@@ -169,7 +227,7 @@ def generate_now_html(data: api.WeatherData, air: api.AirQuality = None) -> str:
                 <div><div style="font-size: 10px; opacity: 0.8;">NO₂</div><div style="font-size: 13px; font-weight: bold;">{air.no2}</div></div>
                 <div><div style="font-size: 10px; opacity: 0.8;">SO₂</div><div style="font-size: 13px; font-weight: bold;">{air.so2}</div></div>
             </div>
-        </div>'''
+        </div>"""
 
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
@@ -230,7 +288,7 @@ def generate_forecast_html(city: str, forecasts: list) -> str:
         night_icon = get_icon(f.night_weather)
         day_url = f"https://icons.qweather.com/assets/icons/{day_icon}.svg"
         night_url = f"https://icons.qweather.com/assets/icons/{night_icon}.svg"
-        forecast_rows += f'''<div style="display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(102,204,255,0.15);">
+        forecast_rows += f"""<div style="display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(102,204,255,0.15);">
             <div style="width: 70px;">
                 <div style="font-size: 14px; font-weight: bold; color: #1a5276;">{weekday}</div>
                 <div style="font-size: 11px; color: #888;">{f.date[5:]}</div>
@@ -249,7 +307,7 @@ def generate_forecast_html(city: str, forecasts: list) -> str:
                 <span style="font-size: 16px; font-weight: bold; color: #1a5276;">{f.temp_max}°</span>
                 <span style="font-size: 13px; color: #888;"> / {f.temp_min}°</span>
             </div>
-        </div>'''
+        </div>"""
 
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
@@ -264,7 +322,10 @@ body {{ width: 440px; padding: 16px; background: linear-gradient(180deg, #E6F7FF
     <div style="text-align: center; margin-top: 12px; font-size: 10px; color: #5dade2;">◆ 数据来源：和风天气 ◆</div>
 </div>
 </body></html>"""
+
+
 # ... existing code ...
+
 
 # ============ 发送图片卡片 ============
 async def send_html_card(html: str, bot: Bot, event: MessageEvent):
@@ -272,6 +333,7 @@ async def send_html_card(html: str, bot: Bot, event: MessageEvent):
     try:
         require("nonebot_plugin_htmlrender")
         from nonebot_plugin_htmlrender import html_to_pic
+
         img_bytes = await html_to_pic(html=html, viewport={"width": 480, "height": 10})
         await bot.send(event, MessageSegment.image(img_bytes))
     except Exception as e:
@@ -300,7 +362,9 @@ async def handle_weather(bot: Bot, event: MessageEvent, args: Message = CommandA
             await weather_cmd.finish("❌ 你当前没有订阅\n使用：天气 订阅 [城市] [时间]")
         sub = _subscriptions[user_id]
         loc = f"群 {sub.get('group_id', '私聊')}" if sub.get("group_id") else "私聊"
-        await weather_cmd.finish(f"📋 你的订阅：{sub['city']} 每天 {sub['time']} | {loc}")
+        await weather_cmd.finish(
+            f"📋 你的订阅：{sub['city']} 每天 {sub['time']} | {loc}"
+        )
 
     if parts and parts[0] in ["订阅", "subscribe"]:
         if len(parts) < 3:
@@ -327,9 +391,9 @@ async def handle_weather(bot: Bot, event: MessageEvent, args: Message = CommandA
     if not api_key or not api_host:
         await weather_cmd.finish("❌ API Key 或 API Host 未配置，请联系管理员")
 
-# ... existing code ...
+    # ... existing code ...
     # ===== ✅ 预报模式 =====
-        # --- 判断是预报还是实时 ---
+    # --- 判断是预报还是实时 ---
     # 如果最后一个部分是纯数字（1-7）且前面有内容，视为预报
     if len(parts) >= 2 and parts[-1].isdigit():
         days = min(max(int(parts[-1]), 1), 7)
@@ -361,9 +425,12 @@ async def handle_weather(bot: Bot, event: MessageEvent, args: Message = CommandA
 
     await send_html_card(generate_now_html(weather_data, air), bot, event)
     logger.info(f"用户 {user_id} 查询了 [{city}] 天气")
+
+
 # ... existing code ...
 # ============ 管理员命令 ============
 admin_weather = on_command("天气管理", priority=5, block=True, permission=SUPERUSER)
+
 
 @admin_weather.handle()
 async def handle_admin(event: MessageEvent, args: Message = CommandArg()):
@@ -407,7 +474,9 @@ async def handle_admin(event: MessageEvent, args: Message = CommandArg()):
         _subscriptions[uid]["city"] = rest[0]
         _subscriptions[uid]["time"] = result
         _save_subscriptions()
-        await admin_weather.finish(f"✅ 已修改：{old['city']} {old['time']} → {rest[0]} {result}")
+        await admin_weather.finish(
+            f"✅ 已修改：{old['city']} {old['time']} → {rest[0]} {result}"
+        )
 
     await admin_weather.finish("📋 天气管理：查看/删除 [QQ]/修改 [QQ] [城市] [时间]")
 
@@ -415,6 +484,7 @@ async def handle_admin(event: MessageEvent, args: Message = CommandArg()):
 # ============ 定时推送 ============
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
+
 
 # ... existing code ...
 @scheduler.scheduled_job("cron", minute="*/1", id="weather_subscription_check")
@@ -448,12 +518,19 @@ async def check_subscriptions():
             html = generate_now_html(weather_data, air)
             require("nonebot_plugin_htmlrender")
             from nonebot_plugin_htmlrender import html_to_pic
-            img_bytes = await html_to_pic(html=html, viewport={"width": 480, "height": 10})
+
+            img_bytes = await html_to_pic(
+                html=html, viewport={"width": 480, "height": 10}
+            )
 
             group_id = sub.get("group_id", "")
             if group_id:
-                await bot.send_group_msg(group_id=int(group_id), message=MessageSegment.image(img_bytes))
+                await bot.send_group_msg(
+                    group_id=int(group_id), message=MessageSegment.image(img_bytes)
+                )
             else:
-                await bot.send_private_msg(user_id=int(uid), message=MessageSegment.image(img_bytes))
+                await bot.send_private_msg(
+                    user_id=int(uid), message=MessageSegment.image(img_bytes)
+                )
         except Exception as e:
             logger.error(f"[Weather] 推送失败 {uid}: {e}")

@@ -1,10 +1,5 @@
 import httpx
-import json
-import re
-import xml.etree.ElementTree as ET
-from typing import Optional
 from pydantic import BaseModel
-
 
 # Deleted:def _parse_warning_level(text: str) -> str:
 # Deleted:    """从文本中提取预警等级"""
@@ -18,6 +13,7 @@ from pydantic import BaseModel
 # Deleted:        return "blue"
 # Deleted:    return "unknown"
 
+
 class WeatherData(BaseModel):
     city: str
     date: str
@@ -28,6 +24,7 @@ class WeatherData(BaseModel):
     wind_scale: str
     visibility: str = "--"
 
+
 class DailyForecast(BaseModel):
     date: str
     day_weather: str
@@ -37,12 +34,14 @@ class DailyForecast(BaseModel):
     wind_dir_day: str
     wind_scale_day: str
 
+
 # Deleted:class WarningInfo(BaseModel):
 # Deleted:    title: str
 # Deleted:    type: str
 # Deleted:    level: str
 # Deleted:    text: str
 # Deleted:    pub_time: str
+
 
 class AirQuality(BaseModel):
     aqi: str
@@ -55,7 +54,7 @@ class AirQuality(BaseModel):
     so2: str
 
 
-async def get_weather(city: str, api_key: str, api_host: str) -> Optional[WeatherData]:
+async def get_weather(city: str, api_key: str, api_host: str) -> WeatherData | None:
     if not api_key or not api_host:
         return None
     async with httpx.AsyncClient(timeout=30) as client:
@@ -65,7 +64,7 @@ async def get_weather(city: str, api_key: str, api_host: str) -> Optional[Weathe
         try:
             resp = await client.get(
                 f"https://{api_host}/v7/weather/now",
-                params={"location": city_id, "key": api_key, "lang": "zh"}
+                params={"location": city_id, "key": api_key, "lang": "zh"},
             )
             resp.raise_for_status()
             data = resp.json()
@@ -86,7 +85,9 @@ async def get_weather(city: str, api_key: str, api_host: str) -> Optional[Weathe
         )
 
 
-async def get_forecast(city: str, days: int, api_key: str, api_host: str) -> Optional[list[DailyForecast]]:
+async def get_forecast(
+    city: str, days: int, api_key: str, api_host: str
+) -> list[DailyForecast] | None:
     if not api_key or not api_host:
         return None
     days = min(max(days, 1), 7)
@@ -97,7 +98,7 @@ async def get_forecast(city: str, days: int, api_key: str, api_host: str) -> Opt
         try:
             resp = await client.get(
                 f"https://{api_host}/v7/weather/{days}d",
-                params={"location": city_id, "key": api_key, "lang": "zh"}
+                params={"location": city_id, "key": api_key, "lang": "zh"},
             )
             resp.raise_for_status()
             data = resp.json()
@@ -107,15 +108,17 @@ async def get_forecast(city: str, days: int, api_key: str, api_host: str) -> Opt
             return None
         result = []
         for day in data.get("daily", [])[:days]:
-            result.append(DailyForecast(
-                date=day.get("fxDate", ""),
-                day_weather=day.get("textDay", "未知"),
-                night_weather=day.get("textNight", "未知"),
-                temp_max=day.get("tempMax", "--"),
-                temp_min=day.get("tempMin", "--"),
-                wind_dir_day=day.get("windDirDay", "--"),
-                wind_scale_day=day.get("windScaleDay", "--"),
-            ))
+            result.append(
+                DailyForecast(
+                    date=day.get("fxDate", ""),
+                    day_weather=day.get("textDay", "未知"),
+                    night_weather=day.get("textNight", "未知"),
+                    temp_max=day.get("tempMax", "--"),
+                    temp_min=day.get("tempMin", "--"),
+                    wind_dir_day=day.get("windDirDay", "--"),
+                    wind_scale_day=day.get("windScaleDay", "--"),
+                )
+            )
         return result
 
 
@@ -236,7 +239,7 @@ async def get_forecast(city: str, days: int, api_key: str, api_host: str) -> Opt
 # Deleted:        return None
 
 
-async def get_air_quality(city: str, api_key: str, api_host: str) -> Optional[AirQuality]:
+async def get_air_quality(city: str, api_key: str, api_host: str) -> AirQuality | None:
     if not api_key or not api_host:
         return None
     async with httpx.AsyncClient(timeout=30) as client:
@@ -246,7 +249,7 @@ async def get_air_quality(city: str, api_key: str, api_host: str) -> Optional[Ai
         try:
             resp = await client.get(
                 f"https://{api_host}/v7/air/now",
-                params={"location": city_id, "key": api_key, "lang": "zh"}
+                params={"location": city_id, "key": api_key, "lang": "zh"},
             )
             resp.raise_for_status()
             data = resp.json()
@@ -267,11 +270,13 @@ async def get_air_quality(city: str, api_key: str, api_host: str) -> Optional[Ai
         )
 
 
-async def _get_city_id(client: httpx.AsyncClient, city: str, api_key: str, api_host: str) -> Optional[str]:
+async def _get_city_id(
+    client: httpx.AsyncClient, city: str, api_key: str, api_host: str
+) -> str | None:
     try:
         resp = await client.get(
             f"https://{api_host}/geo/v2/city/lookup",
-            params={"location": city, "key": api_key, "lang": "zh"}
+            params={"location": city, "key": api_key, "lang": "zh"},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -283,7 +288,7 @@ async def _get_city_id(client: httpx.AsyncClient, city: str, api_key: str, api_h
     try:
         resp = await client.get(
             f"https://{api_host}/geo/v2/city/lookup",
-            params={"location": city, "key": api_key, "lang": "zh"}
+            params={"location": city, "key": api_key, "lang": "zh"},
         )
         resp.raise_for_status()
         data = resp.json()
