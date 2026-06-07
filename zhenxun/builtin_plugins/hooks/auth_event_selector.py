@@ -72,8 +72,8 @@ def _ensure_nonempty_qq_message(message: Any) -> None:
     if message:
         return
     with contextlib.suppress(Exception):
-        from nonebot.adapters.qq.message import MessageSegment
-
+        message_module = importlib.import_module("nonebot.adapters.qq.message")
+        MessageSegment = getattr(message_module, "MessageSegment")
         message.append(MessageSegment.text(""))
 
 

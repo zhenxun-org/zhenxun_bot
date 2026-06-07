@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 import contextlib
+import importlib
 from typing import Any, cast
 
 from nonebot.adapters import Bot, Event
@@ -217,14 +218,19 @@ def apply_uninfo_onebot11_patch() -> None:
             fetcher.endpoint[GroupMessageEvent] = _fast_onebot11_group_message
 
     with contextlib.suppress(Exception):
-        from nonebot.adapters.qq.event import (
-            AtMessageCreateEvent,
-            C2CMessageCreateEvent,
-            DirectMessageCreateEvent,
-            GroupAtMessageCreateEvent,
-            GroupMessageCreateEvent,
-            MessageCreateEvent,
+        qq_event_module = importlib.import_module("nonebot.adapters.qq.event")
+        AtMessageCreateEvent = getattr(qq_event_module, "AtMessageCreateEvent")
+        C2CMessageCreateEvent = getattr(qq_event_module, "C2CMessageCreateEvent")
+        DirectMessageCreateEvent = getattr(qq_event_module, "DirectMessageCreateEvent")
+        GroupAtMessageCreateEvent = getattr(
+            qq_event_module,
+            "GroupAtMessageCreateEvent",
         )
+        GroupMessageCreateEvent = getattr(
+            qq_event_module,
+            "GroupMessageCreateEvent",
+        )
+        MessageCreateEvent = getattr(qq_event_module, "MessageCreateEvent")
         from nonebot_plugin_uninfo.adapters.qq.main import fetcher as qq_fetcher
 
         original_c2c = qq_fetcher.endpoint.get(C2CMessageCreateEvent)
