@@ -151,9 +151,11 @@ class UserConsole(Model):
             source: 来源
             platform: 平台.
         """
-        user = await cls._get_user_for_write(user_id=user_id, platform=platform)
-        user.gold += gold
-        await user.save(update_fields=["gold"])
+        await cls._get_user_for_write(user_id=user_id, platform=platform)
+        # 原子自增,避免并发 read-modify-write 丢币(A2);filter().update()
+        # 不触发基类 save() 的缓存失效,需手动失效。
+        await cls.filter(user_id=user_id).update(gold=F("gold") + gold)
+        await cls.invalidate_user_cache(user_id)
         await append_user_gold_log(
             user_id=user_id, gold=gold, handle=GoldHandle.GET, source=source
         )
@@ -182,8 +184,14 @@ class UserConsole(Model):
         user = await cls._get_user_for_write(user_id=user_id, platform=platform)
         if user.gold < gold:
             raise InsufficientGold()
-        user.gold -= gold
-        await user.save(update_fields=["gold"])
+        # 原子扣减 + gold__gte 守卫,防并发超扣(A2);未命中说明余额已被
+        # 其他协程扣走,按金币不足处理。
+        updated = await cls.filter(user_id=user_id, gold__gte=gold).update(
+            gold=F("gold") - gold
+        )
+        if not updated:
+            raise InsufficientGold()
+        await cls.invalidate_user_cache(user_id)
         await append_user_gold_log(
             user_id=user_id, gold=gold, handle=handle, source=plugin_module
         )

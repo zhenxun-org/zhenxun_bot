@@ -346,7 +346,7 @@ class LimitManager:
         limit = limit_model.limit
         limiter = limit_model.limiter
         is_limit = (
-            LimitWatchType.ALL
+            limit.watch_type == LimitWatchType.ALL
             or (group_id and limit.watch_type == LimitWatchType.GROUP)
             or (not group_id and limit.watch_type == LimitWatchType.USER)
         )

@@ -146,6 +146,10 @@ class DataAccess(Generic[T]):
         返回:
             str | None: 缓存键，如果无法构建则返回None
         """
+        # 含 ORM lookup 后缀(如 channel_id__isnull / x__gte)的查询无法可靠映射到
+        # 单条主键缓存键,退化为直查 DB,避免空串与 NULL 语义混淆导致错误命中(A5)。
+        if any("__" in key for key in kwargs):
+            return None
         if isinstance(self.key_field, tuple):
             # 多字段主键
             key_parts = []

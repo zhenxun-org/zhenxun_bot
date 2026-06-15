@@ -105,6 +105,7 @@ class ScheduleContext(BaseModel):
     schedule_id: int = Field(..., description="数据库中的任务ID")
     plugin_name: str = Field(..., description="任务所属的插件名称")
     bot_id: str | None = Field(None, description="执行任务的Bot ID")
+    platform_scope: str | None = Field(None, description="执行任务的细粒度平台作用域")
     group_id: str | None = Field(None, description="当前执行实例的目标群组ID")
     job_kwargs: dict = Field(default_factory=dict, description="任务配置的参数")
 

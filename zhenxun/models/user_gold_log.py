@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from tortoise import fields
 
 from zhenxun.services.db_context import Model
@@ -21,3 +23,9 @@ class UserGoldLog(Model):
     class Meta:  # pyright: ignore [reportIncompatibleVariableOverride]
         table = "user_gold_log"
         table_description = "用户金币记录表"
+        # 高频写表补索引(H4):按 user_id / (user_id, create_time) 查询流水,
+        # SchemaGuard 启动时自动建,不改变查询语义。
+        indexes: ClassVar = [
+            ("user_id",),
+            ("user_id", "create_time"),
+        ]

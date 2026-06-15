@@ -496,10 +496,11 @@ def _event_text_candidates(
             candidates.append(normalized)
 
     add(_trie_command_text_from_state(state))
-    add(_trie_raw_command_from_state(state))
+    trie_raw = _trie_raw_command_from_state(state)
+    add(trie_raw)
     trie_arg = _trie_command_arg_text_from_state(state)
-    if _trie_raw_command_from_state(state) and trie_arg:
-        add(f"{_trie_raw_command_from_state(state)} {trie_arg}")
+    if trie_raw and trie_arg:
+        add(f"{trie_raw} {trie_arg}")
     add(plain_text)
     if event is not None:
         with contextlib.suppress(Exception):
@@ -794,9 +795,10 @@ def _prepare_handle_event_state(event: Event, state: dict) -> None:
 
 
 def _build_matcher_state(base_state: dict) -> dict:
+    # 第一次调用即在 base_state 写入副作用缓存对象;copy() 后 matcher_state
+    # 与之共享同一引用,无需二次 get(B7)。
     get_permission_side_effect_cache(state=base_state)
     matcher_state = base_state.copy()
-    get_permission_side_effect_cache(state=matcher_state)
     return matcher_state
 
 
@@ -965,25 +967,28 @@ async def _db_section():
         DB_ACTIVE_COUNT = max(DB_ACTIVE_COUNT - 1, 0)
 
 
+_POLICY_SKIP_MESSAGES = {
+    "user_or_group_banned": "user or group banned (cached)",
+    "superuser_required": "超级管理员权限不足...",
+    "admin_required": "管理员权限不足...",
+    "bot_not_found": "Bot不存在，阻断权限检测...",
+    "bot_sleeping": "Bot休眠中阻断权限检测...",
+    "bot_plugin_blocked": "Bot插件权限检查结果为关闭...",
+    "group_not_found": "群组信息不存在...",
+    "group_blacklisted": "群组黑名单, 目标群组群权限权限-1...",
+    "group_sleeping": "群组休眠状态...",
+    "group_level_low": "群等级限制...",
+    "admin_level_low": "管理员权限不足...",
+    "plugin_disabled_in_group": "该插件在群组中已被禁用...",
+    "plugin_superuser_blocked_in_group": "超级管理员禁用了该群此功能...",
+    "plugin_blocked_in_group": "该群未开启此功能...",
+    "plugin_disabled_in_private": "该插件在私聊中已被禁用...",
+    "plugin_global_disabled": "全局未开启此功能...",
+}
+
+
 def _policy_skip_message(reason: str) -> str:
-    return {
-        "user_or_group_banned": "user or group banned (cached)",
-        "superuser_required": "超级管理员权限不足...",
-        "admin_required": "管理员权限不足...",
-        "bot_not_found": "Bot不存在，阻断权限检测...",
-        "bot_sleeping": "Bot休眠中阻断权限检测...",
-        "bot_plugin_blocked": "Bot插件权限检查结果为关闭...",
-        "group_not_found": "群组信息不存在...",
-        "group_blacklisted": "群组黑名单, 目标群组群权限权限-1...",
-        "group_sleeping": "群组休眠状态...",
-        "group_level_low": "群等级限制...",
-        "admin_level_low": "管理员权限不足...",
-        "plugin_disabled_in_group": "该插件在群组中已被禁用...",
-        "plugin_superuser_blocked_in_group": "超级管理员禁用了该群此功能...",
-        "plugin_blocked_in_group": "该群未开启此功能...",
-        "plugin_disabled_in_private": "该插件在私聊中已被禁用...",
-        "plugin_global_disabled": "全局未开启此功能...",
-    }.get(reason, reason or "permission denied")
+    return _POLICY_SKIP_MESSAGES.get(reason, reason or "permission denied")
 
 
 # 超时装饰器
@@ -1342,17 +1347,23 @@ async def _check_ban_from_snapshot(
     hook_recorder: HookTraceRecorder,
     session: Uninfo,
 ) -> None:
+    # skip_ban 上移到 cached 判断之前(A7),否则豁免参数对 cached 命中形同虚设。
+    if skip_ban:
+        hook_recorder.set("auth_ban", "skipped")
+        return
+    is_superuser = bool(getattr(prep.permission_context, "is_superuser", False))
     ban_cache_state = prep.snapshot.ban_state
     if event_cache is not None:
         ban_cache_state = event_cache.get("ban_state")
     if ban_cache_state is True:
+        # 超级用户豁免(A7):与 PDP / 旧轨权威路径保持一致,避免被 ban 后无法自救。
+        if is_superuser:
+            hook_recorder.set("auth_ban", "cached_superuser_exempt")
+            return
         hook_recorder.set("auth_ban", "cached")
         raise SkipPluginException("user or group banned (cached)")
     if ban_cache_state is False:
         hook_recorder.set("auth_ban", "cached")
-        return
-    if skip_ban:
-        hook_recorder.set("auth_ban", "skipped")
         return
 
     ban_start = time.time()

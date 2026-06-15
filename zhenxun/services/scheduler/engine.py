@@ -278,6 +278,7 @@ async def _execute_single_job_instance(
         schedule_id=schedule.id,
         plugin_name=plugin_name,
         bot_id=bot.self_id,
+        platform_scope=PlatformUtils.get_platform_scope(bot),
         group_id=group_id,
         job_kwargs=schedule.job_kwargs if isinstance(schedule.job_kwargs, dict) else {},
     )
@@ -381,6 +382,7 @@ async def _execute_job(
             )
             if bot is None:
                 return
+            context_override.platform_scope = PlatformUtils.get_platform_scope(bot)
             logger.info(f"开始执行临时任务: {plugin_name}")
             injected_params = {"context": context_override}
             state: T_State = {ScheduleContext: context_override}

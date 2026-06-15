@@ -23,7 +23,7 @@ class AuthDispatchRuntimeConfig:
     circuit_reset_time: int = 300
     matcher_route_prefilter_ttl: int = 2
     prefilter_stats_log_interval: float = 10.0
-    cache_sweep_interval: float = 1.0
+    cache_sweep_interval: float = 45.0
     dispatch_stats_log_interval: float = 10.0
 
 

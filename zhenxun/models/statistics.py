@@ -15,7 +15,7 @@ class Statistics(Model):
     """群聊id"""
     plugin_name = fields.CharField(255)
     """插件名称"""
-    create_time = fields.DatetimeField(auto_now=True)
+    create_time = fields.DatetimeField(auto_now_add=True)
     """添加日期"""
     bot_id = fields.CharField(255, null=True)
     """Bot Id"""

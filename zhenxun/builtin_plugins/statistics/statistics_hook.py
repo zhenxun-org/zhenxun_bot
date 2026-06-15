@@ -53,8 +53,12 @@ async def _flush_statistics_buffer(reason: str) -> int:
 
 
 async def _append_statistics(record: Statistics) -> None:
-    TEMP_LIST.append(record)
-    if len(TEMP_LIST) >= STATS_BUFFER_FLUSH_SIZE and not _STATS_FLUSH_LOCK.locked():
+    # 在锁内追加(B8),与 flush 的 copy+clear 串行,消除逻辑窗口;
+    # flush 自身再次获取同一把锁,故在锁外触发避免重入。
+    async with _STATS_FLUSH_LOCK:
+        TEMP_LIST.append(record)
+        should_flush = len(TEMP_LIST) >= STATS_BUFFER_FLUSH_SIZE
+    if should_flush:
         await _flush_statistics_buffer("缓冲区触发")
 
 

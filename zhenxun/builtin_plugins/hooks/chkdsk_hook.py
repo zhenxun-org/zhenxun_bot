@@ -82,6 +82,11 @@ async def _(
     if matcher.type == "notice":
         return
 
+    # AI 重路由注入的合成事件不计入恶意检测(A6):AI 链路有自己的预算/审批,
+    # 不应被人类反垃圾逻辑封禁(此前批量转发误封超级用户的事故根因之一)。
+    if getattr(event, "_ai_triggered", False):
+        return
+
     # 提前判断插件类型，跳过不需要检测的插件
     if plugin := matcher.plugin:
         if metadata := plugin.metadata:
@@ -99,6 +104,13 @@ async def _(
 
     user_id = resolve_actor_user_id(event, session.id1)
     group_id = resolve_event_group_id(event, session.id3 or session.id2)
+    # 超级用户豁免恶意检测(A6):与权威权限路径保持一致,避免误封管理者。
+    if user_id:
+        is_superuser = state.get("_zx_is_superuser")
+        if not isinstance(is_superuser, bool):
+            is_superuser = user_id in bot.config.superusers
+        if is_superuser:
+            return
     malicious_check_time = float(_get_positive_config("MALICIOUS_CHECK_TIME", float))
     malicious_ban_count = int(_get_positive_config("MALICIOUS_BAN_COUNT", int))
     malicious_ban_time = int(_get_positive_config("MALICIOUS_BAN_TIME", int))

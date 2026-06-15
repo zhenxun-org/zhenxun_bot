@@ -101,6 +101,46 @@ class PlatformUtils:
         return None
 
     @classmethod
+    def resolve_bot(
+        cls,
+        bot_id: str | None = None,
+        platform_scope: str | None = None,
+        log_cmd: str | None = None,
+    ) -> Bot | None:
+        """Resolve a bot without randomly selecting the QQ official adapter.
+
+        Background jobs that require OneBot APIs should pass
+        ``platform_scope="qq_client"``.  When no scope is supplied and multiple
+        bots are online, a single OneBot client is preferred; otherwise the
+        ambiguous selection is skipped.
+        """
+        if bot_id:
+            try:
+                bot = nonebot.get_bot(bot_id)
+            except KeyError:
+                logger.warning(f"Bot:{bot_id} 对象未连接或不存在", log_cmd)
+                return None
+            if platform_scope and cls.get_platform_scope(bot) != platform_scope:
+                logger.warning(f"Bot:{bot_id} 平台作用域不匹配，已跳过。", log_cmd)
+                return None
+            return bot
+
+        bots = list(nonebot.get_bots().values())
+        if platform_scope:
+            bots = [
+                bot for bot in bots if cls.get_platform_scope(bot) == platform_scope
+            ]
+        if not bots:
+            logger.warning("当前没有匹配的 Bot，已跳过。", log_cmd)
+            return None
+        if len(bots) == 1:
+            return bots[0]
+        if platform_scope is None:
+            return cls._resolve_unique_qq_client_bot(log_cmd)
+        logger.warning("存在多个匹配的 Bot，无法安全选择，已跳过。", log_cmd)
+        return None
+
+    @classmethod
     def is_qbot(cls, session: Uninfo | Bot) -> bool:
         """判断bot是否为qq官bot
 
@@ -437,10 +477,13 @@ class PlatformUtils:
                 info = interface.basic_info()
                 platform = info["scope"].lower()
                 return "qq" if platform.startswith("qq") else platform
+            adapter_name = _adapter_name(t)
+            if "onebot" in adapter_name or adapter_name == "qq":
+                return "qq"
+            return adapter_name or "unknown"
         else:
             platform = t.basic["scope"].lower()
             return "qq" if platform.startswith("qq") else platform
-        return "unknown"
 
     @classmethod
     def get_platform_scope(cls, t: Bot | Uninfo | object) -> str:

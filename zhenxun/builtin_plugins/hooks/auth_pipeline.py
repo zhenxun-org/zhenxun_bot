@@ -246,7 +246,11 @@ async def route_gate_stage(
     if deps.is_hidden_plugin(ctx.matcher):
         ctx.stop(allowed=True, effect="allow", reason="hidden_plugin")
         return
-    if ctx.event_cache is not None and ctx.event_cache.get("ban_state") is True:
+    if (
+        ctx.event_cache is not None
+        and ctx.event_cache.get("ban_state") is True
+        and not ctx.event_context.is_superuser
+    ):
         ctx.decision_effect = "skip"
         ctx.decision_reason = "ban_cached"
         raise SkipPluginException("user or group banned (cached)")

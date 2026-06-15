@@ -71,6 +71,7 @@ class HandlerDescriptor:
 class AlconnaShortcutDescriptor:
     pattern: str
     fuzzy: bool = False
+    prefix: bool = False
     flags: int = 0
 
 
@@ -1059,6 +1060,7 @@ def _extract_alconna_shortcut_descriptors(
                     AlconnaShortcutDescriptor(
                         pattern=pattern,
                         fuzzy=bool(getattr(args, "fuzzy", False)),
+                        prefix=bool(getattr(args, "prefix", False)),
                         flags=int(getattr(args, "flags", 0) or 0),
                     )
                 )
@@ -1140,7 +1142,7 @@ def matcher_alconna_head_matches(
             if decision == "unknown":
                 saw_unknown = True
         for shortcut in alconna.shortcuts:
-            decision = _alconna_shortcut_matches(text, shortcut)
+            decision = _alconna_shortcut_matches(text, shortcut, alconna.prefixes)
             if decision == "match":
                 return "match"
             if decision == "unknown":
@@ -1194,11 +1196,43 @@ def _alconna_literal_head_matches(text: str, head: str, *, compact: bool) -> boo
 def _alconna_shortcut_matches(
     text: str,
     shortcut: AlconnaShortcutDescriptor,
+    prefixes: tuple[str, ...] = (),
 ) -> ActivationDecision:
     pattern = shortcut.pattern.strip()
     if not pattern:
         return "unknown"
+    saw_unknown = False
+    for normalized in _alconna_shortcut_patterns(pattern, shortcut, prefixes):
+        decision = _alconna_shortcut_pattern_matches(text, normalized, shortcut)
+        if decision == "match":
+            return "match"
+        if decision == "unknown":
+            saw_unknown = True
+    return "unknown" if saw_unknown else "miss"
+
+
+def _alconna_shortcut_patterns(
+    pattern: str,
+    shortcut: AlconnaShortcutDescriptor,
+    prefixes: tuple[str, ...],
+) -> tuple[str, ...]:
     normalized = normalize_shortcut_pattern(pattern)
+    if not normalized:
+        return ()
+    patterns = [normalized]
+    if shortcut.prefix:
+        for prefix in prefixes or ("",):
+            candidate = normalize_shortcut_pattern(f"{prefix}{normalized}")
+            if candidate and candidate not in patterns:
+                patterns.append(candidate)
+    return tuple(patterns)
+
+
+def _alconna_shortcut_pattern_matches(
+    text: str,
+    normalized: str,
+    shortcut: AlconnaShortcutDescriptor,
+) -> ActivationDecision:
     placeholder_match = _placeholder_shortcut_decision(text, normalized)
     if placeholder_match == "match":
         return "match"
@@ -1211,8 +1245,10 @@ def _alconna_shortcut_matches(
         return "match"
     try:
         if shortcut.fuzzy:
-            return "match" if re.match(f"^{pattern}", text, shortcut.flags) else "miss"
-        return "match" if re.fullmatch(pattern, text, shortcut.flags) else "miss"
+            return (
+                "match" if re.match(f"^{normalized}", text, shortcut.flags) else "miss"
+            )
+        return "match" if re.fullmatch(normalized, text, shortcut.flags) else "miss"
     except re.error:
         return "unknown"
 

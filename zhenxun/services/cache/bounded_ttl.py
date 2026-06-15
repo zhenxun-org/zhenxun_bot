@@ -74,7 +74,11 @@ class BoundedTTLCache(Generic[K, V]):
         self._sets = 0
         self._evictions = 0
         self._lock = asyncio.Lock()
+        self._last_sweep = 0.0
         self.__class__._instances.add(self)
+
+    # 全量过期清理的最小间隔(B1):避免每次 get 都 O(N) 扫描整表。
+    _SWEEP_INTERVAL = 30.0
 
     def _expire_at(self, now: float) -> float:
         if self._ttl_seconds <= 0:
@@ -106,23 +110,37 @@ class BoundedTTLCache(Generic[K, V]):
         self._evictions += 1
         return True
 
-    def _cleanup_nolock(self, now: float) -> None:
-        expired_keys = [
-            key for key, (expire_at, _, _) in self._cache.items() if expire_at <= now
-        ]
-        for key in expired_keys:
-            if self._remove_key_nolock(key):
-                self._evictions += 1
+    def _enforce_capacity_nolock(self) -> None:
+        """容量边界强制(O(溢出量)):仅在新增后调用,不扫描全表。"""
         while len(self._cache) > self._max_items:
             self._pop_oldest_nolock()
         if self._max_total_bytes is not None:
             while self._total_bytes > self._max_total_bytes and self._cache:
                 self._pop_oldest_nolock()
 
+    def _sweep_expired_nolock(self, now: float) -> None:
+        """全量过期清理(O(N)):由节流器或后台/governor 低频触发。"""
+        self._last_sweep = now
+        expired_keys = [
+            key for key, (expire_at, _, _) in self._cache.items() if expire_at <= now
+        ]
+        for key in expired_keys:
+            if self._remove_key_nolock(key):
+                self._evictions += 1
+
+    def _maybe_sweep_nolock(self, now: float) -> None:
+        if now - self._last_sweep >= self._SWEEP_INTERVAL:
+            self._sweep_expired_nolock(now)
+
+    def _cleanup_nolock(self, now: float) -> None:
+        """完整清理(全量过期 + 容量):保留给 stats / 显式调用。"""
+        self._sweep_expired_nolock(now)
+        self._enforce_capacity_nolock()
+
     async def get(self, key: K) -> V | None:
         now = time.monotonic()
         async with self._lock:
-            self._cleanup_nolock(now)
+            # 仅做命中项的单条过期检查(O(1)),全量清理改为低频节流(B1)。
             item = self._cache.get(key)
             if item is None:
                 self._misses += 1
@@ -148,7 +166,9 @@ class BoundedTTLCache(Generic[K, V]):
             self._total_bytes += value_size
             self._sets += 1
             self._cache.move_to_end(key)
-            self._cleanup_nolock(now)
+            # 新增后必做容量强制(廉价);全量过期清理走低频节流(B1)。
+            self._maybe_sweep_nolock(now)
+            self._enforce_capacity_nolock()
             return key in self._cache
 
     async def delete(self, key: K) -> bool:

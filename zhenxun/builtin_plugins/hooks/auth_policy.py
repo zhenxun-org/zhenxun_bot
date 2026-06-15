@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -116,8 +117,14 @@ class PolicyDecisionPoint:
         if not bot_data.status and not context.allow_sleep_bypass:
             return PolicyDecision("deny", "bot_sleeping")
         module = snapshot.profile.module
-        if module and self._module_in_block_string(module, bot_data.block_plugins):
-            return PolicyDecision("deny", "bot_plugin_blocked")
+        if module:
+            value = bot_data.block_plugins or ""
+            # 缓存解析后的 frozenset,避免每次 bot 检查重复 split(B8-3);
+            # 仍保留原子串判定以保持行为等价。
+            if CommonUtils.format(module) in value or module in self._bot_block_set(
+                bot_data
+            ):
+                return PolicyDecision("deny", "bot_plugin_blocked")
         return PolicyDecision("allow", "bot_allowed")
 
     def decide_group(self, context: PolicyContext) -> PolicyDecision:
@@ -207,6 +214,17 @@ class PolicyDecisionPoint:
             )
             setattr(group, "superuser_block_plugin_set", super_block_set)
         return block_set, super_block_set
+
+    @staticmethod
+    def _bot_block_set(bot_data: object) -> frozenset[str]:
+        block_set = getattr(bot_data, "block_plugin_set", None)
+        if block_set is None:
+            block_set = _parse_block_modules(
+                getattr(bot_data, "block_plugins", "") or ""
+            )
+            with contextlib.suppress(Exception):
+                setattr(bot_data, "block_plugin_set", block_set)
+        return block_set
 
     @staticmethod
     def _module_in_block_string(module: str, value: str | None) -> bool:
