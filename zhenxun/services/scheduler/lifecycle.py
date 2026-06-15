@@ -82,6 +82,7 @@ async def _load_schedules_from_db():
                 schedule_id=0,
                 plugin_name=job_id,
                 bot_id=None,
+                platform_scope=None,
                 group_id=None,
                 job_kwargs={},
             )

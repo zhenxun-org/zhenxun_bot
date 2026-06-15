@@ -250,6 +250,7 @@ class SchedulerManager:
             schedule_id=0,
             plugin_name=f"runtime::{func.__module__}",
             bot_id=None,
+            platform_scope=None,
             group_id=None,
             job_kwargs={},
         )
