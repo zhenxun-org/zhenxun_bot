@@ -5,12 +5,10 @@ from typing_extensions import Self
 from tortoise import fields
 from tortoise.expressions import Q
 
-from zhenxun.services.cache import CacheException, CacheRegistry, CacheRoot
 from zhenxun.services.cache.runtime_cache import BanMemoryCache
-from zhenxun.services.data_access import DataAccess
 from zhenxun.services.db_context import Model
 from zhenxun.services.log import logger
-from zhenxun.utils.enum import CacheType, DbLockType
+from zhenxun.utils.enum import DbLockType
 from zhenxun.utils.exception import UserAndGroupIsNone
 
 
@@ -38,28 +36,8 @@ class BanConsole(Model):
         unique_together = ("user_id", "group_id")
         indexes = [("user_id",), ("group_id",)]  # noqa: RUF012
 
-    cache_type = CacheType.BAN
-    """缓存类型"""
-    cache_key_field = ("user_id", "group_id")
-    """缓存键字段"""
     enable_lock: ClassVar[list[DbLockType]] = [DbLockType.CREATE, DbLockType.UPSERT]
     """开启锁"""
-    _cache_checked: ClassVar[bool] = False
-
-    @classmethod
-    def _ensure_cache_registered(cls):
-        """兜底注册 BAN 缓存，避免启动时序导致的未注册问题。"""
-        if cls._cache_checked:
-            return
-        try:
-            CacheRoot.get_model(CacheType.BAN)
-        except CacheException:
-            CacheRegistry.register(
-                CacheType.BAN,
-                cls,
-                key_format="{user_id}_{group_id}",
-            )
-        cls._cache_checked = True
 
     @classmethod
     async def create(cls, *args, **kwargs) -> Self:
@@ -87,15 +65,13 @@ class BanConsole(Model):
         返回:
             Self | None: Self
         """
-        cls._ensure_cache_registered()
         if not user_id and not group_id:
             raise UserAndGroupIsNone()
         if user_id:
-            dao = DataAccess(cls)
             return (
-                await dao.safe_get_or_none(user_id=user_id, group_id=group_id)
+                await cls.safe_get_or_none(user_id=user_id, group_id=group_id)
                 if group_id
-                else await dao.safe_get_or_none(user_id=user_id, group_id__isnull=True)
+                else await cls.safe_get_or_none(user_id=user_id, group_id__isnull=True)
             )
         else:
             return await cls.safe_get_or_none(
@@ -177,7 +153,6 @@ class BanConsole(Model):
         )
         if not user_id and not group_id:
             raise UserAndGroupIsNone()
-        cls._ensure_cache_registered()
         target, _ = await cls.update_or_create(
             user_id=user_id,
             group_id=group_id,

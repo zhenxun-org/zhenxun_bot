@@ -1,7 +1,6 @@
 from tortoise import fields
 
 from zhenxun.services.db_context import Model
-from zhenxun.utils.enum import CacheType
 
 
 class GroupPluginSetting(Model):
@@ -17,11 +16,6 @@ class GroupPluginSetting(Model):
     """插件的完整配置 (JSON)"""
     updated_at = fields.DatetimeField(auto_now=True, description="最后更新时间")
     """最后更新时间"""
-
-    cache_type = CacheType.GROUP_PLUGIN_SETTINGS
-    """缓存类型"""
-    cache_key_field = ("group_id", "plugin_name")
-    """缓存键字段"""
 
     class Meta:  # pyright: ignore [reportIncompatibleVariableOverride]
         table = "group_plugin_settings"

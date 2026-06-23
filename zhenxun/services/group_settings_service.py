@@ -6,7 +6,6 @@ import ujson as json
 from zhenxun.configs.config import Config
 from zhenxun.models.group_plugin_setting import GroupPluginSetting
 from zhenxun.services.cache import BoundedTTLCache
-from zhenxun.services.data_access import DataAccess
 from zhenxun.services.log import logger
 from zhenxun.utils.pydantic_compat import model_dump, model_validate, parse_as
 
@@ -20,7 +19,6 @@ class GroupSettingsService:
     """
 
     def __init__(self):
-        self.dao = DataAccess(GroupPluginSetting)
         self._cache = BoundedTTLCache[str, dict[str, Any]](
             "GROUP_PLUGIN_SETTINGS_VIEW",
             ttl_seconds=600,
@@ -48,13 +46,12 @@ class GroupSettingsService:
         settings_dict = model_dump(settings_model)
         json_value = json.dumps(settings_dict, ensure_ascii=False)
 
-        await self.dao.update_or_create(
+        await GroupPluginSetting.update_or_create(
             defaults={"settings": json_value},  # type: ignore
             group_id=group_id,
             plugin_name=plugin_name,
         )
 
-        await self.dao.clear_cache(group_id=group_id, plugin_name=plugin_name)
         await self._clear_merged_cache(group_id, plugin_name)
 
     async def set_key_value(
@@ -72,19 +69,19 @@ class GroupSettingsService:
 
         setting_entry.settings[key] = value
         await setting_entry.save(update_fields=["settings"])
-        await self.dao.clear_cache(group_id=group_id, plugin_name=plugin_name)
         await self._clear_merged_cache(group_id, plugin_name)
 
     async def reset_key(self, group_id: str, plugin_name: str, key: str) -> bool:
         """重置单个配置项"""
-        setting = await self.dao.get_or_none(group_id=group_id, plugin_name=plugin_name)
+        setting = await GroupPluginSetting.safe_get_or_none(
+            group_id=group_id, plugin_name=plugin_name
+        )
         if setting and isinstance(setting.settings, dict) and key in setting.settings:
             del setting.settings[key]
             if not setting.settings:
                 await setting.delete()
             else:
                 await setting.save(update_fields=["settings"])
-            await self.dao.clear_cache(group_id=group_id, plugin_name=plugin_name)
             await self._clear_merged_cache(group_id, plugin_name)
             return True
         return False
@@ -119,12 +116,11 @@ class GroupSettingsService:
         返回:
             bool: 如果成功删除了一个条目，则返回 True，否则返回 False。
         """
-        deleted_count = await self.dao.delete(
+        deleted_count = await GroupPluginSetting.filter(
             group_id=group_id, plugin_name=plugin_name
-        )
+        ).delete()
 
         if deleted_count > 0:
-            await self.dao.clear_cache(group_id=group_id, plugin_name=plugin_name)
             await self._clear_merged_cache(group_id, plugin_name)
             logger.debug(f"已重置插件 '{plugin_name}' 在群组 '{group_id}' 的配置。")
             return True
@@ -176,7 +172,7 @@ class GroupSettingsService:
             for key in global_config_group.configs.keys()
         }
 
-        group_setting_entry = await self.dao.get_or_none(
+        group_setting_entry = await GroupPluginSetting.safe_get_or_none(
             group_id=group_id, plugin_name=plugin_name
         )
         if group_setting_entry:

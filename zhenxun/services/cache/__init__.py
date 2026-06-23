@@ -52,7 +52,6 @@ from typing import Any, ClassVar, Generic, TypeVar, cast, get_type_hints
 from typing_extensions import Self
 
 from aiocache import Cache as AioCache
-from aiocache import SimpleMemoryCache
 from aiocache.base import BaseCache
 from aiocache.serializers import JsonSerializer
 import nonebot
@@ -107,6 +106,10 @@ class Config(BaseModel):
 # 获取配置
 driver = nonebot.get_driver()
 cache_config = nonebot.get_plugin_config(Config)
+
+
+def _redis_cache_enabled() -> bool:
+    return cache_config.cache_mode == CacheMode.REDIS and bool(cache_config.redis_host)
 
 
 class CacheException(Exception):
@@ -190,15 +193,10 @@ class CacheManager:
     def cache_backend(self) -> BaseCache | AioCache:
         """获取缓存后端"""
         if self._cache_backend is None:
-            ttl = cache_config.redis_expire
-            if cache_config.cache_mode == CacheMode.NONE:
-                ttl = 0
-                logger.info("缓存功能已禁用，使用非持久化内存缓存", LOG_COMMAND)
-            elif cache_config.cache_mode == CacheMode.REDIS and cache_config.redis_host:
+            if _redis_cache_enabled():
                 try:
                     from aiocache import RedisCache
 
-                    # 使用Redis缓存
                     self._cache_backend = RedisCache(
                         serializer=JsonSerializer(),
                         namespace=CACHE_KEY_PREFIX,
@@ -215,19 +213,11 @@ class CacheManager:
                     return self._cache_backend
                 except ImportError as e:
                     logger.error(
-                        "导入aiocache[redis]失败，将默认使用内存缓存...",
+                        "导入aiocache[redis]失败，CacheRoot 模型缓存已禁用",
                         LOG_COMMAND,
                         e=e,
                     )
-            else:
-                logger.info("使用内存缓存", LOG_COMMAND)
-            # 默认使用内存缓存
-            self._cache_backend = SimpleMemoryCache(
-                serializer=JsonSerializer(),
-                namespace=CACHE_KEY_PREFIX,
-                timeout=30,
-                ttl=ttl,
-            )
+            raise CacheException("CacheRoot 后端未启用")
         return self._cache_backend
 
     async def invalidate_cache(
@@ -815,11 +805,9 @@ class Cache(Generic[T]):
 
 @driver.on_startup
 async def _():
-    CacheRoot.enabled = cache_config.cache_mode != CacheMode.NONE
+    CacheRoot.enabled = _redis_cache_enabled()
     if CacheRoot.enabled:
-        logger.info("缓存系统已启用", LOG_COMMAND)
-    else:
-        logger.info("缓存系统已禁用", LOG_COMMAND)
+        logger.info("CacheRoot Redis 模型缓存已启用", LOG_COMMAND)
 
 
 @driver.on_shutdown

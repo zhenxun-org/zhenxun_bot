@@ -9,10 +9,9 @@ from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.task_info import TaskInfo
 from zhenxun.services.cache import CacheRoot
 from zhenxun.services.cache.runtime_cache import GroupMemoryCache
-from zhenxun.services.data_access import DataAccess
 from zhenxun.services.db_context import Model
 from zhenxun.services.db_context.schema_ops import AlterColumnType, CreateIndex
-from zhenxun.utils.enum import CacheType, DbLockType, PluginType
+from zhenxun.utils.enum import DbLockType, PluginType
 
 if TYPE_CHECKING:
     from zhenxun.services.cache.runtime_cache import GroupSnapshot
@@ -98,10 +97,6 @@ class GroupConsole(Model):
             ("group_id",)
         ]
 
-    cache_type = CacheType.GROUPS
-    """缓存类型"""
-    cache_key_field = ("group_id", "channel_id")
-    """缓存键字段"""
     enable_lock: ClassVar[list[DbLockType]] = [DbLockType.CREATE, DbLockType.UPSERT]
     """开启锁"""
     _root_group_locks: ClassVar[dict[str, asyncio.Lock]] = {}
@@ -331,9 +326,11 @@ class GroupConsole(Model):
         if update_fields:
             await keep.save(update_fields=update_fields)
 
-        for group in groups:
-            if group.id != keep.id:
-                await group.delete()
+        duplicate_ids = [
+            group.id for group in groups if group.id and group.id != keep.id
+        ]
+        if duplicate_ids:
+            await cls.filter(id__in=duplicate_ids).delete()
         await GroupMemoryCache.upsert_from_model(keep)
         return keep
 
@@ -417,14 +414,13 @@ class GroupConsole(Model):
         clean_duplicates: bool = True,
     ) -> Self | None:
         """获取群组（数据库）"""
-        dao = DataAccess(cls)
         if channel_id:
-            return await dao.safe_get_or_none(
+            return await cls.safe_get_or_none(
                 group_id=group_id,
                 channel_id=channel_id,
                 clean_duplicates=clean_duplicates,
             )
-        return await dao.safe_get_or_none(
+        return await cls.safe_get_or_none(
             group_id=group_id,
             channel_id__isnull=True,
             clean_duplicates=clean_duplicates,
