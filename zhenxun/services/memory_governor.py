@@ -12,7 +12,7 @@ from aiocache import SimpleMemoryCache
 
 from zhenxun.services.cache import CacheRoot
 from zhenxun.services.cache.bounded_ttl import BoundedTTLCache
-from zhenxun.services.cache.cache_containers import CacheDict, CacheList
+from zhenxun.services.cache.cache_containers import CacheDict
 from zhenxun.services.log import logger
 from zhenxun.services.message_load import idle_seconds, is_overloaded
 
@@ -131,7 +131,6 @@ async def _run_reclaim() -> None:
     cleared: dict[str, Any] = {}
     cache_stats_before = {
         "cache_dict": CacheDict.stats_all(),
-        "cache_list": CacheList.stats_all(),
         "bounded_ttl": await BoundedTTLCache.stats_all(),
     }
 
@@ -139,7 +138,6 @@ async def _run_reclaim() -> None:
     cleared["user_gold_logs"] = await _flush_user_gold_log_buffer()
     cleared["bounded_ttl_clear"] = await BoundedTTLCache.clear_all()
     cleared["cache_dict_clear"] = CacheDict.clear_all()
-    cleared["cache_list_clear"] = CacheList.clear_all()
     cleared["runtime_negative"] = _clear_runtime_negative_caches()
     cleared["auth_local"] = _clear_auth_local_caches()
     cleared["avatar_l1"] = _clear_avatar_memory_cache()

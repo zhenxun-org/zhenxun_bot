@@ -49,6 +49,7 @@ async def _(param: PluginIr) -> Result:
         from zhenxun.builtin_plugins.plugin_store import StoreManager
 
         result = await StoreManager.add_plugin(str(param.id))  # type: ignore
+        logger.info(result.replace("\n", "；"), "插件商店")
         return Result.ok(info=result)
     except Exception as e:
         return Result.fail(f"安装插件失败: {type(e)}: {e}")

@@ -42,6 +42,24 @@ Config.add_plugin_config(
 
 Config.add_plugin_config(
     "hook",
+    "MALICIOUS_CHECK_MODE",
+    "off",
+    help="恶意触发检测模式：off=关闭，blacklist=仅列表插件检测，whitelist=列表插件跳过检测",
+    default_value="off",
+    type=str,
+)
+
+Config.add_plugin_config(
+    "hook",
+    "MALICIOUS_CHECK_PLUGINS",
+    [],
+    help="恶意触发检测插件列表，按模式作为黑名单或白名单使用，填插件模块名",
+    default_value=[],
+    type=list,
+)
+
+Config.add_plugin_config(
+    "hook",
     "IS_SEND_TIP_MESSAGE",
     True,
     help="是否发送阻断时提示消息",

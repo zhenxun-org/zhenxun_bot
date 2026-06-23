@@ -39,6 +39,49 @@ class HandleEventSelectorDependencies:
 _HANDLE_EVENT_PATCHED = False
 _ORIGINAL_HANDLE_EVENT: Callable[..., Awaitable[None]] | None = None
 _ORIGINAL_ADAPTER_HANDLE_EVENTS: dict[object, object] = {}
+_MATCHER_DEADLINE_BY_LANE = {
+    "system": 15.0,
+    "command": 12.0,
+    "temp": 15.0,
+    "passive_light": 3.0,
+    "fallback_ai": 5.0,
+}
+_DEFAULT_MATCHER_DEADLINE = 5.0
+
+
+def _matcher_deadline_for_lane(lane: str) -> float:
+    return _MATCHER_DEADLINE_BY_LANE.get(lane, _DEFAULT_MATCHER_DEADLINE)
+
+
+def _matcher_name(matcher: type[Matcher]) -> str:
+    module = str(getattr(matcher, "module", "") or "")
+    lineno = str(getattr(matcher, "lineno", "") or "")
+    matcher_type = str(getattr(matcher, "type", "") or "")
+    name = module or matcher.__name__
+    if lineno:
+        name = f"{name}:{lineno}"
+    if matcher_type:
+        name = f"{name}<{matcher_type}>"
+    return name
+
+
+async def _run_matcher_with_deadline(
+    anyio_mod: Any,
+    coro: Awaitable[None],
+    matcher: type[Matcher],
+    lane: str,
+) -> None:
+    timeout = _matcher_deadline_for_lane(lane)
+    try:
+        with anyio_mod.fail_after(timeout):
+            await coro
+    except TimeoutError:
+        signal_overload(20.0)
+        logger.warning(
+            "matcher dispatch timeout: "
+            f"matcher={_matcher_name(matcher)}, lane={lane}, timeout={timeout:.1f}s",
+            LOGGER_COMMAND,
+        )
 
 
 def _trim_leading_text(message: Any) -> None:
@@ -140,7 +183,6 @@ async def patched_handle_event(
     stop_propagation = getattr(nb_message, "StopPropagation")
     handle_exception = getattr(nb_message, "_handle_exception")
     anyio_mod = getattr(nb_message, "anyio")
-    run_coro_with_shield = getattr(nb_message, "run_coro_with_shield")
 
     async with async_exit_stack() as stack:
         if not await apply_event_preprocessors(
@@ -256,7 +298,8 @@ async def patched_handle_event(
                                         continue
                         matcher_state = deps.build_matcher_state(state)
                         tg.start_soon(
-                            run_coro_with_shield,
+                            _run_matcher_with_deadline,
+                            anyio_mod,
                             deps.run_selected_matcher(
                                 matcher,
                                 bot,
@@ -266,6 +309,8 @@ async def patched_handle_event(
                                 dependency_cache,
                                 lane,
                             ),
+                            matcher,
+                            lane,
                         )
 
         if show_log:

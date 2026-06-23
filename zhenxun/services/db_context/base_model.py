@@ -27,7 +27,7 @@ class Model(TortoiseModel):
     """
 
     sem_data: ClassVar[dict[str, dict[str, asyncio.Semaphore]]] = {}
-    _current_locks: ClassVar[dict[int, DbLockType]] = {}  # 跟踪当前协程持有的锁
+    _current_locks: ClassVar[dict[tuple[str, int], DbLockType]] = {}
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -95,21 +95,21 @@ class Model(TortoiseModel):
     @classmethod
     def _require_lock(cls, lock_type: DbLockType) -> bool:
         """检查是否需要真正加锁"""
-        task_id = id(asyncio.current_task())
-        return cls._current_locks.get(task_id) != lock_type
+        lock_key = (cls.__name__, id(asyncio.current_task()))
+        return cls._current_locks.get(lock_key) != lock_type
 
     @classmethod
     @contextlib.asynccontextmanager
     async def _lock_context(cls, lock_type: DbLockType):
         """带重入检查的锁上下文"""
-        task_id = id(asyncio.current_task())
+        lock_key = (cls.__name__, id(asyncio.current_task()))
         need_lock = cls._require_lock(lock_type)
 
         if need_lock and (sem := cls.get_semaphore(lock_type)):
-            cls._current_locks[task_id] = lock_type
+            cls._current_locks[lock_key] = lock_type
             async with sem:
                 yield
-            cls._current_locks.pop(task_id, None)
+            cls._current_locks.pop(lock_key, None)
         else:
             yield
 
@@ -171,8 +171,8 @@ class Model(TortoiseModel):
                         await obj.save()
                         result = (obj, False)
                     else:
-                        # 创建时不重复加锁
-                        result = await cls.create(**kwargs, **(defaults or {})), True
+                        obj = await super().create(**kwargs, **(defaults or {}))
+                        result = (obj, True)
 
                 if cache_type := cls.get_cache_type():
                     await CacheRoot.invalidate_cache(

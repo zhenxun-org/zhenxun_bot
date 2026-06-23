@@ -17,6 +17,7 @@ from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.platform import PlatformUtils
 
 from ....base_model import BaseResultModel, QueryModel
+from ....utils import webui_db_call
 from ..main.data_source import bot_live
 from .model import (
     AllChatAndCallCount,
@@ -77,14 +78,20 @@ class ApiDataSource:
             logger.warning("获取bot好友/群组信息失败...", "WebUi", e=e)
             bot_info.group_count = 0
             bot_info.friend_count = 0
-        bot_info.day_call = await Statistics.filter(
-            create_time__gte=now - timedelta(hours=now.hour, minutes=now.minute),
-            bot_id=bot.self_id,
-        ).count()
-        bot_info.received_messages = await ChatHistory.filter(
-            bot_id=bot_info.self_id,
-            create_time__gte=now - timedelta(hours=now.hour, minutes=now.minute),
-        ).count()
+        bot_info.day_call = await webui_db_call(
+            Statistics.filter(
+                create_time__gte=now - timedelta(hours=now.hour, minutes=now.minute),
+                bot_id=bot.self_id,
+            ).count(),
+            "Dashboard.bot_day_call",
+        )
+        bot_info.received_messages = await webui_db_call(
+            ChatHistory.filter(
+                bot_id=bot_info.self_id,
+                create_time__gte=now - timedelta(hours=now.hour, minutes=now.minute),
+            ).count(),
+            "Dashboard.bot_received_messages",
+        )
         bot_info.connect_time = bot_live.get(bot.self_id) or 0
         if bot_info.connect_time:
             connect_date = datetime.fromtimestamp(CONNECT_TIME)
@@ -117,17 +124,29 @@ class ApiDataSource:
         query = ChatHistory
         if bot_id:
             query = query.filter(bot_id=bot_id)
-        chat_all_count = await query.annotate().count()
-        chat_day_count = await query.filter(
-            create_time__gte=now - timedelta(hours=now.hour, minutes=now.minute)
-        ).count()
+        chat_all_count = await webui_db_call(
+            query.annotate().count(),
+            "Dashboard.chat_all_count",
+        )
+        chat_day_count = await webui_db_call(
+            query.filter(
+                create_time__gte=now - timedelta(hours=now.hour, minutes=now.minute)
+            ).count(),
+            "Dashboard.chat_day_count",
+        )
         query = Statistics
         if bot_id:
             query = query.filter(bot_id=bot_id)
-        call_all_count = await query.annotate().count()
-        call_day_count = await query.filter(
-            create_time__gte=now - timedelta(hours=now.hour, minutes=now.minute)
-        ).count()
+        call_all_count = await webui_db_call(
+            query.annotate().count(),
+            "Dashboard.call_all_count",
+        )
+        call_day_count = await webui_db_call(
+            query.filter(
+                create_time__gte=now - timedelta(hours=now.hour, minutes=now.minute)
+            ).count(),
+            "Dashboard.call_day_count",
+        )
         return QueryChatCallCount(
             chat_num=chat_all_count,
             chat_day=chat_day_count,
@@ -151,31 +170,51 @@ class ApiDataSource:
         query = ChatHistory
         if bot_id:
             query = query.filter(bot_id=bot_id)
-        chat_week_count = await query.filter(
-            create_time__gte=now - timedelta(days=7, hours=now.hour, minutes=now.minute)
-        ).count()
-        chat_month_count = await query.filter(
-            create_time__gte=now
-            - timedelta(days=30, hours=now.hour, minutes=now.minute)
-        ).count()
-        chat_year_count = await query.filter(
-            create_time__gte=now
-            - timedelta(days=365, hours=now.hour, minutes=now.minute)
-        ).count()
+        chat_week_count = await webui_db_call(
+            query.filter(
+                create_time__gte=now
+                - timedelta(days=7, hours=now.hour, minutes=now.minute)
+            ).count(),
+            "Dashboard.chat_week_count",
+        )
+        chat_month_count = await webui_db_call(
+            query.filter(
+                create_time__gte=now
+                - timedelta(days=30, hours=now.hour, minutes=now.minute)
+            ).count(),
+            "Dashboard.chat_month_count",
+        )
+        chat_year_count = await webui_db_call(
+            query.filter(
+                create_time__gte=now
+                - timedelta(days=365, hours=now.hour, minutes=now.minute)
+            ).count(),
+            "Dashboard.chat_year_count",
+        )
         query = Statistics
         if bot_id:
             query = query.filter(bot_id=bot_id)
-        call_week_count = await query.filter(
-            create_time__gte=now - timedelta(days=7, hours=now.hour, minutes=now.minute)
-        ).count()
-        call_month_count = await query.filter(
-            create_time__gte=now
-            - timedelta(days=30, hours=now.hour, minutes=now.minute)
-        ).count()
-        call_year_count = await query.filter(
-            create_time__gte=now
-            - timedelta(days=365, hours=now.hour, minutes=now.minute)
-        ).count()
+        call_week_count = await webui_db_call(
+            query.filter(
+                create_time__gte=now
+                - timedelta(days=7, hours=now.hour, minutes=now.minute)
+            ).count(),
+            "Dashboard.call_week_count",
+        )
+        call_month_count = await webui_db_call(
+            query.filter(
+                create_time__gte=now
+                - timedelta(days=30, hours=now.hour, minutes=now.minute)
+            ).count(),
+            "Dashboard.call_month_count",
+        )
+        call_year_count = await webui_db_call(
+            query.filter(
+                create_time__gte=now
+                - timedelta(days=365, hours=now.hour, minutes=now.minute)
+            ).count(),
+            "Dashboard.call_year_count",
+        )
         return AllChatAndCallCount(
             chat_week=chat_week_count,
             chat_month=chat_month_count,
@@ -202,17 +241,19 @@ class ApiDataSource:
         if bot_id:
             chat_query = chat_query.filter(bot_id=bot_id)
             call_query = call_query.filter(bot_id=bot_id)
-        chat_date_list = (
-            await chat_query.filter(create_time__gte=filter_date)
+        chat_date_list = await webui_db_call(
+            chat_query.filter(create_time__gte=filter_date)
             .annotate(date=RawSQL("DATE(create_time)"), count=Count("id"))
             .group_by("date")
-            .values("date", "count")
+            .values("date", "count"),
+            "Dashboard.chat_month_series",
         )
-        call_date_list = (
-            await call_query.filter(create_time__gte=filter_date)
+        call_date_list = await webui_db_call(
+            call_query.filter(create_time__gte=filter_date)
             .annotate(date=RawSQL("DATE(create_time)"), count=Count("id"))
             .group_by("date")
-            .values("date", "count")
+            .values("date", "count"),
+            "Dashboard.call_month_series",
         )
         date_list = []
         chat_count_list = []

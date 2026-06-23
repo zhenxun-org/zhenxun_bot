@@ -15,7 +15,9 @@ from zhenxun.services import (
     avatar_service,
     generate,
 )
+from zhenxun.services.db_context import with_db_timeout
 from zhenxun.services.log import logger
+from zhenxun.services.message_load import is_db_unhealthy
 from zhenxun.services.renderer.result_cache import RenderResultMemoryCache
 from zhenxun.ui.models import PluginMenuCategory, PluginMenuData
 from zhenxun.utils.common_utils import format_usage_for_markdown
@@ -25,11 +27,31 @@ from zhenxun.utils.platform import PlatformUtils
 from .utils import classify_plugin
 
 driver = nonebot.get_driver()
+_DB_BUSY_MESSAGE = "数据库繁忙，请稍后再试"
+_HELP_DB_TIMEOUT = 3.0
 _HELP_MENU_IMAGE_CACHE = RenderResultMemoryCache(
     ttl_seconds=300,
     max_items=64,
     max_total_bytes=64 * 1024 * 1024,
 )
+
+
+class _DbBusyError(Exception):
+    pass
+
+
+async def _read_db(factory, operation: str):
+    if is_db_unhealthy():
+        raise _DbBusyError
+    try:
+        return await with_db_timeout(
+            factory(),
+            timeout=_HELP_DB_TIMEOUT,
+            operation=operation,
+            source="help",
+        )
+    except TimeoutError as exc:
+        raise _DbBusyError from exc
 
 
 def _create_plugin_menu_item(
@@ -79,11 +101,17 @@ def _create_plugin_menu_item(
 
 async def create_help_img(
     session: Uninfo, group_id: str | None, is_detail: bool
-) -> bytes:
+) -> str | bytes:
     """使用渲染服务生成帮助图片"""
-    classified_data = await classify_plugin(
-        session, group_id, is_detail, _create_plugin_menu_item
-    )
+    try:
+        classified_data = await _read_db(
+            lambda: classify_plugin(
+                session, group_id, is_detail, _create_plugin_menu_item
+            ),
+            "Help.classify_plugin",
+        )
+    except _DbBusyError:
+        return _DB_BUSY_MESSAGE
 
     sorted_categories = dict(
         sorted(classified_data.items(), key=lambda x: len(x[1]), reverse=True)
@@ -157,9 +185,11 @@ async def get_user_allow_help(user_id: str) -> list[str]:
         list[str]: 插件类型列表
     """
     type_list = ["NORMAL", "DEPENDANT"]
-    for level in await LevelUser.filter(user_id=user_id).values_list(
-        "user_level", flat=True
-    ):
+    levels = await _read_db(
+        lambda: LevelUser.filter(user_id=user_id).values_list("user_level", flat=True),
+        "Help.user_allow_level",
+    )
+    for level in levels:
         if level > 0:  # type: ignore
             type_list.extend(("ADMIN", "ADMIN_SUPER"))
             break
@@ -170,7 +200,7 @@ async def get_user_allow_help(user_id: str) -> list[str]:
 
 async def get_plugin_help(
     user_id: str, name: str, is_superuser: bool, variant: str | None = None
-) -> bytes | None:
+) -> str | bytes | None:
     """获取功能的帮助信息
 
     参数:
@@ -179,20 +209,35 @@ async def get_plugin_help(
         is_superuser: 是否为超级用户
         variant: 使用的皮肤/变体名称
     """
-    type_list = await get_user_allow_help(user_id)
-    if name.isdigit():
-        plugin = await PluginInfo.get_or_none(id=int(name), plugin_type__in=type_list)
-    else:
-        plugin = await PluginInfo.get_or_none(
-            name__iexact=name, load_status=True, plugin_type__in=type_list
-        )
+    try:
+        type_list = await get_user_allow_help(user_id)
+        if name.isdigit():
+            plugin = await _read_db(
+                lambda: PluginInfo.get_or_none(id=int(name), plugin_type__in=type_list),
+                "Help.plugin_by_id",
+            )
+        else:
+            plugin = await _read_db(
+                lambda: PluginInfo.get_or_none(
+                    name__iexact=name, load_status=True, plugin_type__in=type_list
+                ),
+                "Help.plugin_by_name",
+            )
+    except _DbBusyError:
+        return _DB_BUSY_MESSAGE
 
     if plugin:
         _plugin = nonebot.get_plugin_by_module_name(plugin.module_path)
         if _plugin and _plugin.metadata:
             extra_data = PluginExtraData(**_plugin.metadata.extra)
 
-            call_count = await Statistics.filter(plugin_name=plugin.module).count()
+            try:
+                call_count = await _read_db(
+                    lambda: Statistics.filter(plugin_name=plugin.module).count(),
+                    "Help.plugin_call_count",
+                )
+            except _DbBusyError:
+                return _DB_BUSY_MESSAGE
             usage = _plugin.metadata.usage
 
             metadata_items = [
@@ -263,14 +308,19 @@ async def get_llm_help(question: str, user_id: str) -> str | bytes:
     """
 
     try:
-        allowed_types = await get_user_allow_help(user_id)
-
-        plugins = await PluginInfo.get_plugins(
-            load_status=None,
-            filter_parent=False,
-            is_show=True,
-            plugin_type__in=allowed_types,
-        )
+        try:
+            allowed_types = await get_user_allow_help(user_id)
+            plugins = await _read_db(
+                lambda: PluginInfo.get_plugins(
+                    load_status=None,
+                    filter_parent=False,
+                    is_show=True,
+                    plugin_type__in=allowed_types,
+                ),
+                "Help.llm_plugin_list",
+            )
+        except _DbBusyError:
+            return _DB_BUSY_MESSAGE
 
         knowledge_base_parts = []
         for p in plugins:

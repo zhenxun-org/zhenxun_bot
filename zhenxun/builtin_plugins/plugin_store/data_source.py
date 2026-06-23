@@ -314,7 +314,12 @@ class StoreManager:
             is_external,
             source,
         )
-        return f"插件 {plugin_info.name} 安装成功! 重启后生效"
+        return (
+            f"插件 {plugin_info.name} 安装完成\n"
+            "- 已下载插件文件\n"
+            "- 已处理依赖文件\n"
+            "- 重启后生效"
+        )
 
     @classmethod
     async def install_plugin_with_repo(

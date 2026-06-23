@@ -61,6 +61,88 @@ _blmt = BanCheckLimiter(
     4,
 )
 
+_MALICIOUS_CHECK_MODES = {"off", "blacklist", "whitelist"}
+_EVENT_PLUGIN_DEDUPE_TTL = 30.0
+_EVENT_PLUGIN_DEDUPE_MAX = 4096
+_event_plugin_seen: dict[str, float] = {}
+
+
+def _malicious_check_mode() -> str:
+    mode = str(Config.get_config("hook", "MALICIOUS_CHECK_MODE") or "off")
+    mode = mode.strip().lower()
+    return mode if mode in _MALICIOUS_CHECK_MODES else "off"
+
+
+def _malicious_plugin_set() -> set[str]:
+    value = Config.get_config("hook", "MALICIOUS_CHECK_PLUGINS")
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        items = value.replace("\n", ",").split(",")
+    elif isinstance(value, list | tuple | set):
+        items = value
+    else:
+        items = [value]
+    return {str(item).strip().casefold() for item in items if str(item).strip()}
+
+
+def _should_check_plugin(module: str, lane: str) -> bool:
+    mode = _malicious_check_mode()
+    if mode == "off":
+        return False
+
+    normalized_module = str(module or "").strip().casefold()
+    if not normalized_module:
+        return False
+
+    plugin_set = _malicious_plugin_set()
+    in_plugin_set = normalized_module in plugin_set
+    is_passive = str(lane or "").startswith("passive_")
+
+    if mode == "blacklist":
+        return in_plugin_set
+    if is_passive:
+        return False
+    if mode == "whitelist":
+        return not in_plugin_set
+    return False
+
+
+def _event_plugin_key(event: Event, user_id: str, module: str) -> str:
+    message_id = getattr(event, "message_id", None) or getattr(event, "id", None)
+    if message_id is None:
+        message_id = id(event)
+    return f"{message_id}:{user_id}:{module}"
+
+
+def _remember_event_plugin_once(key: str) -> bool:
+    now = time.monotonic()
+    expires_at = _event_plugin_seen.get(key)
+    if expires_at is not None and expires_at > now:
+        return False
+
+    _event_plugin_seen[key] = now + _EVENT_PLUGIN_DEDUPE_TTL
+    if len(_event_plugin_seen) > _EVENT_PLUGIN_DEDUPE_MAX:
+        target_size = _EVENT_PLUGIN_DEDUPE_MAX // 2
+        for cache_key, cache_expires_at in list(_event_plugin_seen.items()):
+            if cache_expires_at <= now or len(_event_plugin_seen) > target_size:
+                _event_plugin_seen.pop(cache_key, None)
+            if len(_event_plugin_seen) <= target_size:
+                break
+    return True
+
+
+def _mark_event_plugin_checked(
+    state: T_State, event: Event, user_id: str, module: str
+) -> bool:
+    checked = state.setdefault("_zx_malicious_checked_plugins", set())
+    if isinstance(checked, set):
+        if module in checked:
+            return False
+        checked.add(module)
+
+    return _remember_event_plugin_once(_event_plugin_key(event, user_id, module))
+
 
 def _get_positive_config(key: str, cast_type: type[int] | type[float]) -> int | float:
     value = Config.get_config("hook", key)
@@ -102,6 +184,10 @@ async def _(
     else:
         return
 
+    lane = state.get("_zx_dispatch_lane")
+    if not _should_check_plugin(module, lane if isinstance(lane, str) else ""):
+        return
+
     user_id = resolve_actor_user_id(event, session.id1)
     group_id = resolve_event_group_id(event, session.id3 or session.id2)
     # 超级用户豁免恶意检测(A6):与权威权限路径保持一致,避免误封管理者。
@@ -111,35 +197,42 @@ async def _(
             is_superuser = user_id in bot.config.superusers
         if is_superuser:
             return
+    else:
+        return
+
+    if not _mark_event_plugin_checked(state, event, user_id, module):
+        return
+
+    # 只统计通过模式/lane过滤且同事件同插件去重后的有效触发。
+    limiter_key = f"{user_id}__{module}"
     malicious_check_time = float(_get_positive_config("MALICIOUS_CHECK_TIME", float))
     malicious_ban_count = int(_get_positive_config("MALICIOUS_BAN_COUNT", int))
     malicious_ban_time = int(_get_positive_config("MALICIOUS_BAN_TIME", int))
     _blmt.configure(malicious_check_time, malicious_ban_count)
-    if user_id and module:
-        if _blmt.check(f"{user_id}__{module}"):
-            await BanConsole.ban(
-                user_id,
-                group_id,
-                9,
-                "恶意触发命令检测",
-                malicious_ban_time * 60,
-                bot.self_id,
-            )
-            logger.info(
-                f"触发了恶意触发检测: {matcher.plugin_name}",
-                "HOOK",
-                session=session,
-            )
-            await MessageUtils.build_message(
-                [
-                    At(flag="user", target=user_id),
-                    "检测到恶意触发命令，您将被封禁 30 分钟",
-                ]
-            ).send()
-            logger.debug(
-                f"触发了恶意触发检测: {matcher.plugin_name}",
-                "HOOK",
-                session=session,
-            )
-            raise IgnoredException("检测到恶意触发命令")
-        _blmt.add(f"{user_id}__{module}")
+    if _blmt.check(limiter_key):
+        await BanConsole.ban(
+            user_id,
+            group_id,
+            9,
+            "恶意触发命令检测",
+            malicious_ban_time * 60,
+            bot.self_id,
+        )
+        logger.info(
+            f"触发了恶意触发检测: {matcher.plugin_name}",
+            "HOOK",
+            session=session,
+        )
+        await MessageUtils.build_message(
+            [
+                At(flag="user", target=user_id),
+                "检测到恶意触发命令，您将被封禁 30 分钟",
+            ]
+        ).send()
+        logger.debug(
+            f"触发了恶意触发检测: {matcher.plugin_name}",
+            "HOOK",
+            session=session,
+        )
+        raise IgnoredException("检测到恶意触发命令")
+    _blmt.add(limiter_key)

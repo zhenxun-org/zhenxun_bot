@@ -11,6 +11,7 @@ import uuid
 
 from zhenxun.services.cache.config import CacheMode
 from zhenxun.services.log import logger
+from zhenxun.services.message_load import is_db_unhealthy
 from zhenxun.utils.enum import (
     BlockType,
     LimitCheckType,
@@ -57,6 +58,7 @@ RUNTIME_CACHE_SYNC_ENABLED = True
 RUNTIME_CACHE_SYNC_CHANNEL = "ZHENXUN_RUNTIME_CACHE_SYNC"
 RUNTIME_CACHE_LOAD_RETRY_SECONDS = 1.0
 RUNTIME_CACHE_STARTUP_REFRESH_SKIP_SECONDS = 5.0
+RUNTIME_CACHE_DB_TIMEOUT_SECONDS = 3.0
 
 
 INSTANCE_ID = uuid.uuid4().hex
@@ -749,6 +751,9 @@ class RuntimeCacheMutation:
 
     @classmethod
     async def ensure_loaded(cls, cache_cls: type, label: str) -> None:
+        if is_db_unhealthy():
+            cls.mark_error(cache_cls, RuntimeError("database unhealthy"))
+            return
         if getattr(cache_cls, "_loaded", False):
             return
         now = time.monotonic()
@@ -756,6 +761,9 @@ class RuntimeCacheMutation:
             return
         lock = cls._load_locks.setdefault(label, asyncio.Lock())
         async with lock:
+            if is_db_unhealthy():
+                cls.mark_error(cache_cls, RuntimeError("database unhealthy"))
+                return
             if getattr(cache_cls, "_loaded", False):
                 return
             now = time.monotonic()
@@ -768,7 +776,27 @@ class RuntimeCacheMutation:
                 cls._retry_after[label] = (
                     time.monotonic() + RUNTIME_CACHE_LOAD_RETRY_SECONDS
                 )
-                raise
+                return
+
+    @staticmethod
+    async def read_db(cache_cls: type, coro, *, operation: str):
+        from zhenxun.services.db_context import with_db_timeout
+
+        if is_db_unhealthy():
+            RuntimeCacheMutation.mark_error(
+                cache_cls, RuntimeError("database unhealthy")
+            )
+            return None
+        try:
+            return await with_db_timeout(
+                coro,
+                timeout=RUNTIME_CACHE_DB_TIMEOUT_SECONDS,
+                operation=operation,
+                source="runtime_cache",
+            )
+        except Exception as exc:
+            RuntimeCacheMutation.mark_error(cache_cls, exc)
+            return None
 
     @staticmethod
     def mark_refreshed(cache_cls: type) -> None:
@@ -834,7 +862,13 @@ class PluginInfoMemoryCache:
         from zhenxun.models.plugin_info import PluginInfo
 
         async with cls._lock:
-            plugins = await PluginInfo.all()
+            plugins = await RuntimeCacheMutation.read_db(
+                cls,
+                PluginInfo.all(),
+                operation="PluginInfoMemoryCache.refresh",
+            )
+            if plugins is None:
+                return
             by_module: dict[str, PluginInfoSnapshot] = {}
             by_module_path: dict[str, PluginInfoSnapshot] = {}
             for plugin in plugins:
@@ -1016,7 +1050,13 @@ class BotMemoryCache:
         from zhenxun.models.bot_console import BotConsole
 
         async with cls._lock:
-            records = await BotConsole.all()
+            records = await RuntimeCacheMutation.read_db(
+                cls,
+                BotConsole.all(),
+                operation="BotMemoryCache.refresh",
+            )
+            if records is None:
+                return
             cls._by_id = {str(r.bot_id): BotSnapshot.from_model(r) for r in records}
             RuntimeCacheMutation.clear_negative_all(cls)
             RuntimeCacheMutation.mark_refreshed(cls)
@@ -1201,7 +1241,13 @@ class GroupMemoryCache:
         from zhenxun.models.group_console import GroupConsole
 
         async with cls._lock:
-            records = await GroupConsole.all()
+            records = await RuntimeCacheMutation.read_db(
+                cls,
+                GroupConsole.all(),
+                operation="GroupMemoryCache.refresh",
+            )
+            if records is None:
+                return
             by_key: dict[tuple[str, str], GroupSnapshot] = {}
             for record in records:
                 entry = GroupSnapshot.from_model(record)
@@ -1374,7 +1420,13 @@ class LevelUserMemoryCache:
         from zhenxun.models.level_user import LevelUser
 
         async with cls._lock:
-            records = await LevelUser.all()
+            records = await RuntimeCacheMutation.read_db(
+                cls,
+                LevelUser.all(),
+                operation="LevelUserMemoryCache.refresh",
+            )
+            if records is None:
+                return
             by_key: dict[tuple[str, str], LevelUserSnapshot] = {}
             by_user_max: dict[str, int] = {}
             for record in records:
@@ -1607,7 +1659,13 @@ class TaskInfoMemoryCache:
         from zhenxun.models.task_info import TaskInfo
 
         async with cls._lock:
-            records = await TaskInfo.all()
+            records = await RuntimeCacheMutation.read_db(
+                cls,
+                TaskInfo.all(),
+                operation="TaskInfoMemoryCache.refresh",
+            )
+            if records is None:
+                return
             by_module: dict[str, TaskInfoSnapshot] = {}
             by_name: dict[str, TaskInfoSnapshot] = {}
             for record in records:
@@ -1790,7 +1848,13 @@ class PluginLimitMemoryCache:
         from zhenxun.models.plugin_limit import PluginLimit
 
         async with cls._lock:
-            records = await PluginLimit.filter(status=True).all()
+            records = await RuntimeCacheMutation.read_db(
+                cls,
+                PluginLimit.filter(status=True).all(),
+                operation="PluginLimitMemoryCache.refresh",
+            )
+            if records is None:
+                return
             by_id: dict[int, PluginLimitSnapshot] = {}
             by_module: dict[str, list[PluginLimitSnapshot]] = {}
             for record in records:
@@ -2015,7 +2079,13 @@ class BanMemoryCache:
 
         async with cls._lock:
             now_ts = time.time()
-            records = await BanConsole.all()
+            records = await RuntimeCacheMutation.read_db(
+                cls,
+                BanConsole.all(),
+                operation="BanMemoryCache.refresh",
+            )
+            if records is None:
+                return
             by_user: dict[str, BanEntry] = {}
             by_group: dict[str, BanEntry] = {}
             by_user_group: dict[tuple[str, str], BanEntry] = {}

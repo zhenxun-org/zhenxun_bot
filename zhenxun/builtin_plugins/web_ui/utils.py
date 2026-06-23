@@ -12,11 +12,15 @@ import ujson as json
 
 from zhenxun.configs.config import Config
 from zhenxun.configs.path_config import DATA_PATH
+from zhenxun.services.db_context import with_db_timeout
+from zhenxun.services.message_load import is_db_unhealthy
 
 from .base_model import SystemFolderSize, SystemStatus, User
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+DB_BUSY_MESSAGE = "数据库繁忙，请稍后再试"
+WEBUI_DB_TIMEOUT = 3.0
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 
@@ -26,6 +30,20 @@ token_data = {"token": []}
 if token_file.exists():
     with contextlib.suppress(json.JSONDecodeError):
         token_data = json.load(open(token_file, encoding="utf8"))
+
+
+async def webui_db_call(coro, operation: str):
+    if is_db_unhealthy():
+        close = getattr(coro, "close", None)
+        if callable(close):
+            close()
+        raise TimeoutError(DB_BUSY_MESSAGE)
+    return await with_db_timeout(
+        coro,
+        timeout=WEBUI_DB_TIMEOUT,
+        operation=operation,
+        source="web_ui",
+    )
 
 
 def validate_path(path_str: str | None) -> tuple[Path | None, str | None]:

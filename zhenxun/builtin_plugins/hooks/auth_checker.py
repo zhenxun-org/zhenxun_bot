@@ -17,7 +17,7 @@ from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.user_console import UserConsole
 from zhenxun.services.cache.cache_containers import CacheDict
 from zhenxun.services.log import logger
-from zhenxun.services.message_load import signal_overload
+from zhenxun.services.message_load import is_db_unhealthy, signal_overload
 from zhenxun.utils.enum import GoldHandle, PluginType
 from zhenxun.utils.exception import InsufficientGold
 from zhenxun.utils.platform import PlatformUtils
@@ -811,6 +811,8 @@ async def _run_selected_matcher(
     dependency_cache,
     lane: str = "command_exact",
 ) -> None:
+    # state is copied per matcher before dispatch; keep lane matcher-local.
+    state["_zx_dispatch_lane"] = lane
     async with _dispatch_lane_section(lane):
         await nb_message.check_and_run_matcher(
             matcher,
@@ -938,6 +940,11 @@ async def _has_limits_cached(
             event_cache.setdefault("module_limit_entries", {})[module] = limit_entries
             event_cache.setdefault("module_limits_ready", {})[module] = True
         return has_limits
+    if is_db_unhealthy():
+        module_limit_cache[module] = False
+        if event_cache is not None:
+            event_cache.setdefault("module_limits_ready", {})[module] = False
+        return False
     limits = await LimitManager.get_module_limits(module)
     has_limits = bool(limits)
     module_limit_cache[module] = has_limits
@@ -1075,7 +1082,7 @@ async def _get_plugin_cache_first(
 
     plugin = provider.get_plugin_if_ready(module)
     cache_miss = plugin is None and not provider.plugin_cache_loaded()
-    if plugin is None and allow_cache_load:
+    if plugin is None and allow_cache_load and not is_db_unhealthy():
         plugin = await provider.get_plugin(module)
         cache_miss = False
     if event_cache is not None:
@@ -1324,6 +1331,9 @@ async def _prepare_auth_state_with_fallback(
     )
     if prep is not None:
         return prep
+    if is_db_unhealthy():
+        hook_recorder.set("auth_snapshot", "cache_miss_db_unhealthy")
+        return None
     hook_recorder.set("auth_snapshot", "cache_miss_fallback")
     return await _prepare_auth_state(
         module=module,
@@ -1408,6 +1418,9 @@ async def _resolve_cost_gold(
     if prep.profile.cost_gold <= 0:
         hook_recorder.set("cost_gold", "skipped")
         return 0
+    if is_db_unhealthy():
+        hook_recorder.set("cost_gold", "db_unhealthy")
+        raise SkipPluginException("数据库繁忙，金币功能暂不可用...")
     cost_start = time.time()
     try:
         if prep.user is None:

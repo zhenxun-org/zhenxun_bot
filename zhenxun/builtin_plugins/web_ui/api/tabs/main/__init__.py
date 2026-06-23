@@ -16,7 +16,7 @@ from zhenxun.utils.platform import PlatformUtils
 
 from ....base_model import Result
 from ....config import QueryDateType
-from ....utils import authentication, get_system_status
+from ....utils import DB_BUSY_MESSAGE, authentication, get_system_status
 from .data_source import ApiDataSource
 from .model import (
     ActiveGroup,
@@ -82,6 +82,8 @@ async def _(bot_id: str | None = None) -> Result[list[BaseInfo]]:
         if not result:
             Result.warning_("无Bot连接...")
         return Result.ok(result, "拿到信息啦!")
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(f"{router.prefix}/get_base_info 调用错误", "WebUi", e=e)
         return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")
@@ -97,6 +99,8 @@ async def _(bot_id: str | None = None) -> Result[list[BaseInfo]]:
 async def _(bot_id: str | None = None) -> Result[QueryCount]:
     try:
         return Result.ok(await ApiDataSource.get_all_chat_count(bot_id), "拿到信息啦!")
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(f"{router.prefix}/get_all_chat_count 调用错误", "WebUi", e=e)
         return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")
@@ -112,6 +116,8 @@ async def _(bot_id: str | None = None) -> Result[QueryCount]:
 async def _(bot_id: str | None = None) -> Result[QueryCount]:
     try:
         return Result.ok(await ApiDataSource.get_all_call_count(bot_id), "拿到信息啦!")
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(f"{router.prefix}/get_all_call_count 调用错误", "WebUi", e=e)
         return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")
@@ -188,6 +194,8 @@ async def _(
         return Result.ok(
             await ApiDataSource.get_active_group(date_type, bot_id), "拿到信息啦!"
         )
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(f"{router.prefix}/get_active_group 调用错误", "WebUi", e=e)
         return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")
@@ -207,6 +215,8 @@ async def _(
         return Result.ok(
             await ApiDataSource.get_hot_plugin(date_type, bot_id), "拿到信息啦!"
         )
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(f"{router.prefix}/get_hot_plugin 调用错误", "WebUi", e=e)
         return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")
@@ -294,9 +304,14 @@ async def system_logs_realtime(websocket: WebSocket, sleep: int = 5):
             await asyncio.wait_for(websocket.send_text(system_status.json()), timeout=5)
             try:
                 await asyncio.wait_for(disconnect_event.wait(), timeout=max(sleep, 1))
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 pass
-    except (WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK):
+    except (
+        asyncio.CancelledError,
+        WebSocketDisconnect,
+        ConnectionClosedError,
+        ConnectionClosedOK,
+    ):
         pass
     finally:
         _SYSTEM_STATUS_CONNECTIONS.discard(websocket)

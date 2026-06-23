@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 
 _OVERLOAD_UNTIL = 0.0
+_DB_UNHEALTHY_UNTIL = 0.0
+_DB_UNHEALTHY_REASON = ""
 _LAST_ACTIVITY = time.monotonic()
 
 
@@ -31,5 +33,27 @@ def is_overloaded() -> bool:
     return time.monotonic() < _OVERLOAD_UNTIL
 
 
+def signal_db_unhealthy(duration: float = 30.0, reason: str = "") -> None:
+    """Mark database-dependent low-priority tasks as unsafe to run briefly."""
+    global _DB_UNHEALTHY_REASON, _DB_UNHEALTHY_UNTIL
+    if duration <= 0:
+        return
+    now = time.monotonic()
+    until = now + duration
+    if until > _DB_UNHEALTHY_UNTIL:
+        _DB_UNHEALTHY_UNTIL = until
+        _DB_UNHEALTHY_REASON = str(reason or "")[:200]
+
+
+def is_db_unhealthy() -> bool:
+    return time.monotonic() < _DB_UNHEALTHY_UNTIL
+
+
+def db_unhealthy_reason() -> str:
+    if not is_db_unhealthy():
+        return ""
+    return _DB_UNHEALTHY_REASON
+
+
 def should_pause_tasks() -> bool:
-    return is_overloaded()
+    return is_overloaded() or is_db_unhealthy()

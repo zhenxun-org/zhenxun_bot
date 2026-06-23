@@ -12,7 +12,7 @@ from zhenxun.utils.platform import PlatformUtils
 
 from ....base_model import Result
 from ....config import AVA_URL, GROUP_AVA_URL
-from ....utils import authentication
+from ....utils import DB_BUSY_MESSAGE, authentication
 from .data_source import ApiDataSource
 from .model import (
     ClearRequest,
@@ -294,6 +294,8 @@ async def _(bot_id: str, user_id: str) -> Result[UserDetail]:
             if result
             else Result.warning_("未找到该好友...")
         )
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except (ValueError, KeyError):
         return Result.warning_("指定Bot未连接...")
     except Exception as e:
@@ -311,6 +313,8 @@ async def _(bot_id: str, user_id: str) -> Result[UserDetail]:
 async def _(group_id: str) -> Result[GroupDetail]:
     try:
         return Result.ok(await ApiDataSource.get_group_detail(group_id), "拿到信息啦!")
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(f"{router.prefix}/get_group_detail 调用错误", "WebUi", e=e)
         return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")

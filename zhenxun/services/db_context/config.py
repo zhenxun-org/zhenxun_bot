@@ -27,7 +27,9 @@ MYSQL_CONFIG = {
 
 SQLITE_CONFIG = {
     "journal_mode": "WAL",  # 提高并发写入性能
-    "busy_timeout": 30000,  # SQLite 锁等待超时，单位毫秒
+    # SQLite 的底层锁等待应接近业务超时，避免上层放弃后 worker 仍长时间占线。
+    # Windows bind mount / Docker 场景下 SQLite 不适合高写并发。
+    "busy_timeout": 5000,
     "foreign_keys": "ON",
 }
 

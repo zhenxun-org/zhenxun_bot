@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from zhenxun.services.message_load import is_db_unhealthy
 from zhenxun.utils.enum import BlockType, PluginType
 
 from .auth.data_provider import (
@@ -103,7 +104,7 @@ async def get_plugin_auth_profile(
     if limits is None:
         limits = provider.get_module_limits_if_ready(module)
         limits_ready = limits is not None
-    if limits is None and allow_cache_load:
+    if limits is None and allow_cache_load and not is_db_unhealthy():
         limits = await provider.get_module_limits(module)
         limits_ready = True
     if limits is None:

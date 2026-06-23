@@ -7,7 +7,7 @@ from nonebot.config import Config
 from zhenxun.services.log import logger
 
 from ....base_model import BaseResultModel, QueryModel, Result
-from ....utils import authentication
+from ....utils import DB_BUSY_MESSAGE, authentication
 from .data_source import ApiDataSource
 from .model import AllChatAndCallCount, BotInfo, ChatCallMonthCount, QueryChatCallCount
 
@@ -28,6 +28,8 @@ driver = nonebot.get_driver()
 async def _() -> Result[list[BotInfo]]:
     try:
         return Result.ok(await ApiDataSource.get_bot_list(), "拿到信息啦!")
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(f"{router.prefix}/get_bot_list 调用错误", "WebUi", e=e)
         return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")
@@ -45,6 +47,8 @@ async def _(bot_id: str | None = None) -> Result[QueryChatCallCount]:
         return Result.ok(
             await ApiDataSource.get_chat_and_call_count(bot_id), "拿到信息啦!"
         )
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(f"{router.prefix}/get_chat_and_call_count 调用错误", "WebUi", e=e)
         return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")
@@ -62,6 +66,8 @@ async def _(bot_id: str | None = None) -> Result[AllChatAndCallCount]:
         return Result.ok(
             await ApiDataSource.get_all_chat_and_call_count(bot_id), "拿到信息啦!"
         )
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(
             f"{router.prefix}/get_all_chat_and_call_count 调用错误", "WebUi", e=e
@@ -81,6 +87,8 @@ async def _(bot_id: str | None = None) -> Result[ChatCallMonthCount]:
         return Result.ok(
             await ApiDataSource.get_chat_and_call_month(bot_id), "拿到信息啦!"
         )
+    except TimeoutError:
+        return Result.fail(DB_BUSY_MESSAGE)
     except Exception as e:
         logger.error(f"{router.prefix}/get_chat_and_call_month 调用错误", "WebUi", e=e)
         return Result.fail(f"发生了一点错误捏 {type(e)}: {e}")

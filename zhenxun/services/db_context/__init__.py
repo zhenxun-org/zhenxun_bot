@@ -18,6 +18,7 @@ from zhenxun.configs.config import BotConfig
 from zhenxun.services.log import logger
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
+from . import watchdog as _watchdog  # noqa: F401
 from .base_model import Model
 from .config import (
     DB_TIMEOUT_SECONDS,

@@ -7,14 +7,19 @@ from nonebot.adapters.onebot.v11 import PokeNotifyEvent
 from nonebot.matcher import Matcher
 from nonebot.message import run_postprocessor
 from nonebot.plugin import PluginMetadata
-from nonebot_plugin_apscheduler import scheduler
 from nonebot_plugin_uninfo import Uninfo
 
 from zhenxun.configs.utils import PluginExtraData
 from zhenxun.models.statistics import Statistics
 from zhenxun.services.cache.runtime_cache import PluginInfoMemoryCache
+from zhenxun.services.db_context import with_db_timeout
 from zhenxun.services.log import logger
-from zhenxun.services.message_load import should_pause_tasks
+from zhenxun.services.low_priority_writer import (
+    LowPriorityWriterConfig,
+    append_low_priority_record,
+    flush_low_priority_writer,
+    register_low_priority_writer,
+)
 from zhenxun.utils.enum import PluginType
 from zhenxun.utils.utils import get_entity_ids
 
@@ -29,37 +34,44 @@ __plugin_meta__ = PluginMetadata(
 
 STATS_BUFFER_FLUSH_SIZE = 5000
 STATS_BUFFER_MAX_RETAIN = 10000
-TEMP_LIST: list[Statistics] = []
 _STATS_FLUSH_LOCK = asyncio.Lock()
+_WRITER_NAME = "statistics"
 driver = get_driver()
 
 
+async def _write_statistics_batch(batch: list[Statistics], reason: str) -> None:
+    await with_db_timeout(
+        Statistics.bulk_create(batch),
+        timeout=5.0,
+        operation=f"Statistics.bulk_create[{len(batch)}]",
+        source=f"statistics:{reason}",
+    )
+
+
+register_low_priority_writer(
+    LowPriorityWriterConfig(
+        name=_WRITER_NAME,
+        write_batch=_write_statistics_batch,
+        batch_size=STATS_BUFFER_FLUSH_SIZE,
+        trigger_size=STATS_BUFFER_FLUSH_SIZE,
+        max_retain=STATS_BUFFER_MAX_RETAIN,
+        flush_interval_seconds=30 * 60,
+        max_items_per_cycle=STATS_BUFFER_FLUSH_SIZE,
+        backoff_base_seconds=30.0,
+        backoff_max_seconds=600.0,
+        log_command="定时任务",
+    )
+)
+
+
 async def _flush_statistics_buffer(reason: str) -> int:
+    """Compatibility entry used by memory governor and shutdown hooks."""
     async with _STATS_FLUSH_LOCK:
-        call_list = TEMP_LIST.copy()
-        TEMP_LIST.clear()
-        if not call_list:
-            return 0
-        try:
-            await Statistics.bulk_create(call_list)
-        except Exception as e:
-            logger.error(f"{reason}批量添加调用记录失败", "定时任务", e=e)
-            retain_count = max(STATS_BUFFER_MAX_RETAIN - len(TEMP_LIST), 0)
-            if retain_count:
-                TEMP_LIST[:0] = call_list[-retain_count:]
-            return 0
-    logger.debug(f"{reason}批量添加调用记录 {len(call_list)} 条", "定时任务")
-    return len(call_list)
+        return await flush_low_priority_writer(_WRITER_NAME, reason, force=True)
 
 
 async def _append_statistics(record: Statistics) -> None:
-    # 在锁内追加(B8),与 flush 的 copy+clear 串行,消除逻辑窗口;
-    # flush 自身再次获取同一把锁,故在锁外触发避免重入。
-    async with _STATS_FLUSH_LOCK:
-        TEMP_LIST.append(record)
-        should_flush = len(TEMP_LIST) >= STATS_BUFFER_FLUSH_SIZE
-    if should_flush:
-        await _flush_statistics_buffer("缓冲区触发")
+    await append_low_priority_record(_WRITER_NAME, record)
 
 
 @run_postprocessor
@@ -93,16 +105,6 @@ async def _(
                     bot_id=bot.self_id,
                 )
             )
-
-
-@scheduler.scheduled_job("interval", minutes=30, max_instances=1, coalesce=True)
-async def _():
-    try:
-        if should_pause_tasks():
-            return
-        await _flush_statistics_buffer("定时")
-    except Exception as e:
-        logger.error("定时批量添加调用记录", "定时任务", e=e)
 
 
 @driver.on_shutdown

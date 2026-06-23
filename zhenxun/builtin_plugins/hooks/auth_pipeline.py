@@ -10,6 +10,7 @@ from nonebot.adapters import Bot, Event
 from nonebot.matcher import Matcher
 from nonebot_plugin_uninfo import Uninfo
 
+from zhenxun.services.message_load import is_db_unhealthy
 from zhenxun.utils.utils import EntityIDs
 
 from .auth.context import (
@@ -296,6 +297,9 @@ async def policy_precheck_stage(
         ctx.flags = apply_policy_precheck(ctx, deps)
     except PermissionExemption as exc:
         _recorder(ctx).set("policy_fallback", str(exc))
+        if is_db_unhealthy():
+            ctx.stop(allowed=True, effect="allow", reason="db_unhealthy_cache_miss")
+            return
         ctx.prep = await deps.prepare_auth_state(
             module=ctx.module,
             context=ctx.event_context,

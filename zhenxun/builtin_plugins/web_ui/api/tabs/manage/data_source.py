@@ -13,6 +13,7 @@ from zhenxun.utils.enum import RequestType
 from zhenxun.utils.platform import PlatformUtils
 
 from ....config import AVA_URL, GROUP_AVA_URL
+from ....utils import webui_db_call
 from .model import (
     FriendRequestResult,
     GroupDetail,
@@ -110,20 +111,24 @@ class ApiDataSource:
         fd = [x for x in friend_list if x.user_id == user_id]
         if not fd:
             return None
-        like_plugin_list = (
-            await Statistics.filter(user_id=user_id)
+        like_plugin_list = await webui_db_call(
+            Statistics.filter(user_id=user_id)
             .annotate(count=Count("id"))
             .group_by("plugin_name")
             .order_by("-count")
             .limit(5)
-            .values_list("plugin_name", "count")
+            .values_list("plugin_name", "count"),
+            "Manage.friend_like_plugin",
         )
         like_plugin = {}
         module_list = [x[0] for x in like_plugin_list]
-        plugins = await PluginInfo.get_plugins(
-            load_status=None,
-            filter_parent=False,
-            module__in=module_list,
+        plugins = await webui_db_call(
+            PluginInfo.get_plugins(
+                load_status=None,
+                filter_parent=False,
+                module__in=module_list,
+            ),
+            "Manage.friend_like_plugin_names",
         )
         module2name = {p.module: p.name for p in plugins}
         for data in like_plugin_list:
@@ -136,8 +141,14 @@ class ApiDataSource:
             nickname=user.user_name,
             remark="",
             is_ban=await BanConsole.is_ban(user_id),
-            chat_count=await ChatHistory.filter(user_id=user_id).count(),
-            call_count=await Statistics.filter(user_id=user_id).count(),
+            chat_count=await webui_db_call(
+                ChatHistory.filter(user_id=user_id).count(),
+                "Manage.friend_chat_count",
+            ),
+            call_count=await webui_db_call(
+                Statistics.filter(user_id=user_id).count(),
+                "Manage.friend_call_count",
+            ),
             like_plugin=like_plugin,
         )
 
@@ -151,16 +162,20 @@ class ApiDataSource:
         返回:
             dict[str, int]: 插件与调用次数
         """
-        like_plugin_list = (
-            await Statistics.filter(group_id=group_id)
+        like_plugin_list = await webui_db_call(
+            Statistics.filter(group_id=group_id)
             .annotate(count=Count("id"))
             .group_by("plugin_name")
             .order_by("-count")
             .limit(5)
-            .values_list("plugin_name", "count")
+            .values_list("plugin_name", "count"),
+            "Manage.group_like_plugin",
         )
         like_plugin = {}
-        plugins = await PluginInfo.get_plugins()
+        plugins = await webui_db_call(
+            PluginInfo.get_plugins(),
+            "Manage.group_like_plugin_names",
+        )
         module2name = {p.module: p.name for p in plugins}
         for data in like_plugin_list:
             name = module2name.get(data[0]) or data[0]
@@ -268,8 +283,14 @@ class ApiDataSource:
             name=group.group_name,
             member_count=group.member_count,
             max_member_count=group.max_member_count,
-            chat_count=await ChatHistory.filter(group_id=group_id).count(),
-            call_count=await Statistics.filter(group_id=group_id).count(),
+            chat_count=await webui_db_call(
+                ChatHistory.filter(group_id=group_id).count(),
+                "Manage.group_chat_count",
+            ),
+            call_count=await webui_db_call(
+                Statistics.filter(group_id=group_id).count(),
+                "Manage.group_call_count",
+            ),
             like_plugin=like_plugin,
             level=group.level,
             status=group.status,

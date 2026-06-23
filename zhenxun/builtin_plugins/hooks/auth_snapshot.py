@@ -10,7 +10,9 @@ from zhenxun.services.cache.runtime_cache import (
     GroupSnapshot,
     LevelUserSnapshot,
 )
+from zhenxun.services.db_context import with_db_timeout
 from zhenxun.services.log import logger
+from zhenxun.services.message_load import is_db_unhealthy
 
 from .auth.config import LOGGER_COMMAND
 from .auth.context import EventContext
@@ -31,6 +33,41 @@ _QQ_CLIENT_GROUP_REPAIR_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
 def _build_runtime_group_snapshot(context: EventContext) -> GroupSnapshot | None:
     """Provide a non-persistent default group for QQ official runtime auth."""
     if context.platform_scope != "qq_api" or not context.group_id:
+        return None
+    return GroupSnapshot(
+        group_id=context.group_id,
+        channel_id=context.channel_id,
+        group_name="",
+        max_member_count=0,
+        member_count=0,
+        status=True,
+        level=5,
+        is_super=False,
+        group_flag=0,
+        block_plugin="",
+        superuser_block_plugin="",
+        block_task="",
+        superuser_block_task="",
+        platform=context.platform,
+    )
+
+
+def _build_default_bot_snapshot(context: EventContext) -> BotSnapshot:
+    """Fail-open bot snapshot used only while DB cold-path is unhealthy."""
+    return BotSnapshot(
+        bot_id=context.bot_id,
+        status=True,
+        platform=context.platform,
+        block_plugins="",
+        block_tasks="",
+        available_plugins="",
+        available_tasks="",
+    )
+
+
+def _build_default_group_snapshot(context: EventContext) -> GroupSnapshot | None:
+    """Fail-open group snapshot used only while DB cold-path is unhealthy."""
+    if not context.group_id:
         return None
     return GroupSnapshot(
         group_id=context.group_id,
@@ -72,6 +109,8 @@ async def _repair_missing_qq_client_group(
     provider: PermissionDataProvider,
 ) -> GroupSnapshot | None:
     """Persist a minimal OneBot group when startup group sync returned empty."""
+    if is_db_unhealthy():
+        return None
     key = _qq_client_group_repair_key(context)
     if key is None or not provider.group_cache_loaded():
         return None
@@ -97,9 +136,14 @@ async def _repair_missing_qq_client_group(
                 "group_flag": 1,
                 "platform": context.platform,
             }
-            group, _ = await GroupConsole.get_or_create_root_group(
-                group_id=group_id,
-                defaults=defaults,
+            group, _ = await with_db_timeout(
+                GroupConsole.get_or_create_root_group(
+                    group_id=group_id,
+                    defaults=defaults,
+                ),
+                timeout=2.0,
+                operation="GroupConsole.get_or_create_root_group",
+                source="auth_snapshot.repair_missing_group",
             )
         from zhenxun.services.cache.runtime_cache import GroupMemoryCache
 
@@ -129,6 +173,7 @@ class AuthSnapshot:
     ban_state: bool | None = None
     user_balance_loaded: bool = False
     user_balance: int | None = None
+    db_unhealthy: bool = False
     cache_misses: frozenset[str] = field(default_factory=frozenset)
 
     @property
@@ -173,43 +218,63 @@ async def build_auth_snapshot(
     event_cache = context.event_cache
     entity = context.entity
     cache_misses: set[str] = set()
+    db_unhealthy = is_db_unhealthy()
+    can_load_cache = allow_cache_load and not db_unhealthy
 
     bot_data: BotSnapshot | None = None
     if (
         event_cache is not None
         and "bot_data" in event_cache
-        and (event_cache.get("bot_cache_ready") or not allow_cache_load)
+        and (event_cache.get("bot_cache_ready") or not can_load_cache)
     ):
         bot_data = event_cache.get("bot_data")
     else:
         bot_data = provider.get_bot_if_ready(bot.self_id)
         if bot_data is None:
-            if allow_cache_load:
+            if can_load_cache:
                 bot_data = await provider.get_bot(bot.self_id)
+            elif db_unhealthy:
+                bot_data = _build_default_bot_snapshot(context)
             elif not provider.bot_cache_loaded():
                 cache_misses.add("bot")
         if event_cache is not None:
             event_cache["bot_data"] = bot_data
-            event_cache["bot_cache_ready"] = provider.bot_cache_loaded()
+            event_cache["bot_cache_ready"] = provider.bot_cache_loaded() or db_unhealthy
+    if bot_data is None and db_unhealthy:
+        bot_data = _build_default_bot_snapshot(context)
+        if event_cache is not None:
+            event_cache["bot_data"] = bot_data
+            event_cache["bot_cache_ready"] = True
 
     group = None
     if entity.group_id:
         if (
             event_cache is not None
             and "group" in event_cache
-            and (event_cache.get("group_cache_ready") or not allow_cache_load)
+            and (event_cache.get("group_cache_ready") or not can_load_cache)
         ):
             group = event_cache.get("group")
         else:
             group = provider.get_group_if_ready(entity.group_id, entity.channel_id)
             if group is None and not provider.group_cache_loaded():
                 cache_misses.add("group")
-            elif group is None and allow_cache_load:
+            elif group is None and can_load_cache:
                 group = await provider.get_group(entity.group_id, entity.channel_id)
+            if group is None and db_unhealthy:
+                group = _build_default_group_snapshot(context)
+                cache_misses.discard("group")
             if event_cache is not None:
                 event_cache["group"] = group
-                event_cache["group_cache_ready"] = provider.group_cache_loaded()
-        if group is None:
+                event_cache["group_cache_ready"] = (
+                    provider.group_cache_loaded() or db_unhealthy
+                )
+        if group is None and db_unhealthy:
+            group = _build_default_group_snapshot(context)
+            cache_misses.discard("group")
+            if event_cache is not None:
+                event_cache["group"] = group
+                event_cache["group_cache_ready"] = True
+        if group is None and not db_unhealthy:
             group = await _repair_missing_qq_client_group(
                 context,
                 provider=provider,
@@ -232,7 +297,7 @@ async def build_auth_snapshot(
         if (
             event_cache is not None
             and "admin_levels" in event_cache
-            and (event_cache.get("admin_cache_ready") or not allow_cache_load)
+            and (event_cache.get("admin_cache_ready") or not can_load_cache)
         ):
             admin_levels = event_cache.get("admin_levels")
         else:
@@ -241,16 +306,26 @@ async def build_auth_snapshot(
                 entity.group_id,
             )
             if admin_levels is None:
-                if allow_cache_load:
+                if can_load_cache:
                     admin_levels = await provider.get_admin_levels(
                         entity.user_id,
                         entity.group_id,
                     )
+                elif db_unhealthy:
+                    admin_levels = (None, None)
                 else:
                     cache_misses.add("admin_levels")
             if event_cache is not None:
                 event_cache["admin_levels"] = admin_levels
-                event_cache["admin_cache_ready"] = provider.admin_cache_loaded()
+                event_cache["admin_cache_ready"] = (
+                    provider.admin_cache_loaded() or db_unhealthy
+                )
+        if admin_levels is None and db_unhealthy and not provider.admin_cache_loaded():
+            admin_levels = (None, None)
+            cache_misses.discard("admin_levels")
+            if event_cache is not None:
+                event_cache["admin_levels"] = admin_levels
+                event_cache["admin_cache_ready"] = True
 
     ban_state = None
     if not skip_ban:
@@ -260,9 +335,13 @@ async def build_auth_snapshot(
             ban_state = provider.is_banned(entity.user_id, entity.group_id)
             if event_cache is not None:
                 event_cache["ban_state"] = ban_state
-        elif allow_cache_load:
+        elif can_load_cache:
             await provider.ensure_ban_loaded()
             ban_state = provider.is_banned(entity.user_id, entity.group_id)
+            if event_cache is not None:
+                event_cache["ban_state"] = ban_state
+        elif db_unhealthy:
+            ban_state = False
             if event_cache is not None:
                 event_cache["ban_state"] = ban_state
         else:
@@ -276,6 +355,7 @@ async def build_auth_snapshot(
         group=group,
         admin_levels=admin_levels,
         ban_state=ban_state,
+        db_unhealthy=db_unhealthy,
         cache_misses=frozenset(cache_misses),
     )
 

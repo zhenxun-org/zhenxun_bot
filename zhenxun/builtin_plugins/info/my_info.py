@@ -12,6 +12,8 @@ from zhenxun.models.sign_user import SignUser
 from zhenxun.models.statistics import Statistics
 from zhenxun.models.user_console import UserConsole
 from zhenxun.services import avatar_service
+from zhenxun.services.db_context import with_db_timeout
+from zhenxun.services.message_load import is_db_unhealthy
 from zhenxun.utils.platform import PlatformUtils
 
 RACE = [
@@ -81,6 +83,21 @@ lik2level = {
     10: 1,
     0: 0,
 }
+_INFO_DB_TIMEOUT = 3.0
+
+
+async def _read_db(factory, operation: str, default):
+    if is_db_unhealthy():
+        return default
+    try:
+        return await with_db_timeout(
+            factory(),
+            timeout=_INFO_DB_TIMEOUT,
+            operation=operation,
+            source="my_info",
+        )
+    except Exception:
+        return default
 
 
 def get_level(impression: float) -> int:
@@ -103,13 +120,17 @@ async def get_chat_history(
     """
     now = datetime.now()
     filter_date = now - timedelta(days=7)
-    date_list = (
-        await ChatHistory.filter(
-            user_id=user_id, group_id=group_id, create_time__gte=filter_date
+    date_list = await _read_db(
+        lambda: ChatHistory.filter(
+            user_id=user_id,
+            group_id=group_id,
+            create_time__gte=filter_date,
         )
         .annotate(date=RawSQL("DATE(create_time)"), count=Count("id"))
         .group_by("date")
-        .values("date", "count")
+        .values("date", "count"),
+        "MyInfo.chat_history_chart",
+        [],
     )
     chart_date: list[str] = []
     count_list: list[int] = []
@@ -143,20 +164,40 @@ async def get_user_info(
     avatar_path = await avatar_service.get_avatar_path(platform, user_id)
     avatar_url = avatar_path.as_uri() if avatar_path else ""
 
-    user = await UserConsole.get_user(user_id, platform)
-    permission_level = await LevelUser.get_user_level(user_id, group_id)
+    user = await _read_db(
+        lambda: UserConsole.get_user(user_id, platform),
+        "MyInfo.user_console",
+        None,
+    )
+    permission_level = await _read_db(
+        lambda: LevelUser.get_user_level(user_id, group_id),
+        "MyInfo.level_user",
+        0,
+    )
 
     sign_level = 0
-    if sign_user := await SignUser.get_or_none(user_id=user_id):
+    if sign_user := await _read_db(
+        lambda: SignUser.get_or_none(user_id=user_id),
+        "MyInfo.sign_user",
+        None,
+    ):
         sign_level = get_level(float(sign_user.impression))
 
-    chat_count = await ChatHistory.filter(user_id=user_id, group_id=group_id).count()
-    stat_count = await Statistics.filter(user_id=user_id, group_id=group_id).count()
+    chat_count = await _read_db(
+        lambda: ChatHistory.filter(user_id=user_id, group_id=group_id).count(),
+        "MyInfo.chat_count",
+        0,
+    )
+    stat_count = await _read_db(
+        lambda: Statistics.filter(user_id=user_id, group_id=group_id).count(),
+        "MyInfo.stat_count",
+        0,
+    )
 
     selected_indices = [""] * 9
     selected_indices[sign_level] = "select"
 
-    uid = f"{user.uid}".rjust(8, "0")
+    uid = f"{getattr(user, 'uid', 0)}".rjust(8, "0")
     uid_formatted = f"{uid[:4]} {uid[4:]}"
 
     now = datetime.now()
@@ -182,8 +223,8 @@ async def get_user_info(
             ),
         },
         "stats": {
-            "gold": user.gold,
-            "prop_count": len(user.props),
+            "gold": getattr(user, "gold", 0),
+            "prop_count": len(getattr(user, "props", {}) or {}),
             "call_count": stat_count,
             "chat_count": chat_count,
         },
