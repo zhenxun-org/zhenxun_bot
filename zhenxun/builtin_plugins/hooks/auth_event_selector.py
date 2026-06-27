@@ -39,14 +39,8 @@ class HandleEventSelectorDependencies:
 _HANDLE_EVENT_PATCHED = False
 _ORIGINAL_HANDLE_EVENT: Callable[..., Awaitable[None]] | None = None
 _ORIGINAL_ADAPTER_HANDLE_EVENTS: dict[object, object] = {}
-_MATCHER_DEADLINE_BY_LANE = {
-    "system": 15.0,
-    "command": 12.0,
-    "temp": 15.0,
-    "passive_light": 3.0,
-    "fallback_ai": 5.0,
-}
-_DEFAULT_MATCHER_DEADLINE = 5.0
+_DEFAULT_MATCHER_DEADLINE = 21600.0
+_MATCHER_DEADLINE_BY_LANE: dict[str, float] = {}
 
 
 def _matcher_deadline_for_lane(lane: str) -> float:
@@ -76,7 +70,6 @@ async def _run_matcher_with_deadline(
         with anyio_mod.fail_after(timeout):
             await coro
     except TimeoutError:
-        signal_overload(20.0)
         logger.warning(
             "matcher dispatch timeout: "
             f"matcher={_matcher_name(matcher)}, lane={lane}, timeout={timeout:.1f}s",

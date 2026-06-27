@@ -15,6 +15,12 @@ _SQLITE_STALL_UNTIL = 0.0
 _SQLITE_STALL_REASON = ""
 _DB_UNHEALTHY_TIMEOUT_SECONDS = 30.0
 _SQLITE_STALL_TIMEOUT_SECONDS = 60.0
+_SQLITE_LOCK_PATTERNS = (
+    "database is locked",
+    "database is busy",
+    "database table is locked",
+    "database table is busy",
+)
 
 
 def _is_sqlite_connection() -> bool:
@@ -44,6 +50,24 @@ def sqlite_stall_reason() -> str:
     if not is_sqlite_stall_suspected():
         return ""
     return _SQLITE_STALL_REASON
+
+
+def _is_sqlite_lock_error(exc: BaseException) -> bool:
+    if not _is_sqlite_connection():
+        return False
+    message = str(exc).casefold()
+    return any(pattern in message for pattern in _SQLITE_LOCK_PATTERNS)
+
+
+def _mark_sqlite_lock_unhealthy(exc: BaseException, operation: str | None) -> None:
+    reason = f"{operation or 'database_operation'} sqlite lock: {exc}"
+    _mark_sqlite_stall(reason, _SQLITE_STALL_TIMEOUT_SECONDS)
+    signal_db_unhealthy(_SQLITE_STALL_TIMEOUT_SECONDS, reason=reason)
+    logger.warning(
+        "SQLite 数据库锁等待失败，已暂停低优先级数据库任务",
+        LOG_COMMAND,
+        e=exc if isinstance(exc, Exception) else None,
+    )
 
 
 async def with_db_timeout(
@@ -77,4 +101,8 @@ async def with_db_timeout(
                 f"数据库操作超时: {operation} (>{timeout}s) 来源: {source}",
                 LOG_COMMAND,
             )
+        raise
+    except Exception as exc:
+        if _is_sqlite_lock_error(exc):
+            _mark_sqlite_lock_unhealthy(exc, operation)
         raise

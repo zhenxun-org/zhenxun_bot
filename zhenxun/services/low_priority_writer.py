@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 from zhenxun.services.log import logger
-from zhenxun.services.message_load import should_pause_tasks, signal_db_unhealthy
+from zhenxun.services.message_load import should_pause_db_tasks, signal_db_unhealthy
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 
 LOG_COMMAND = "LowPriorityWriter"
@@ -159,7 +159,7 @@ async def _worker_loop() -> None:
             except asyncio.TimeoutError:
                 pass
             event.clear()
-        if should_pause_tasks():
+        if should_pause_db_tasks():
             continue
         async with _FLUSH_LOCK:
             for state in list(_WRITERS.values()):
@@ -186,7 +186,7 @@ async def _flush_state(
     force: bool = False,
 ) -> int:
     if not force:
-        if should_pause_tasks():
+        if should_pause_db_tasks():
             return 0
         if time.monotonic() < state.backoff_until:
             return 0

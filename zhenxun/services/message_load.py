@@ -57,3 +57,7 @@ def db_unhealthy_reason() -> str:
 
 def should_pause_tasks() -> bool:
     return is_overloaded() or is_db_unhealthy()
+
+
+def should_pause_db_tasks() -> bool:
+    return is_db_unhealthy()
