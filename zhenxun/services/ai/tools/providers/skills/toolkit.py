@@ -56,19 +56,16 @@ class SkillSandboxExecutionMixin:
         ]
         if missing_keys:
             logger.warning(f"技能 {skill.id} 因缺少环境变量 {missing_keys} 被拦截。")
-            return (
-                ToolResult(
-                    output=(
-                        f"❌ 技能执行被系统拦截：缺少必需的全局环境变量 "
-                        f"{missing_keys}。\n"
-                        "💡 [智能体自愈引导]：当前技能的底层配置缺失，无法正常运行。"
-                        "请你立即停止尝试，并向用户抱歉，提示用户（或 Bot 管理员）"
-                        "在机器人后端的 `data/ai/skill_envs.json` 文件中为该技能配置"
-                        "相应的环境变量（API Key 等），配置完成后方可使用。"
-                    ),
-                )
-                .as_error()
-            )
+            return ToolResult(
+                output=(
+                    f"❌ 技能执行被系统拦截：缺少必需的全局环境变量 "
+                    f"{missing_keys}。\n"
+                    "💡 [智能体自愈引导]：当前技能的底层配置缺失，无法正常运行。"
+                    "请你立即停止尝试，并向用户抱歉，提示用户（或 Bot 管理员）"
+                    "在机器人后端的 `data/ai/skill_envs.json` 文件中为该技能配置"
+                    "相应的环境变量（API Key 等），配置完成后方可使用。"
+                ),
+            ).as_error()
 
         env_vars = {}
         for k, v in configured_envs.items():

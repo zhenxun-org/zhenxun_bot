@@ -177,6 +177,7 @@ class MemoryScope:
             r.metadata["last_accessed_at"] = now
             await self.rag_client.storage.update(r)
 
+
 class InMemoryChatContext(BaseChatContext):
     def __init__(self):
         self._messages: dict[str, list[LLMMessage]] = {}
@@ -218,7 +219,6 @@ class InMemoryChatContext(BaseChatContext):
         ]
         for sid in keys_to_delete:
             self._messages.pop(sid, None)
-
 
 
 class AbstractMemoryRecord(Model):

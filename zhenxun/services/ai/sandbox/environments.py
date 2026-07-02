@@ -66,7 +66,6 @@ class UnifiedManifestProvisioner(BaseProvisioner):
     async def install(
         self, session: "BaseSandboxSession", blueprint: "SandboxBlueprint"
     ) -> bool:
-
         target_hash = blueprint.calculate_hash()
 
         if session.get_meta("env_hash") == target_hash:
@@ -97,7 +96,6 @@ class UnifiedManifestProvisioner(BaseProvisioner):
     async def scan_and_setup_workspace(
         self, session: "BaseSandboxSession", workspace_dir: str
     ) -> bool:
-
         check = await session.run_process(f"test -f {workspace_dir}/requirements.txt")
         if check.exit_code == 0:
             check_uv = await session.run_process("command -v uv")

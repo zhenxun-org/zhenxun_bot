@@ -362,7 +362,6 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
                 from zhenxun.services.ai.run.models import AgentRunError
 
                 if isinstance(e, asyncio.CancelledError):
-
                     e = ConcurrencyInterruptException("团队执行已被新请求打断并接管")
                 await event_bus.emit(AgentRunError(error=e))
             finally:

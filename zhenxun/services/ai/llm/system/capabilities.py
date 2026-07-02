@@ -180,28 +180,28 @@ CAP_OPENAI_TTS = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.AUDIO},
     supports_tool_calling=False,
-    default_voice_id="alloy"
+    default_voice_id="alloy",
 )
 
 CAP_GEMINI_TTS = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.AUDIO},
     supports_tool_calling=False,
-    default_voice_id="Aoede"
+    default_voice_id="Aoede",
 )
 
 CAP_MINIMAX_TTS = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.AUDIO},
     supports_tool_calling=False,
-    default_voice_id="female-shaonv"
+    default_voice_id="female-shaonv",
 )
 
 CAP_MIMO_TTS = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.AUDIO},
     supports_tool_calling=False,
-    default_voice_id="mimo_default"
+    default_voice_id="mimo_default",
 )
 
 CAP_TEXT_EMBEDDING = ModelCapabilities(

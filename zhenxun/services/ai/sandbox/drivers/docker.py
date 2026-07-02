@@ -342,7 +342,6 @@ class DockerSandboxSession(BaseSandboxSession):
     async def upload_raw_dir(
         self, local_dir_path: str, sandbox_target_path: str
     ) -> bool:
-
         aio_path = anyio.Path(local_dir_path)
         if not await aio_path.exists() or not await aio_path.is_dir():
             return False

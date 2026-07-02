@@ -32,7 +32,6 @@ class HITLToolkit(BaseToolkit):
         hitl: Inject.HITL,
         context: RunContext,
     ) -> ToolResult:
-
         try:
             user_reply = await hitl.ask_text(
                 f"🤖 [AI 提问]\n{question}\n\n(请在 60 秒内回复，或回复'取消')",

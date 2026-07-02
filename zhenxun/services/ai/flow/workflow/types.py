@@ -15,9 +15,6 @@ class StepType(str, Enum):
     ROUTER = "Router"
 
 
-
-
-
 class StepInput(BaseModel):
     """传递给每个 Step 的标准输入结构"""
 
@@ -60,9 +57,6 @@ class StepOutput(BaseModel):
 
     steps: list["StepOutput"] | None = None
     """嵌套步骤的输出结果集合（如复合节点 Loop、Parallel 的内部产出）"""
-
-
-
 
 
 class WorkflowRunResult(BaseModel):

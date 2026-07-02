@@ -138,6 +138,7 @@ async def handle_info(arp: Arparma, model_name: Match[str]):
     image_bytes = await Presenters.format_model_details_as_markdown_image(details)
     await llm_cmd.finish(MessageUtils.build_message(image_bytes))
 
+
 @llm_cmd.assign("test")
 async def handle_test(arp: Arparma, model_name: Match[str]):
     """处理 'llm test' 命令"""

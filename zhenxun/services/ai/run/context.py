@@ -97,7 +97,7 @@ class SessionContext(Generic[AgentDepsT]):
                 group_id=group_id,
                 platform=platform,
                 namespace=self.namespace,
-            )
+            ),
         )
         return AgentSessionFacade(memory_manager, meta)
 

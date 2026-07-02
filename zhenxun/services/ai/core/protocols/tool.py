@@ -41,8 +41,6 @@ class ToolExecutable(Protocol):
         ...
 
 
-
-
 @runtime_checkable
 class ToolResolvable(Protocol):
     """

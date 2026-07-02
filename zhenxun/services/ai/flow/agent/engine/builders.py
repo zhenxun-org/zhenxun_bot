@@ -40,7 +40,6 @@ class AgentProfileResolver:
         cap_config: GenerationConfig | None,
         profile_config: GenerationConfig | None,
     ) -> GenerationConfig:
-
         final_gen_config = model_copy(base_config, deep=True)
         if cap_config:
             final_gen_config = final_gen_config.merge_with(cap_config)
@@ -65,7 +64,6 @@ class CapabilityBuilder:
         profile_capabilities: list | None,
         context: RunContext,
     ) -> CombinedCapability:
-
         from zhenxun.services.ai.capabilities import (
             AbstractCapability,
             DynamicCapability,

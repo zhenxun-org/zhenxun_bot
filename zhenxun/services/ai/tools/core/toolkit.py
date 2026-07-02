@@ -201,7 +201,6 @@ class BaseToolkit:
         return f"<{tag_name}>\n{text}\n</{tag_name}>"
 
     def prefixed(self, prefix: str) -> "BaseToolkit":
-
         new_tk = copy.copy(self)
         new_tk.config = model_copy(self.config, deep=True)
         current_prefix = new_tk.config.prefix or ""
@@ -210,7 +209,6 @@ class BaseToolkit:
         return new_tk
 
     def filtered(self, filter_func: Callable[[BaseTool], bool]) -> "BaseToolkit":
-
         new_tk = copy.copy(self)
         new_tk.config = model_copy(self.config, deep=True)
         old_filter = self._instance_filter
