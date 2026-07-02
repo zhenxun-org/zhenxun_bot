@@ -35,6 +35,12 @@ class DocumentChunking(ChunkingStrategy):
     """段落语义分块策略 (按双换行切分)"""
 
     def __init__(self, chunk_size: int = 1000):
+        """
+        初始化段落语义分块策略。
+
+        参数:
+            chunk_size: 单个分块的最大字符长度限制，默认 1000。
+        """
         self.chunk_size = chunk_size
 
     def chunk(self, record: BaseRecord) -> list[BaseRecord]:
@@ -81,6 +87,15 @@ class RecursiveCharacterChunking(ChunkingStrategy):
         overlap: int = 100,
         separators: list[str] | None = None,
     ):
+        """
+        初始化递归字符分块策略。
+
+        参数:
+            chunk_size: 单个分块的最大字符长度限制，默认 1000。
+            overlap: 相邻分块之间的重叠字符长度，默认 100。
+            separators: 用于切分文本的候选分隔符列表，按优先级从高到低尝试，
+                默认包含段落、句子和常见标点。
+        """
         if overlap >= chunk_size:
             raise ValueError(f"重叠长度 ({overlap}) 必须小于分块大小 ({chunk_size})")
         self.chunk_size = chunk_size
@@ -195,6 +210,12 @@ class RowChunking(ChunkingStrategy):
     """
 
     def __init__(self, rows_per_chunk: int = 50):
+        """
+        初始化表格行数据分块策略。
+
+        参数:
+            rows_per_chunk: 每个分块包含的数据行数（不含表头），默认 50。
+        """
         self.rows_per_chunk = rows_per_chunk
 
     def chunk(self, record: BaseRecord) -> list[BaseRecord]:
@@ -229,6 +250,13 @@ class DeduplicationProcessor:
     """
 
     def __init__(self, threshold: float = 0.98):
+        """
+        初始化入库批处理去重处理器。
+
+        参数:
+            threshold: 余弦相似度重复阈值，超过该阈值的块将被判定为重复并过滤，
+                默认 0.98。
+        """
         self.threshold = threshold
 
     async def process(self, records: list[BaseRecord]) -> list[BaseRecord]:
@@ -289,6 +317,14 @@ class DynamicChunkingNode(BaseBatchNode):
         default_strategy: ChunkingStrategy,
         custom_strategies: dict[str, ChunkingStrategy] | None = None,
     ):
+        """
+        初始化智能路由切块节点。
+
+        参数:
+            default_strategy: 默认的切块策略。
+            custom_strategies: 针对特定文件后缀的自定义切块策略映射表，
+                默认 CSV 文件使用 RowChunking。
+        """
         self.default_strategy = default_strategy
         self.strategies = custom_strategies or {".csv": RowChunking(rows_per_chunk=30)}
 
@@ -305,6 +341,13 @@ class BaseEmbeddingBatchNode(BaseBatchNode):
     """批量向量化抽象基类：提取文本、分批请求 API 并将结果写回的公共逻辑"""
 
     def __init__(self, embedder, batch_size: int = 80):
+        """
+        初始化批量向量化抽象基类。
+
+        参数:
+            embedder: 向量嵌入模型/函数，用于将文本生成向量。
+            batch_size: 向量化请求的单批次大小限制，默认 80。
+        """
         self.embedder = embedder
         self.batch_size = batch_size
 
@@ -349,6 +392,12 @@ class DedupNode(BaseBatchNode):
     """批次内查重节点"""
 
     def __init__(self, threshold: float):
+        """
+        初始化批次内查重节点。
+
+        参数:
+            threshold: 余弦相似度重复阈值，超过该阈值的块将被判定为重复并过滤。
+        """
         self.processor = DeduplicationProcessor(threshold=threshold)
 
     async def process_batch(self, records: list[BaseRecord]) -> list[BaseRecord]:
@@ -359,6 +408,12 @@ class StorageCommitNode(BaseBatchNode):
     """持久化事务提交节点 (Reduce)。统一收集意图并执行并发数据库 I/O。"""
 
     def __init__(self, storage):
+        """
+        初始化持久化事务提交节点。
+
+        参数:
+            storage: 存储后端，负责将记录存入或删除。
+        """
         self.storage = storage
 
     async def process_batch(self, records: list[BaseRecord]) -> list[BaseRecord]:
@@ -402,6 +457,13 @@ class IndexPipeline:
         nodes: list[BaseBatchNode | BaseMapNode] | None = None,
         max_workers: int = 5,
     ):
+        """
+        初始化统一入库流水线。
+
+        参数:
+            nodes: 管道节点列表，按顺序执行数据处理，默认 None。
+            max_workers: 最大并发工作协程数，用于 Map 节点的并发调度，默认 5。
+        """
         self.nodes = nodes or []
         self.max_workers = max_workers
 

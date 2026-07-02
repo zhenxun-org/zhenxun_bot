@@ -75,6 +75,15 @@ class VectorDBRetriever(BaseRetriever):
         scope_prefix: str | None = None,
         score_threshold: float = 0.4,
     ):
+        """
+        初始化向量数据库检索器。
+
+        参数:
+            storage: 存储后端，用于执行向量相似度搜索。
+            embedder: 向量嵌入模型/函数，用于将文本转换为向量。
+            scope_prefix: 作用域前缀，用于限制检索范围，默认 None。
+            score_threshold: 分数阈值，过滤掉相似度低于该值的检索结果，默认 0.4。
+        """
         self.storage = storage
         self.embedder = embedder
         self.scope_prefix = scope_prefix
@@ -114,6 +123,14 @@ class DatabaseSparseRetriever(BaseRetriever):
         scope_prefix: str | None = None,
         score_threshold: float = 0.0,
     ):
+        """
+        初始化数据库稀疏检索器。
+
+        参数:
+            storage: 存储后端，用于执行全文检索/关键词检索。
+            scope_prefix: 作用域前缀，用于限制检索范围，默认 None。
+            score_threshold: 分数阈值，过滤掉相关度低于该值的检索结果，默认 0.0。
+        """
         self.storage = storage
         self.scope_prefix = scope_prefix
         self.score_threshold = score_threshold
@@ -149,6 +166,16 @@ class RerankRetriever(BaseRetriever):
         oversample_factor: int = 2,
         min_oversample: int = 20,
     ):
+        """
+        初始化重排检索器。
+
+        参数:
+            base_retriever: 基础检索器，用于初筛。
+            model_name: 重排模型的名称，默认 None。
+            top_n: 重排后保留的前 N 个文档数，默认 5。
+            oversample_factor: 过采样系数，决定初筛检索的文档数量倍数，默认 2。
+            min_oversample: 最小过采样文档数，默认 20。
+        """
         self.base_retriever = base_retriever
         self.model_name = model_name
         self.top_n = top_n
@@ -203,6 +230,14 @@ class PipelineRetriever(BaseRetriever):
         post_processors: list[PostProcessor] | None = None,
         pre_processors: list[PreProcessor] | None = None,
     ):
+        """
+        初始化流水线检索器。
+
+        参数:
+            base_retriever: 基础检索器，执行最初的检索过程。
+            post_processors: 后处理器列表，用于对检索到的结果进行重排、过滤等后处理，默认 None。
+            pre_processors: 预处理器列表，用于对查询词进行改写、扩展等预处理，默认 None。
+        """  # noqa: E501
         self.base_retriever = base_retriever
         self.post_processors = post_processors or []
         self.pre_processors = pre_processors or []
@@ -256,6 +291,16 @@ class LifecyclePostProcessor(PostProcessor):
         importance_weight: float = 0.0,
         reinforcement_weight: float = 0.2,
     ):
+        """
+        初始化生命周期后处理器。
+
+        参数:
+            half_life_days: 记忆衰减半衰期天数，控制信息随时间的降权速度，默认 30。
+            decay_weight: 时间衰减得分的权重，默认 0.3。
+            semantic_weight: 语义相关度得分的权重，默认 0.7。
+            importance_weight: 信息重要性得分的权重，默认 0.0。
+            reinforcement_weight: 惰性访问强化（如访问次数得分）的权重，默认 0.2。
+        """
         self.half_life_days = half_life_days
         self.decay_weight = decay_weight
         self.semantic_weight = semantic_weight

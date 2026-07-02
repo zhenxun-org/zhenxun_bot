@@ -88,6 +88,14 @@ class BaseTool:
         description: str | None = None,
         settings: ToolOptions | None = None,
     ):
+        """
+        初始化工具基类。
+
+        参数:
+            name: 工具名，供大模型识别调用，默认取类名。
+            description: 工具功能说明，供大模型理解，默认取 __doc__ 说明。
+            settings: 工具的个性化配置选项（例如缓存时间、依赖中间件等），默认 None。
+        """
         self.name = name or getattr(self, "name", self.__class__.__name__)
         self.description = description or getattr(
             self, "description", self.__doc__ or "未提供描述"
@@ -361,6 +369,15 @@ class FunctionTool(BaseTool):
         description: str | None = None,
         settings: ToolOptions | None = None,
     ):
+        """
+        初始化函数式包装工具。
+
+        参数:
+            func: 被包装的底层 Python 同步或异步函数。
+            name: 覆盖函数名的自定义工具名，默认 None。
+            description: 覆盖 docstring 的自定义工具描述，默认 None。
+            settings: 覆盖默认选项的自定义工具配置项，默认 None。
+        """
         super().__init__(name=name, description=description, settings=settings)
 
         self._original_func = func

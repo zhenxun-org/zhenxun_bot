@@ -26,6 +26,14 @@ class PromptTemplate(Generic[AgentDepsT]):
         custom_filters: dict[str, Callable] | None = None,
         custom_globals: dict[str, Any] | None = None,
     ):
+        """
+        初始化 Prompt 渲染引擎。
+
+        参数:
+            template_string: Jinja2 模板格式的提示词原文本。
+            custom_filters: 挂载到 Jinja2 渲染环境的自定义过滤器字典，默认 None。
+            custom_globals: 挂载到 Jinja2 渲染环境的全局变量或辅助函数字典，默认 None。
+        """
         self.template_string = template_string
 
         self._env = Environment(autoescape=False)

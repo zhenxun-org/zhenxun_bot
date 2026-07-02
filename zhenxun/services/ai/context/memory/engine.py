@@ -22,6 +22,13 @@ class MemoryReader:
     def __init__(
         self, session_meta: SessionMetadata, memory_config: MemoryConfig | None
     ):
+        """
+        初始化记忆读取器。
+
+        参数:
+            session_meta: 会话元数据，包含 Namespace 与作用域映射等上下文信息。
+            memory_config: 记忆系统的配置对象，控制长期、短期及槽位记忆的启用与逻辑。
+        """
         self.session_meta = session_meta
         self.memory_config = memory_config
 
@@ -199,6 +206,14 @@ class MemoryWriter:
         memory_config: MemoryConfig | None,
         context: Any = None,
     ):
+        """
+        初始化记忆写入器。
+
+        参数:
+            session_meta: 会话元数据，包含 Namespace 与作用域映射等上下文信息。
+            memory_config: 记忆系统的配置对象，控制记忆存入的逻辑。
+            context: 运行时上下文环境，作为可选参数传入，供中间件使用，默认 None。
+        """
         self.session_meta = session_meta
         self.memory_config = memory_config
         self.context = context

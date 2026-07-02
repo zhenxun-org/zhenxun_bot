@@ -142,6 +142,13 @@ class RetryPolicy(BaseFailurePolicy):
     """退避重试策略"""
 
     def __init__(self, max_retries: int = 3, delay: float = 1.0):
+        """
+        初始化退避重试策略。
+
+        参数:
+            max_retries: 最大允许重试的次数限制，默认 3。
+            delay: 每次重试前需要等待和睡眠的秒数，默认 1.0。
+        """
         self.max_retries = max_retries
         self.delay = delay
 
@@ -161,6 +168,12 @@ class FallbackPolicy(BaseFailurePolicy):
     """降级路由策略"""
 
     def __init__(self, fallback_node: Any):
+        """
+        初始化降级路由策略。
+
+        参数:
+            fallback_node: 当主节点发生致命故障时，直接转入执行的备用降级节点。
+        """
         self.fallback_node = fallback_node
 
     async def handle_failure(
@@ -175,6 +188,13 @@ class SelfHealingPolicy(BaseFailurePolicy):
     """大模型高级自愈策略"""
 
     def __init__(self, healer_model: str, max_retries: int = 2):
+        """
+        初始化大模型高级自愈策略。
+
+        参数:
+            healer_model: 用于分析错误原因并智能修复入参的大模型名称。
+            max_retries: 最大尝试自愈修复的次数，默认 2。
+        """
         self.healer_model = healer_model
         self.max_retries = max_retries
 

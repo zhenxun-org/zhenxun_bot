@@ -41,6 +41,15 @@ class BaseOutputProcessor(Generic[OutputDataT]):
         error_template: str | None = None,
         raw_schema: dict[str, Any] | None = None,
     ):
+        """
+        初始化结构化输出处理器。
+
+        参数:
+            response_model: 期望的输出目标 Pydantic 模型类或 Union 类型，默认 None。
+            error_template: 当 JSON 解析或模型验证失败时，反馈给大模型的 IVR 纠错提示词模板，默认 None。
+            raw_schema: 显式传入的原始 JSON Schema 字典，
+                如果不为 None 则跳过根据 response_model 生成，默认 None。
+        """  # noqa: E501
         self.original_model = response_model
         self.error_template = error_template or DEFAULT_IVR_TEMPLATE
         self.raw_schema = raw_schema
@@ -145,6 +154,13 @@ class SubmitFinalResultExecutable(BaseTool):
         output_processor: BaseOutputProcessor,
         guardrails: list[Any] | None = None,
     ):
+        """
+        初始化提交最终结果的动态执行工具。
+
+        参数:
+            output_processor: 绑定的结构化输出处理器，用于验证提交的最终结果。
+            guardrails: 用于在结果输出前进行安全合规拦截的护栏中间件列表，默认 None。
+        """
         super().__init__(
             name="submit_final_result",
             description=(

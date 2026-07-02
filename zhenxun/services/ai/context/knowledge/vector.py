@@ -72,12 +72,18 @@ class VectorKnowledge(BaseKnowledge):
         初始化向量语义知识库工具箱。
 
         参数:
-            rag_client: RAG 基础设施客户端实例。
+            rag_client: RAG 基础设施客户端实例，默认 None。
             injection_mode: 知识库的介入模式。
                 - "tool": 纯工具模式 (默认)。大模型需自主思考并显式调用 `search_knowledge` 工具获取信息。
                 - "auto": 自动注入模式。向大模型隐藏检索工具，直接使用用户的原始输入去数据库粗筛并静默注入。
                 - "smart": 智能查询模式。向大模型隐藏检索工具，先利用 LLM 对用户的提问进行改写，再查库注入，准确率最高。
             query_rewrite_model: 在 "smart" 模式下，指定用于重写查询词的大模型名称（为空则跟随当前主模型）。
+            auto_inject_template: 自动/智能注入模式下向大模型提示词注入的模板字符串，默认 None。
+            query_rewrite_prompt: 智能模式下对查询词进行改写时的提示词，默认 None。
+            query_rewrite_instruction: 智能模式下进行查询词改写的大模型 System 提示词说明，默认 None。
+            search_limit: 单次库检索的返回记录数限制，默认 8。
+            inject_limit: 最终合并去重后注入给大模型的上下文片段数上限，默认 12。
+            **kwargs: 传递给父类的其他关键字参数。
         """  # noqa: E501
         self.injection_mode = injection_mode
         self.query_rewrite_model = query_rewrite_model

@@ -31,6 +31,15 @@ class FileSystemKnowledge(BaseKnowledge):
         allowed_extensions: tuple[str, ...] | None = None,
         **kwargs: Any,
     ):
+        """
+        初始化文本文件系统知识库。
+
+        参数:
+            base_dir: 知识库对应的本地根目录路径。
+            allowed_extensions: 允许读取和检索的文件后缀元组，
+                默认支持 txt, md, json, csv, yaml, log。
+            **kwargs: 透传给父类 BaseKnowledge 的额外参数。
+        """
         super().__init__(**kwargs)
         self.base_dir = Path(base_dir).resolve()
         self.allowed_extensions = allowed_extensions or (

@@ -26,6 +26,14 @@ class CacheCapability(AbstractCapability):
     """
 
     def __init__(self, ttl: int = 3600, cache_function: Callable | None = None):
+        """
+        初始化极速缓存能力中间件。
+
+        参数:
+            ttl: 缓存结果的有效存活时长（秒），默认 3600。
+            cache_function: 自定义判定函数，接收 arguments 与 result，
+                返回布尔值决定该次结果是否允许缓存，默认 None。
+        """
         self.ttl = ttl
         self.cache_function = cache_function
 
@@ -126,6 +134,16 @@ class LifecycleCapability(AbstractCapability):
         validate_args: Callable | None = None,
         prepare_tool: Callable | None = None,
     ):
+        """
+        初始化通用生命周期能力中间件。
+
+        参数:
+            before_execute: 在工具开始执行前触发的钩子函数，默认 None。
+            after_execute: 在工具执行完毕后触发的钩子/拦截函数，默认 None。
+            validate_args: 在工具参数验证阶段拦截的自定义校验函数，默认 None。
+            prepare_tool: 在加载并提供大模型 Schema 定义前进行拦截加工的准备函数，
+                默认 None。
+        """
         self.before_execute_hook = before_execute
         self.after_execute_hook = after_execute
         self.validate_args_hook = validate_args
@@ -211,6 +229,12 @@ class AdminLevelCapability(AbstractCapability):
     """需要指定群聊权限等级"""
 
     def __init__(self, min_level: int):
+        """
+        初始化群聊权限等级限制能力。
+
+        参数:
+            min_level: 允许执行该工具的最小群聊管理权限等级。
+        """
         self.min_level = min_level
 
     async def prepare_tools(
@@ -236,6 +260,14 @@ class ConfigDependencyCapability(AbstractCapability):
     """依赖特定配置开关"""
 
     def __init__(self, module: str, key: str, expected_value: Any = True):
+        """
+        初始化配置依赖开关能力。
+
+        参数:
+            module: 目标配置所属的模块名。
+            key: 目标配置项的键名。
+            expected_value: 期望该配置项所匹配的值，如果匹配通过才可见/可用该工具，默认 True。
+        """  # noqa: E501
         self.module = module
         self.key = key
         self.expected_value = expected_value
@@ -315,6 +347,12 @@ class FallbackCapability(AbstractCapability):
     """
 
     def __init__(self, fallback_tool_name: str):
+        """
+        初始化降级路由器局部中间件。
+
+        参数:
+            fallback_tool_name: 当主工具执行遇到错误时，自动透明重定向到的备用工具名称。
+        """
         self.fallback_tool_name = fallback_tool_name
 
     async def wrap_tool_execute(

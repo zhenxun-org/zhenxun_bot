@@ -30,6 +30,16 @@ class BaseNode(ABC):
         confirmation_message: str | None = None,
         failure_policy: BaseFailurePolicy | None = None,
     ):
+        """
+        初始化工作流节点基类。
+
+        参数:
+            name: 节点的唯一名称标识。
+            requires_confirmation: 标记该节点在执行前是否需要人工介入授权 (HITL)，默认 False。
+            confirmation_message: 挂起等待授权时，向前端/群聊展示的提示文案，默认 None。
+            failure_policy: 该节点执行失败时的错误恢复与自愈策略，
+                默认使用中断策略 (AbortPolicy)。
+        """  # noqa: E501
         self.name = name
         self.requires_confirmation = requires_confirmation
         self.confirmation_message = confirmation_message

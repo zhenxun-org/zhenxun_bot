@@ -51,6 +51,17 @@ class Step(BaseNode):
         confirmation_message: str | None = None,
         failure_policy: BaseFailurePolicy | None = None,
     ):
+        """
+        初始化工作流单元步骤（门面）。
+
+        参数:
+            name: 步骤的名称，为空则自动取执行器的名称，默认 None。
+            executor: 该步骤要运行的核心执行器（支持 RunnableNode 或 Callable 依赖注入）。
+            prompt: 该步骤的初始输入或提示词定义，默认 None。
+            requires_confirmation: 标记该节点在执行前是否需要人工介入授权，默认 False。
+            confirmation_message: 挂起等待授权时展示的提示文案，默认 None。
+            failure_policy: 该节点执行失败时的错误处理策略，默认使用中断策略。
+        """  # noqa: E501
         actual_name = name or getattr(
             executor, "name", getattr(executor, "__name__", "unnamed_step")
         )
@@ -171,6 +182,13 @@ class Steps(BaseNode):
     """串行执行的工作流容器。按照列表顺序依次执行。"""
 
     def __init__(self, steps: Sequence[NodeSource], name: str = "StepsGroup"):
+        """
+        初始化串行工作流容器。
+
+        参数:
+            steps: 依次串行执行的节点/执行器列表。
+            name: 该串行容器 of 名称，默认 "StepsGroup"。
+        """
         super().__init__(name=name)
         self.steps = [NodeFactory.build(step) for step in steps]
 
@@ -220,6 +238,15 @@ class Condition(BaseNode):
         else_steps: Sequence[NodeSource] | None = None,
         name: str = "ConditionGroup",
     ):
+        """
+        初始化条件分支节点。
+
+        参数:
+            evaluator: 用于评估条件真假的布尔值、表达式或可调用函数。
+            steps: 当 evaluator 求值为真时，将执行的步骤序列。
+            else_steps: 当 evaluator 求值为假时，将执行的备用步骤序列，默认 None。
+            name: 该条件分支容器的名称，默认 "ConditionGroup"。
+        """
         super().__init__(name=name)
         self.evaluator = evaluator
         self.steps = [NodeFactory.build(step) for step in steps]
@@ -267,6 +294,14 @@ class Router(BaseNode):
     def __init__(
         self, choices: Sequence[NodeSource], selector: Any, name: str = "RouterGroup"
     ):
+        """
+        初始化选择路由器节点。
+
+        参数:
+            choices: 包含所有候选执行路由分支的步骤序列。
+            selector: 用于决定路由流向的匹配值、或者是返回分支名称的动态选择器函数。
+            name: 该路由器容器的名称，默认 "RouterGroup"。
+        """
         super().__init__(name=name)
         self.choices = [NodeFactory.build(c) for c in choices]
         self.selector = selector
@@ -326,6 +361,16 @@ class Loop(BaseNode):
         end_condition: Any = None,
         name: str = "LoopGroup",
     ):
+        """
+        初始化循环控制器节点。
+
+        参数:
+            steps: 每次循环中需要顺序运行的步骤序列。
+            max_iterations: 最大允许循环执行的迭代次数上限，默认 3。
+            end_condition: 决定是否可以提前终止循环的条件布尔值或可调用判定函数，
+                默认 None。
+            name: 该循环容器的名称，默认 "LoopGroup"。
+        """
         super().__init__(name=name)
         self.steps = [NodeFactory.build(step) for step in steps]
         self.max_iterations = max_iterations
@@ -398,6 +443,13 @@ class Parallel(BaseNode):
     """并发执行的工作流容器。无序地并发执行内部所有步骤，并最终聚合成一个输出。"""
 
     def __init__(self, *args: NodeSource | str, name: str | None = None):
+        """
+        初始化并发工作流容器。
+
+        参数:
+            *args: 并发执行的任务节点/执行器，支持混入字符串覆盖作为 Parallel 的名字。
+            name: 该并发容器的名称，默认 "ParallelGroup"。
+        """
         super().__init__(name=name or "ParallelGroup")
         self.steps = []
         for arg in args:
