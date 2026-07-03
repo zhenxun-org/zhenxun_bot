@@ -1,6 +1,7 @@
 from zhenxun.services.ai.core.exceptions import AbortException, ToolFatalError
 from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent
-from zhenxun.services.ai.run import Inject, RunContext
+from zhenxun.services.ai.run.context import RunContext
+from zhenxun.services.ai.run.di import Inject
 from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.models import ToolResult
@@ -32,6 +33,7 @@ class HITLToolkit(BaseToolkit):
         hitl: Inject.HITL,
         context: RunContext,
     ) -> ToolResult:
+
         try:
             user_reply = await hitl.ask_text(
                 f"🤖 [AI 提问]\n{question}\n\n(请在 60 秒内回复，或回复'取消')",

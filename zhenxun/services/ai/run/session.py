@@ -71,7 +71,9 @@ class LockContext(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     active_task: Any | None = None
+    """当前持锁运行的异步任务"""
     cancel_token: CancellationToken | None = None
+    """当前任务关联的取消令牌，以便由抢占者随时下发取消指令"""
 
 
 class AgentSessionManager:
@@ -115,32 +117,38 @@ class AgentSessionManager:
         return count
 
     def _get_lock(self, session_id: str) -> asyncio.Lock:
+        """获取或创建指定会话的内部同步锁"""
         if session_id not in self._locks:
             self._locks[session_id] = asyncio.Lock()
         return self._locks[session_id]
 
     def get_exec_lock(self, session_id: str) -> asyncio.Lock:
+        """获取或创建指定会话的任务排队执行锁"""
         if session_id not in self._exec_locks:
             self._exec_locks[session_id] = asyncio.Lock()
         return self._exec_locks[session_id]
 
     async def get_or_create(self, session_id: str) -> SessionInfo:
+        """获取或创建指定会话的信息，不存在则自动初始化"""
         async with self._get_lock(session_id):
             if session_id not in self._sessions:
                 self._sessions[session_id] = SessionInfo(session_id=session_id)
             return self._sessions[session_id]
 
     async def get(self, session_id: str) -> SessionInfo | None:
+        """获取指定会话的信息，不存在则返回 None"""
         async with self._get_lock(session_id):
             return self._sessions.get(session_id)
 
     async def update_state(self, session_id: str, new_state: dict[str, Any]):
+        """用新字典更新指定会话的状态载荷"""
         async with self._get_lock(session_id):
             if session_id in self._sessions:
                 self._sessions[session_id].state.update(new_state)
                 self._sessions[session_id].updated_at = time.time()
 
     async def delete(self, session_id: str):
+        """删除指定会话及其对应的长期内存上下文"""
         async with self._get_lock(session_id):
             self._sessions.pop(session_id, None)
             from zhenxun.services.ai.context.memory.manager import memory_manager

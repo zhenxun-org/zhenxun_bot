@@ -37,6 +37,7 @@ class ProvisionerRegistry:
 
     @classmethod
     def register(cls, provisioner: BaseProvisioner) -> None:
+        """向注册中心注册一个环境配置器"""
         if provisioner.name in cls._provisioners:
             logger.warning(
                 f"[ProvisionerRegistry] 覆盖已存在的配置器: {provisioner.name}"
@@ -46,10 +47,12 @@ class ProvisionerRegistry:
 
     @classmethod
     def get(cls, name: str) -> BaseProvisioner | None:
+        """获取指定名称的环境配置器"""
         return cls._provisioners.get(name)
 
     @classmethod
     def get_all(cls) -> dict[str, BaseProvisioner]:
+        """获取所有已注册的环境配置器列表"""
         return cls._provisioners.copy()
 
 
@@ -61,11 +64,13 @@ class UnifiedManifestProvisioner(BaseProvisioner):
 
     @property
     def name(self) -> str:
+        """返回统一环境清单装配器的名称"""
         return "unified_manifest"
 
     async def install(
         self, session: "BaseSandboxSession", blueprint: "SandboxBlueprint"
     ) -> bool:
+        """根据 SandboxBlueprint 环境清单指纹装配沙箱依赖环境"""
         target_hash = blueprint.calculate_hash()
 
         if session.get_meta("env_hash") == target_hash:
@@ -96,6 +101,7 @@ class UnifiedManifestProvisioner(BaseProvisioner):
     async def scan_and_setup_workspace(
         self, session: "BaseSandboxSession", workspace_dir: str
     ) -> bool:
+        """扫描项目工作区，根据 requirements.txt 或 package.json 自动安装所需依赖"""
         check = await session.run_process(f"test -f {workspace_dir}/requirements.txt")
         if check.exit_code == 0:
             check_uv = await session.run_process("command -v uv")

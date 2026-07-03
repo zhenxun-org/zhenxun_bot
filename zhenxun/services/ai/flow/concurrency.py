@@ -2,9 +2,16 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
-from zhenxun.services.ai.core.exceptions import ConcurrencyRejectException
+from zhenxun.services.ai.core.exceptions import (
+    ConcurrencyRejectException,
+    InterventionHandledException,
+)
 from zhenxun.services.ai.core.models import CancellationToken
-from zhenxun.services.ai.flow.base import ConcurrencyPolicy
+from zhenxun.services.ai.run.models import Task
+from zhenxun.services.ai.run.session import LockContext, session_manager
+from zhenxun.services.log import logger
+
+from .base import ConcurrencyPolicy, InterventionPolicy
 
 
 @asynccontextmanager
@@ -16,8 +23,21 @@ async def apply_concurrency_policy(
     intervention_policy: Any = None,
     message: Any = None,
 ):
-    """应用并发策略的中央调度上下文管理器"""
-    from zhenxun.services.ai.run.session import LockContext, session_manager
+    """
+    异步上下文管理器：对大模型执行流应用特定的并发及消息干预调度策略。
+    负责请求互斥锁竞争、任务中断/拒绝处理，以及运行时用户实时指令的插队控制。
+
+    参数：
+        session_id: 当前会话的唯一标识，用于在会话管理器中隔离上下文。
+        lock_id: 当前锁域标识，决定了哪些 Agent 或任务使用同一套互斥锁竞争机制。
+        policy: 当发生并发锁占用时执行的策略（允许、拒绝、中断、排队）。
+        cancel_token: 运行时用于监听取消请求的取消令牌实例。
+        intervention_policy: 用户消息干预策略（转向、追加）。
+        message: 并发竞争发生时新入站的用户请求消息或 Task 载荷。
+
+    返回：
+        AsyncGenerator: 返回异步生成器，供 async with 消费，包裹大模型的整个执行环节。
+    """
 
     current_task = asyncio.current_task()
     task_tuple = (cancel_token, current_task)
@@ -30,20 +50,13 @@ async def apply_concurrency_policy(
         lock_ctx = session_manager.lock_contexts.setdefault(lock_id, LockContext())
 
         if exec_lock.locked():
-            from zhenxun.services.ai.flow.base import InterventionPolicy
-
             if intervention_policy in (
                 InterventionPolicy.STEER,
                 InterventionPolicy.FOLLOW_UP,
             ):
-                from zhenxun.services.ai.core.exceptions import (
-                    InterventionHandledException,
-                )
-
                 session = await session_manager.get_or_create(session_id)
 
                 actual_msg = message
-                from zhenxun.services.ai.run.models import Task
 
                 if isinstance(message, Task):
                     actual_msg = message.description
@@ -82,8 +95,6 @@ async def apply_concurrency_policy(
 
         elif policy == ConcurrencyPolicy.QUEUE:
             if exec_lock.locked():
-                from zhenxun.services.log import logger
-
                 logger.info(
                     f"⏳ [并发控制] 锁域 {lock_id} 被占用，"
                     "新请求已进入后台等待队列 (QUEUE)..."

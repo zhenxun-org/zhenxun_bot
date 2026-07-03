@@ -17,6 +17,7 @@ class BaseSandboxSession(SandboxChannel):
     """沙箱会话接口，持有 Client 分配的具体资源，提供统一的标准操作"""
 
     def __init__(self, state: SandboxSessionState):
+        """初始化沙箱会话实例并设置工作空间"""
         self.state = state
         self.last_active_time: float = time.time()
         self.loaded_skills: set[str] = set()
@@ -27,6 +28,7 @@ class BaseSandboxSession(SandboxChannel):
 
     @property
     def session_id(self) -> str:
+        """获取当前会话的 ID"""
         return self.state.session_id
 
     def get_meta(self, key: str, default: Any = None) -> Any:
@@ -103,6 +105,7 @@ class BaseSandboxSession(SandboxChannel):
 
     @abstractmethod
     async def close(self) -> None:
+        """关闭当前沙箱会话并释放关联资源"""
         pass
 
     @abstractmethod
@@ -114,37 +117,46 @@ class BaseSandboxSession(SandboxChannel):
         env: dict[str, str] | None = None,
         on_output: Any = None,
     ) -> Any:
+        """在沙箱内异步执行子进程"""
         pass
 
     @abstractmethod
     async def read(self, path: str) -> bytes:
+        """读取沙箱内指定路径的文件内容"""
         pass
 
     @abstractmethod
     async def write(self, path: str, data: bytes) -> bool:
+        """向沙箱内指定路径写入文件数据"""
         pass
 
     @abstractmethod
     async def rm(self, path: str, recursive: bool = False) -> bool:
+        """在沙箱内删除指定路径的文件或目录"""
         pass
 
     @abstractmethod
     async def mkdir(self, path: str, parents: bool = False) -> bool:
+        """在沙箱内创建目录"""
         pass
 
     async def write_raw_file(self, path: str, content: str) -> bool:
+        """向沙箱中写入纯文本文件内容"""
         return await self.write(path, content.encode("utf-8"))
 
     async def read_raw_file(self, path: str) -> str:
+        """读取并以 utf-8 解码沙箱中的文本文件内容"""
         data = await self.read(path)
         return data.decode("utf-8", errors="replace")
 
     async def delete_raw_file(self, path: str) -> bool:
+        """删除沙箱中的纯文本文件"""
         return await self.rm(path)
 
     async def upload_raw_dir(
         self, local_dir_path: str, sandbox_target_path: str
     ) -> bool:
+        """将本地文件夹上传并映射至沙箱内指定位置"""
         return True
 
 
@@ -159,14 +171,17 @@ class BaseSandboxClient(ABC):
         session_id: str,
         blueprint: SandboxBlueprint | None = None,
     ) -> BaseSandboxSession:
+        """创建并启动一个全新的沙箱会话环境"""
         pass
 
     @abstractmethod
     async def resume(self, state: SandboxSessionState) -> BaseSandboxSession:
+        """恢复一个已有的沙箱会话环境"""
         pass
 
     @abstractmethod
     async def delete(self, session: BaseSandboxSession) -> None:
+        """销毁指定的沙箱环境并清理容器或实例"""
         pass
 
 

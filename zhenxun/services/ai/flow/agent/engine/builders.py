@@ -5,19 +5,31 @@ from typing import Any, cast
 
 from nonebot.utils import is_coroutine_callable
 
-from zhenxun.services.ai.capabilities import CombinedCapability
+from zhenxun.services.ai.capabilities import (
+    AbstractCapability,
+    CombinedCapability,
+    DynamicCapability,
+)
+from zhenxun.services.ai.context.memory.builder import MemoryBuilder
+from zhenxun.services.ai.context.memory.engine import MemoryReader, MemoryWriter
 from zhenxun.services.ai.context.memory.models import MemoryConfig
-from zhenxun.services.ai.core.messages import LLMMessage
+from zhenxun.services.ai.context.memory.types import SessionMetadata
+from zhenxun.services.ai.core.messages import LLMMessage, TextPart
 from zhenxun.services.ai.core.options import GenerationConfig
 from zhenxun.services.ai.core.templates import PromptTemplate
+from zhenxun.services.ai.flow.agent.capabilities import (
+    OutputValidationCapability,
+    TaskTrackingCapability,
+)
 from zhenxun.services.ai.flow.agent.models import Persona
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run import GLOBAL_CAPABILITIES, RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.tools.engine.registry import (
     ToolCollection,
     tool_provider_manager,
 )
 from zhenxun.services.ai.tools.models import GlobalToolFilter, ResolvedToolPayload
+from zhenxun.services.ai.utils.scope import ScopeSelector
 from zhenxun.utils.pydantic_compat import model_copy
 
 
@@ -28,8 +40,17 @@ class AgentProfileResolver:
     def resolve_memory(
         agent_memory_config: MemoryConfig, override_memory: Any | None
     ) -> MemoryConfig:
-        from zhenxun.services.ai.context.memory.builder import MemoryBuilder
+        """
+        解析并合并 Memory 记忆域的配置。
+        支持从外部覆盖配置并重新构建。
 
+        参数：
+            agent_memory_config: 预置的 Agent 默认记忆域配置对象。
+            override_memory: 运行时覆盖的记忆域配置，可为 dict, MemoryConfig 或其他合法结构。
+
+        返回：
+            MemoryConfig: 合并并生成的运行时记忆域配置实例。
+        """  # noqa: E501
         if override_memory is not None:
             return MemoryBuilder.resolve(override_memory)
         return model_copy(agent_memory_config, deep=True)
@@ -40,6 +61,18 @@ class AgentProfileResolver:
         cap_config: GenerationConfig | None,
         profile_config: GenerationConfig | None,
     ) -> GenerationConfig:
+        """
+        解析并合并多层 GenerationConfig 模型生成配置。
+        优先级顺序由低到高为：基础配置 -> 拦截器能力配置 -> 运行时 Profile 覆盖配置。
+
+        参数：
+            base_config: 基础的模型生成配置对象。
+            cap_config: 拦截器能力中提取出的模型生成参数配置。
+            profile_config: 运行时传入的 Profile 覆盖参数配置。
+
+        返回：
+            GenerationConfig: 合并多层配置后生成的最终运行时生成配置实例。
+        """
         final_gen_config = model_copy(base_config, deep=True)
         if cap_config:
             final_gen_config = final_gen_config.merge_with(cap_config)
@@ -64,15 +97,25 @@ class CapabilityBuilder:
         profile_capabilities: list | None,
         context: RunContext,
     ) -> CombinedCapability:
-        from zhenxun.services.ai.capabilities import (
-            AbstractCapability,
-            DynamicCapability,
-        )
-        from zhenxun.services.ai.flow.agent.capabilities import (
-            OutputValidationCapability,
-            TaskTrackingCapability,
-        )
+        """
+        为当前的 Agent 运行实例组装并实例化所有能力拦截器中间件。
+        整合全局能力、任务追踪、格式校验以及动态注入的能力。
 
+        参数：
+            agent_name: 执行推理的 Agent 标识名。
+            namespace: 会话所归属的命名空间。
+            output_type: 期待大模型返回的结构化 Pydantic 模型类型（支持 None 或 str）。
+            raw_schema: 原始结构化 Schema 定义字典。
+            agent_guardrails: Agent 自身定义的业务语义安全护栏列表。
+            task_guardrails: 本次任务定义的业务语义安全护栏列表。
+            task_obj: 被追踪的任务上下文对象实例。
+            agent_capabilities: Agent 定义的静态拦截器列表。
+            profile_capabilities: 运行时动态传入的能力或中间件列表。
+            context: 运行上下文对象实例。
+
+        返回：
+            CombinedCapability: 已经过运行初始化完毕的合并能力拦截器实例。
+        """
         dynamic_caps = []
         combined_guardrails = agent_guardrails + task_guardrails
 
@@ -100,10 +143,6 @@ class CapabilityBuilder:
                 elif callable(cap):
                     run_level_caps.append(DynamicCapability(cap))
 
-        from zhenxun.services.ai.run import (
-            GLOBAL_CAPABILITIES,
-        )
-
         base_caps = GLOBAL_CAPABILITIES.get("global", []).copy()
         if namespace != "global" and namespace in GLOBAL_CAPABILITIES:
             base_caps.extend(GLOBAL_CAPABILITIES[namespace])
@@ -129,8 +168,20 @@ class ContextBuilder:
         run_scoped_cap: CombinedCapability,
         persona: Persona | None = None,
     ) -> tuple[str, list[Any]]:
-        """解析提示词，返回 (静态系统提示词文本, 动态独立消息列表) 元组"""
+        """
+        解析、合并并渲染 Agent 的系统提示词和上下文记忆。
+        包含对依赖参数的动态注入和 Jinja 模板渲染。
 
+        参数：
+            instruction: 任务级别的初始指令或提示词模板。
+            system_prompts: 系统提示词生成函数（支持依赖注入）列表。
+            run_context: 运行上下文对象实例。
+            run_scoped_cap: 运行域下的合并能力中间件。
+            persona: 设定的 Agent 人设配置实例。
+
+        返回：
+            tuple[str, list[Any]]: 包含 (渲染后的静态系统提示词文本, 渲染后的动态消息列表) 的元组。
+        """  # noqa: E501
         static_instructions = []
         dynamic_messages = []
 
@@ -205,7 +256,6 @@ class ContextBuilder:
             render_context.update(run_context.state)
 
         rendered_dynamic_messages = []
-        from zhenxun.services.ai.core.messages import TextPart
 
         for msg in dynamic_messages:
             if msg.role == "system":
@@ -252,7 +302,22 @@ class ToolBuilder:
         run_context: RunContext,
         run_scoped_cap: CombinedCapability,
     ) -> ResolvedToolPayload:
-        """解析、合并并过滤工具集"""
+        """
+        解析并合并来自静态定义、动态函数依赖以及能力的工具列表。
+        通过工具提供者管理器完成工具的具体实例化及参数绑定。
+
+        参数：
+            tool_definitions: 静态工具或工具集合的定义列表。
+            toolset_funcs: 待依赖注入解析的工具集生成函数列表。
+            system_tools: 系统默认强制集成的工具定义列表。
+            namespace: 会话命名空间。
+            tool_filter: 全局的工具过滤条件，此处为占位。
+            run_context: 运行上下文对象实例.
+            run_scoped_cap: 运行域下的合并能力中间件，用于提供特定的能力工具。
+
+        返回：
+            ResolvedToolPayload: 解析完毕并附带依赖绑定关系的工具负载载体。
+        """
         defs_to_resolve = list(tool_definitions)
 
         for ts_func in toolset_funcs:
@@ -304,7 +369,18 @@ class ToolBuilder:
         tool_filters: list[Callable],
         run_scoped_cap: CombinedCapability,
     ) -> ToolCollection:
-        """处理生命周期：在工具发往执行器前，进行最终的 Schema 拦截和清洗"""
+        """
+        在将工具发往模型执行器之前，触发最终的过滤器与能力拦截，进行 schema 的清洗。
+
+        参数：
+            effective_tools: 备选的工具执行实例列表。
+            context: 运行上下文对象实例。
+            tool_filters: 运行时自定义工具过滤与清洗函数列表。
+            run_scoped_cap: 运行域下的合并能力中间件，提供拦截入口。
+
+        返回：
+            ToolCollection: 准备就绪的、可直接发往模型的最终有效工具执行集。
+        """
         current_tool_defs = []
         for t_exec in effective_tools:
             if hasattr(t_exec, "get_definition"):
@@ -355,10 +431,18 @@ class SessionBuilder:
         agent_name: str,
         effective_memory: MemoryConfig,
     ) -> tuple[Any, Any, Any]:
-        from zhenxun.services.ai.context.memory.engine import MemoryReader, MemoryWriter
-        from zhenxun.services.ai.context.memory.types import SessionMetadata
-        from zhenxun.services.ai.utils.scope import ScopeSelector
+        """
+        根据当前用户、群组和平台标识，动态隔离前缀，计算并构建会话与记忆存储的读写门面。
 
+        参数：
+            context: 运行上下文对象实例。
+            namespace: 当前会话的命名空间。
+            agent_name: 执行推理的 Agent 标识名。
+            effective_memory: 运行时最终生效的 MemoryConfig 配置对象。
+
+        返回：
+            tuple[Any, Any, Any]: 包含 (SessionMetadata 会话元数据, MemoryReader 记忆读取器, MemoryWriter 记忆写入器) 的元组。
+        """  # noqa: E501
         bot_id = None
         bot_inst = context.get_bot()
         if bot_inst and hasattr(bot_inst, "self_id"):

@@ -1,7 +1,7 @@
 import nonebot
 
-from .bridges.matcher_bridge import MatcherTool, bind_matcher
-from .core.decorators import Rules, tool
+from .bridges.matcher_bridge import bind_matcher
+from .core.decorators import Rules, tool, toolkit
 from .core.toolkit import BaseToolkit
 from .engine.registry import tool_provider_manager
 from .models import (
@@ -22,11 +22,11 @@ async def _shutdown_mcp_provider():
 
 __all__ = [
     "BaseToolkit",
-    "MatcherTool",
     "Native",
     "Rules",
     "ToolOptions",
     "ToolResult",
     "bind_matcher",
     "tool",
+    "toolkit",
 ]

@@ -41,6 +41,14 @@ class DelegateTool(BaseTool):
         name: str | None = None,
         description: str | None = None,
     ):
+        """
+        初始化委派工具，将可运行实体包装为子例程工具。
+
+        参数:
+            runnable: 被包装的可运行实体，可以是 Agent、Team 或 Workflow 等。
+            name: 自定义工具名称，若为 None 则默认推导为 runnable 实体名。
+            description: 工具描述信息，用于指导大模型何时代用此工具。
+        """
         resolved_name = name or getattr(runnable, "name", "SubRunnable")
         resolved_desc = description or getattr(
             runnable, "description", f"将子任务委派给 {resolved_name} 执行"

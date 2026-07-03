@@ -10,6 +10,7 @@ from zhenxun.services.ai.core.engine.structured_parser import (
 from zhenxun.services.ai.core.exceptions import UpstreamServerException
 from zhenxun.services.ai.core.messages import TaskLifecycleEvent
 from zhenxun.services.ai.core.options import BaseOutputDefinition, ToolOutput
+from zhenxun.services.ai.guardrails import parse_guardrails
 from zhenxun.services.ai.run import AgentRunResult, RunContext, Task
 from zhenxun.services.log import logger
 
@@ -32,8 +33,6 @@ class OutputValidationCapability(AbstractCapability):
     ):
         self.output_type = output_type
         self.raw_schema = raw_schema
-
-        from zhenxun.services.ai.guardrails import parse_guardrails
 
         self.guardrails = parse_guardrails(guardrails)
         self.processor = None

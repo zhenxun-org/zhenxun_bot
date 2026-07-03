@@ -17,6 +17,7 @@ from zhenxun.utils.utils import infer_plugin_namespace
 
 
 def parse_shebang(script_path: str | Path) -> str | None:
+    """解析脚本首行的 Shebang，获取解释器名称"""
     path = Path(script_path)
     if not path.is_file():
         return None
@@ -46,6 +47,7 @@ def parse_shebang(script_path: str | Path) -> str | None:
 def get_execution_command(
     script_path: str | Path, args: list[str] | None = None
 ) -> str:
+    """根据 Shebang 或文件后缀生成对应的脚本执行命令"""
     path = Path(script_path)
     interpreter = parse_shebang(path)
     if not interpreter:
@@ -66,6 +68,8 @@ def get_execution_command(
 
 
 class JupyterWSClient:
+    """管理与单个 Jupyter Kernel WebSocket 通道通信的客户端"""
+
     def __init__(
         self,
         http_session: aiohttp.ClientSession,
@@ -73,6 +77,7 @@ class JupyterWSClient:
         ws_url: str,
         kernel_id: str,
     ):
+        """初始化 Jupyter WebSocket 客户端并绑定内核ID"""
         self.http_session = http_session
         self.base_url = base_url
         self.ws_url = ws_url
@@ -80,6 +85,7 @@ class JupyterWSClient:
         self.ws: aiohttp.ClientWebSocketResponse | None = None
 
     async def _connect_ws(self) -> aiohttp.ClientWebSocketResponse:
+        """建立并返回与 Jupyter Kernel 活跃的 WebSocket 连接"""
         if self.ws is None or self.ws.closed:
             self.ws = await self.http_session.ws_connect(
                 f"{self.ws_url}/api/kernels/{self.kernel_id}/channels"
@@ -88,6 +94,7 @@ class JupyterWSClient:
         return self.ws
 
     async def interrupt(self):
+        """向 Jupyter Kernel 发送 HTTP POST 中断正在执行的进程"""
         try:
             async with self.http_session.post(
                 f"{self.base_url}/api/kernels/{self.kernel_id}/interrupt"
@@ -100,6 +107,7 @@ class JupyterWSClient:
             logger.warning(f"[JupyterWSClient] 中断 Kernel 失败: {e}")
 
     async def execute(self, code: str, timeout: int = 30, on_output=None):
+        """在 Jupyter 核心中执行代码，并通过 WebSocket 接收标准输出、标准错误和图像"""
         background_tasks: set[asyncio.Task[None]] = set()
 
         try:
@@ -226,6 +234,7 @@ class JupyterWSClient:
         )
 
     async def close(self):
+        """关闭与 Jupyter Kernel 的 WebSocket 通道连接"""
         if self.ws and not self.ws.closed:
             await self.ws.close()
             self.ws = None
@@ -235,6 +244,7 @@ class JupyterServerManager:
     """管理沙箱内的 Jupyter 引擎生命周期及长连接"""
 
     def __init__(self, session: BaseSandboxSession):
+        """初始化 Jupyter 服务生命周期及会话连接管理器"""
         self.session = session
         self._http_session: aiohttp.ClientSession | None = None
         self.base_url = ""
@@ -243,6 +253,7 @@ class JupyterServerManager:
         self._clients: dict[str, JupyterWSClient] = {}
 
     async def ensure_started(self, env_vars: dict[str, str] | None = None):
+        """确保沙箱环境内部已拉起并运行着 Jupyter Server"""
         if self._is_started:
             return
 
@@ -257,6 +268,14 @@ class JupyterServerManager:
             )
         if check_jupyter.exit_code != 0:
             raise RuntimeError("沙箱内未安装 jupyter-server，请检查 Blueprint")
+
+        await self.session.run_process(
+            "mkdir -p /tmp/jupyter_runtime /tmp/jupyter_data && "
+            "chmod 777 /tmp/jupyter_runtime /tmp/jupyter_data"
+        )
+
+        await self.session.run_process("pkill -9 -f jupyter-server || true")
+        await asyncio.sleep(0.5)
 
         env_str = " ".join([f"{k}={v}" for k, v in (env_vars or {}).items()])
         start_cmd = (
@@ -300,6 +319,7 @@ class JupyterServerManager:
         )
 
     async def get_client(self, kernel_name: str) -> JupyterWSClient:
+        """获取并连接到指定内核的 Jupyter WebSocket 客户端"""
         await self.ensure_started()
         if kernel_name in self._clients:
             return self._clients[kernel_name]
@@ -321,6 +341,7 @@ class JupyterServerManager:
         return client
 
     async def close(self):
+        """关闭并清理所有 Jupyter WS 连接及 HTTP 会话资源"""
         for client in self._clients.values():
             await client.close()
         self._clients.clear()
@@ -334,6 +355,7 @@ class BaseCodeExecutor(ABC):
     """代码执行器抽象基类"""
 
     def __init__(self, session: BaseSandboxSession):
+        """初始化代码执行器，绑定沙箱会话"""
         self.session = session
 
     @abstractmethod
@@ -344,6 +366,7 @@ class BaseCodeExecutor(ABC):
         injected_code: str | None = None,
         on_output: Callable[[str, bytes], Awaitable[None]] | None = None,
     ) -> SandboxExecutionResult:
+        """在沙箱会话中执行指定代码并返回执行结果"""
         pass
 
 
@@ -351,6 +374,7 @@ class GenericCLIExecutor(BaseCodeExecutor):
     """模板驱动的通用代码执行器"""
 
     def __init__(self, session, profile: "LanguageProfile"):
+        """初始化通用命令行代码执行器，传入语言配置模板"""
         super().__init__(session)
         self.profile = profile
 
@@ -361,6 +385,7 @@ class GenericCLIExecutor(BaseCodeExecutor):
         injected_code: str | None = None,
         on_output: Callable[[str, bytes], Awaitable[None]] | None = None,
     ) -> SandboxExecutionResult:
+        """将代码写入临时文件，必要时编译并执行，返回执行结果"""
         env = None
         if injected_code:
             await self.session.write(
@@ -403,6 +428,7 @@ class CodeExecutorRegistry:
 
     @classmethod
     def _normalize_lang(cls, language: str) -> str:
+        """规范化语言名称，转换为统一小写格式并应用别名"""
         lang_lower = language.lower().strip()
         return cls._aliases.get(lang_lower, lang_lower)
 
@@ -414,6 +440,7 @@ class CodeExecutorRegistry:
         is_stateful: bool = False,
         scope: str | None = None,
     ) -> None:
+        """注册一个语言对应的代码执行器构造工厂"""
         ns = scope if scope is not None else infer_plugin_namespace()
         lang_norm = cls._normalize_lang(language)
 
@@ -435,7 +462,7 @@ class CodeExecutorRegistry:
         kernel_name: str,
         scope: str | None = None,
     ) -> None:
-        """语法糖：快速注册一门基于 Jupyter Kernel 的有状态语言"""
+        """快速注册一个基于 Jupyter 内核的有状态运行语言"""
         cls.register(
             language,
             lambda session: GenericJupyterExecutor(session, kernel_name=kernel_name),
@@ -445,6 +472,7 @@ class CodeExecutorRegistry:
 
     @classmethod
     def register_profile(cls, profile: "LanguageProfile") -> None:
+        """注册一个基于命令行的无状态运行语言配置模板"""
         cls._profiles[profile.language.lower()] = profile
         for alias in profile.aliases:
             cls._profiles[alias.lower()] = profile
@@ -454,6 +482,7 @@ class CodeExecutorRegistry:
     def create_executor(
         cls, language: str, needs_state: bool, session: Any, namespace: str = "global"
     ) -> BaseCodeExecutor:
+        """根据语言和有无状态需求为指定会话创建具体的执行器实例"""
         lang_norm = cls._normalize_lang(language)
 
         for target_ns in [namespace, "global"]:
@@ -482,6 +511,7 @@ class CodeExecutorRegistry:
 
     @classmethod
     def get_supported_languages(cls, namespace: str = "global") -> list[str]:
+        """获取所有目前已注册支持的编程语言列表"""
         langs = set(cls._executors.get("global", {}).keys())
         if namespace in cls._executors:
             langs.update(cls._executors[namespace].keys())
@@ -493,6 +523,7 @@ class GenericJupyterExecutor(BaseCodeExecutor):
     """基于 Jupyter 协议的泛化有状态执行器。支持多语言 REPL。"""
 
     def __init__(self, session, kernel_name: str = "python3"):
+        """初始化泛用 Jupyter 有状态执行器，设置默认内核"""
         super().__init__(session)
         self.kernel_name = kernel_name
         self.manager = JupyterServerManager(session)
@@ -504,6 +535,7 @@ class GenericJupyterExecutor(BaseCodeExecutor):
         injected_code: str | None = None,
         on_output: Callable[[str, bytes], Awaitable[None]] | None = None,
     ) -> SandboxExecutionResult:
+        """利用 Jupyter 内核长连接异步执行代码并返回运行结果"""
         try:
             await self.manager.ensure_started()
         except Exception as e:
@@ -524,6 +556,7 @@ class GenericJupyterExecutor(BaseCodeExecutor):
         return result
 
     async def close(self):
+        """关闭 Jupyter 客户端及后台运行环境"""
         await self.manager.close()
 
 

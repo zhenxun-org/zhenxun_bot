@@ -64,20 +64,30 @@ class RequestData(BaseModel):
     """标准化的请求载体，用于向上层 HTTP 客户端传递请求参数。"""
 
     method: str = "POST"
+    """请求的 HTTP 方法，默认 'POST'"""
     url: str
+    """请求的目标 HTTP URL"""
     headers: dict[str, str]
+    """请求的 HTTP 头部键值对"""
     body: dict[str, Any]
+    """请求的 HTTP 载荷体 JSON 字典"""
     files: dict[str, Any] | list[tuple[str, Any]] | None = None
+    """要上传的多媒体或二进制文件字典"""
 
 
 class ResponseData(BaseModel):
     """标准化的响应载体，统一承接文本、多模态与附加元数据。"""
 
     content_parts: list[LLMContentPart] = Field(default_factory=list)
+    """大模型生成的结构化内容片段列表（如文本、图片、工具调用）"""
     usage_info: dict[str, Any] | None = None
+    """底层 API Token 消耗使用统计字典"""
     raw_response: dict[str, Any] | None = None
+    """接口返回的原始 JSON 响应字典"""
     grounding_metadata: Any | None = None
+    """Gemini 等模型特有的 Grounding 搜索依据元数据"""
     cache_info: Any | None = None
+    """接口缓存的命中与生成情况等元数据"""
 
     @property
     def text(self) -> str:

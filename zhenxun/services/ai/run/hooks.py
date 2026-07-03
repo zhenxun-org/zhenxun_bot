@@ -1,6 +1,6 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Any, Generic, Protocol, TypeVar, overload
 
 import anyio
 from nonebot.utils import is_coroutine_callable
@@ -49,28 +49,38 @@ class _ToolHookEntry(_HookEntry[_FuncT]):
 
 
 class BeforeRunHookFunc(Protocol):
+    """运行前钩子：在 Agent 启动任何流转前触发。"""
+
     def __call__(self, ctx: RunContext[Any], /) -> None | Awaitable[None]: ...
 
 
 class AfterRunHookFunc(Protocol):
+    """运行后钩子：在 Agent 获取最终结果后触发，可用于修改最终输出。"""
+
     def __call__(
         self, ctx: RunContext[Any], /, *, result: AgentRunResult[Any]
     ) -> AgentRunResult[Any] | Awaitable[AgentRunResult[Any]]: ...
 
 
 class WrapRunHookFunc(Protocol):
+    """包裹运行钩子：以洋葱模型接管整个 Agent 运行生命周期。"""
+
     def __call__(
         self, ctx: RunContext[Any], /, *, handler: WrapRunHandler
     ) -> AgentRunResult[Any] | Awaitable[AgentRunResult[Any]]: ...
 
 
 class OnRunErrorHookFunc(Protocol):
+    """运行异常钩子：捕获 Agent 级别的致命错误。"""
+
     def __call__(
         self, ctx: RunContext[Any], /, *, error: BaseException
     ) -> AgentRunResult[Any] | Awaitable[AgentRunResult[Any]]: ...
 
 
 class BeforeModelRequestHookFunc(Protocol):
+    """大模型请求前钩子：在发送网络请求前触发，可篡改 Messages 上下文。"""
+
     def __call__(
         self,
         ctx: RunContext[Any],
@@ -83,6 +93,8 @@ class BeforeModelRequestHookFunc(Protocol):
 
 
 class AfterModelRequestHookFunc(Protocol):
+    """大模型请求后钩子：在接收到网络响应后触发，可验证或篡改原始 Response。"""
+
     def __call__(
         self,
         ctx: RunContext[Any],
@@ -94,6 +106,8 @@ class AfterModelRequestHookFunc(Protocol):
 
 
 class WrapModelRequestHookFunc(Protocol):
+    """包裹大模型请求钩子：以洋葱模型接管 LLM 网络请求过程（可用于实现缓存）。"""
+
     def __call__(
         self,
         ctx: RunContext[Any],
@@ -105,6 +119,8 @@ class WrapModelRequestHookFunc(Protocol):
 
 
 class OnModelRequestErrorHookFunc(Protocol):
+    """大模型请求异常钩子：捕获超时或网络等异常，可用于发起重试。"""
+
     def __call__(
         self,
         ctx: RunContext[Any],
@@ -116,24 +132,32 @@ class OnModelRequestErrorHookFunc(Protocol):
 
 
 class PrepareToolsHookFunc(Protocol):
+    """准备工具集钩子：向大模型渲染 JSON Schema 前触发，可动态增删工具。"""
+
     def __call__(
         self, ctx: RunContext[Any], tool_defs: list[Any], /
     ) -> list[Any] | Awaitable[list[Any]]: ...
 
 
 class BeforeToolValidateHookFunc(Protocol):
+    """工具验证前钩子：在反序列化前触发，可篡改原始 JSON 字符串或字典。"""
+
     def __call__(
         self, ctx: RunContext[Any], /, *, tool_name: str, args: str | dict[str, Any]
     ) -> str | dict[str, Any] | Awaitable[str | dict[str, Any]]: ...
 
 
 class AfterToolValidateHookFunc(Protocol):
+    """工具验证后钩子：在 Schema 校验通过后触发，接收并可篡改强类型参数字典。"""
+
     def __call__(
         self, ctx: RunContext[Any], /, *, tool_name: str, args: dict[str, Any]
     ) -> dict[str, Any] | Awaitable[dict[str, Any]]: ...
 
 
 class WrapToolValidateHookFunc(Protocol):
+    """包裹工具验证钩子：以洋葱模型接管工具参数校验过程（可用于交互式拦截）。"""
+
     def __call__(
         self,
         ctx: RunContext[Any],
@@ -146,6 +170,8 @@ class WrapToolValidateHookFunc(Protocol):
 
 
 class OnToolValidateErrorHookFunc(Protocol):
+    """工具验证异常钩子：捕获校验失败的异常，可将其转化为大模型自愈提示。"""
+
     def __call__(
         self,
         ctx: RunContext[Any],
@@ -158,12 +184,16 @@ class OnToolValidateErrorHookFunc(Protocol):
 
 
 class BeforeToolExecuteHookFunc(Protocol):
+    """工具执行前钩子：在工具物理执行前触发，可用于最后的权限判定或参数篡改。"""
+
     def __call__(
         self, ctx: RunContext[Any], /, *, tool_name: str, arguments: dict[str, Any]
     ) -> dict[str, Any] | Awaitable[dict[str, Any]]: ...
 
 
 class AfterToolExecuteHookFunc(Protocol):
+    """工具执行后钩子：工具执行完毕后触发，可篡改最终发往大模型的返回结果。"""
+
     def __call__(
         self,
         ctx: RunContext[Any],
@@ -176,6 +206,8 @@ class AfterToolExecuteHookFunc(Protocol):
 
 
 class WrapToolExecuteHookFunc(Protocol):
+    """包裹工具执行钩子：以洋葱模型接管特定工具的物理执行逻辑。"""
+
     def __call__(
         self,
         ctx: RunContext[Any],
@@ -188,6 +220,8 @@ class WrapToolExecuteHookFunc(Protocol):
 
 
 class OnToolExecuteErrorHookFunc(Protocol):
+    """工具执行异常钩子：捕获工具执行时的崩溃异常，可用于兜底返回或自愈。"""
+
     def __call__(
         self, ctx: RunContext[Any], /, *, tool_name: str, error: Exception
     ) -> Any | Awaitable[Any]: ...
@@ -276,11 +310,70 @@ def _tool_bare_or_parameterized(
     return decorator
 
 
+class BoundHookPoint(Generic[_FuncT]):
+    def __init__(self, key: str, registry_holder: Any):
+        self.key = key
+        self.registry_holder = registry_holder
+
+    @overload
+    def __call__(self, func: _FuncT, /) -> _FuncT: ...
+
+    @overload
+    def __call__(
+        self, *, timeout: float | None = None
+    ) -> Callable[[_FuncT], _FuncT]: ...
+
+    def __call__(
+        self, func: _FuncT | None = None, *, timeout: float | None = None
+    ) -> Any:
+        return _bare_or_parameterized(
+            self.registry_holder._r, self.key, func, timeout=timeout
+        )
+
+
+class HookPoint(Generic[_FuncT]):
+    def __init__(self, key: str):
+        self.key = key
+
+    def __get__(self, instance: Any, owner: Any) -> BoundHookPoint[_FuncT]:
+        return BoundHookPoint(self.key, instance)
+
+
+class BoundToolHookPoint(Generic[_FuncT]):
+    def __init__(self, key: str, registry_holder: Any):
+        self.key = key
+        self.registry_holder = registry_holder
+
+    @overload
+    def __call__(self, func: _FuncT, /) -> _FuncT: ...
+
+    @overload
+    def __call__(
+        self, *, tools: list[str] | None = None, timeout: float | None = None
+    ) -> Callable[[_FuncT], _FuncT]: ...
+
+    def __call__(
+        self,
+        func: _FuncT | None = None,
+        *,
+        tools: list[str] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        return _tool_bare_or_parameterized(
+            self.registry_holder._r, self.key, func, tools=tools, timeout=timeout
+        )
+
+
+class ToolHookPoint(Generic[_FuncT]):
+    def __init__(self, key: str):
+        self.key = key
+
+    def __get__(self, instance: Any, owner: Any) -> BoundToolHookPoint[_FuncT]:
+        return BoundToolHookPoint(self.key, instance)
+
+
 class _HookRegistration:
-    """
-    Hooks 的装饰器命名空间。
-    利用 @overload 提供完美的 IDE 强类型补全和文档提示。
-    """
+    """Hooks 装饰器注册辅助类，用于各阶段钩子的声明式注册"""
 
     def __init__(self, hooks: "Hooks"):
         self._hooks = hooks
@@ -289,211 +382,49 @@ class _HookRegistration:
     def _r(self) -> dict[str, list[_HookEntry[Any]]]:
         return self._hooks._registry
 
-    from typing import overload
+    before_run = HookPoint[BeforeRunHookFunc]("before_run")
+    """注册运行前钩子。在 Agent 启动任何流转前触发。"""
+    after_run = HookPoint[AfterRunHookFunc]("after_run")
+    """注册运行后钩子。在 Agent 获取最终结果后触发，可修改结果。"""
+    wrap_run = HookPoint[WrapRunHookFunc]("wrap_run")
+    """注册运行包裹钩子。以洋葱模型接管整个 Agent 运行过程。"""
+    on_run_error = HookPoint[OnRunErrorHookFunc]("on_run_error")
+    """注册运行异常钩子。捕获 Agent 级别的致命错误。"""
 
-    @overload
-    def before_run(self, func: BeforeRunHookFunc, /) -> BeforeRunHookFunc: ...
-    @overload
-    def before_run(
-        self, *, timeout: float | None = None
-    ) -> Callable[[BeforeRunHookFunc], BeforeRunHookFunc]: ...
-    def before_run(
-        self, func: BeforeRunHookFunc | None = None, *, timeout: float | None = None
-    ) -> Any:
-        """注册运行前钩子。在 Agent 启动任何流转前触发。"""
-        return _bare_or_parameterized(self._r, "before_run", func, timeout=timeout)
+    before_model_request = HookPoint[BeforeModelRequestHookFunc]("before_model_request")
+    """注册大模型请求前钩子。可在此修改发送给 LLM 的 Messages 等上下文。"""
+    after_model_request = HookPoint[AfterModelRequestHookFunc]("after_model_request")
+    """注册大模型请求后钩子。可在此验证或修改 LLM 的原始 Response。"""
+    wrap_model_request = HookPoint[WrapModelRequestHookFunc]("wrap_model_request")
+    """注册大模型请求包裹钩子。以洋葱模型接管 LLM 的网络请求过程。"""
+    on_model_request_error = HookPoint[OnModelRequestErrorHookFunc](
+        "on_model_request_error"
+    )
+    """注册大模型请求异常钩子。捕获超时或网络等异常。"""
 
-    @overload
-    def after_run(self, func: AfterRunHookFunc, /) -> AfterRunHookFunc: ...
-    @overload
-    def after_run(
-        self, *, timeout: float | None = None
-    ) -> Callable[[AfterRunHookFunc], AfterRunHookFunc]: ...
-    def after_run(
-        self, func: AfterRunHookFunc | None = None, *, timeout: float | None = None
-    ) -> Any:
-        """注册运行后钩子。在 Agent 获取最终结果后触发，可修改结果。"""
-        return _bare_or_parameterized(self._r, "after_run", func, timeout=timeout)
+    before_tool_validate = HookPoint[BeforeToolValidateHookFunc]("before_tool_validate")
+    """注册工具验证前钩子。在工具输入参数校验前触发，可篡改或校验参数。"""
+    after_tool_validate = HookPoint[AfterToolValidateHookFunc]("after_tool_validate")
+    """注册工具验证后钩子。在工具输入参数校验成功后触发，可篡改最终参数。"""
+    wrap_tool_validate = HookPoint[WrapToolValidateHookFunc]("wrap_tool_validate")
+    """注册工具验证包裹钩子。以洋葱模型接管工具参数校验过程。"""
+    on_tool_validate_error = HookPoint[OnToolValidateErrorHookFunc](
+        "on_tool_validate_error"
+    )
+    """注册工具验证异常钩子。捕获并处理校验阶段抛出的异常。"""
 
-    @overload
-    def wrap_run(self, func: WrapRunHookFunc, /) -> WrapRunHookFunc: ...
-    @overload
-    def wrap_run(
-        self, *, timeout: float | None = None
-    ) -> Callable[[WrapRunHookFunc], WrapRunHookFunc]: ...
-    def wrap_run(
-        self, func: WrapRunHookFunc | None = None, *, timeout: float | None = None
-    ) -> Any:
-        """注册运行包裹钩子。以洋葱模型接管整个 Agent 运行过程。"""
-        return _bare_or_parameterized(self._r, "wrap_run", func, timeout=timeout)
-
-    @overload
-    def on_run_error(self, func: OnRunErrorHookFunc, /) -> OnRunErrorHookFunc: ...
-    @overload
-    def on_run_error(
-        self, *, timeout: float | None = None
-    ) -> Callable[[OnRunErrorHookFunc], OnRunErrorHookFunc]: ...
-    def on_run_error(
-        self, func: OnRunErrorHookFunc | None = None, *, timeout: float | None = None
-    ) -> Any:
-        """注册运行异常钩子。捕获 Agent 级别的致命错误。"""
-        return _bare_or_parameterized(self._r, "on_run_error", func, timeout=timeout)
-
-    @overload
-    def before_model_request(
-        self, func: BeforeModelRequestHookFunc, /
-    ) -> BeforeModelRequestHookFunc: ...
-    @overload
-    def before_model_request(
-        self, *, timeout: float | None = None
-    ) -> Callable[[BeforeModelRequestHookFunc], BeforeModelRequestHookFunc]: ...
-    def before_model_request(
-        self,
-        func: BeforeModelRequestHookFunc | None = None,
-        *,
-        timeout: float | None = None,
-    ) -> Any:
-        """注册大模型请求前钩子。可在此修改发送给 LLM 的 Messages 等上下文。"""
-        return _bare_or_parameterized(
-            self._r, "before_model_request", func, timeout=timeout
-        )
-
-    @overload
-    def after_model_request(
-        self, func: AfterModelRequestHookFunc, /
-    ) -> AfterModelRequestHookFunc: ...
-    @overload
-    def after_model_request(
-        self, *, timeout: float | None = None
-    ) -> Callable[[AfterModelRequestHookFunc], AfterModelRequestHookFunc]: ...
-    def after_model_request(
-        self,
-        func: AfterModelRequestHookFunc | None = None,
-        *,
-        timeout: float | None = None,
-    ) -> Any:
-        """注册大模型请求后钩子。可在此验证或修改 LLM 的原始 Response。"""
-        return _bare_or_parameterized(
-            self._r, "after_model_request", func, timeout=timeout
-        )
-
-    @overload
-    def wrap_model_request(
-        self, func: WrapModelRequestHookFunc, /
-    ) -> WrapModelRequestHookFunc: ...
-    @overload
-    def wrap_model_request(
-        self, *, timeout: float | None = None
-    ) -> Callable[[WrapModelRequestHookFunc], WrapModelRequestHookFunc]: ...
-    def wrap_model_request(
-        self,
-        func: WrapModelRequestHookFunc | None = None,
-        *,
-        timeout: float | None = None,
-    ) -> Any:
-        """注册大模型请求包裹钩子。以洋葱模型接管 LLM 的网络请求过程。"""
-        return _bare_or_parameterized(
-            self._r, "wrap_model_request", func, timeout=timeout
-        )
-
-    @overload
-    def on_model_request_error(
-        self, func: OnModelRequestErrorHookFunc, /
-    ) -> OnModelRequestErrorHookFunc: ...
-    @overload
-    def on_model_request_error(
-        self, *, timeout: float | None = None
-    ) -> Callable[[OnModelRequestErrorHookFunc], OnModelRequestErrorHookFunc]: ...
-    def on_model_request_error(
-        self,
-        func: OnModelRequestErrorHookFunc | None = None,
-        *,
-        timeout: float | None = None,
-    ) -> Any:
-        """注册大模型请求异常钩子。捕获超时或网络等异常。"""
-        return _bare_or_parameterized(
-            self._r, "on_model_request_error", func, timeout=timeout
-        )
-
-    @overload
-    def before_tool_execute(
-        self, func: BeforeToolExecuteHookFunc, /
-    ) -> BeforeToolExecuteHookFunc: ...
-    @overload
-    def before_tool_execute(
-        self, *, tools: list[str] | None = None, timeout: float | None = None
-    ) -> Callable[[BeforeToolExecuteHookFunc], BeforeToolExecuteHookFunc]: ...
-    def before_tool_execute(
-        self,
-        func: BeforeToolExecuteHookFunc | None = None,
-        *,
-        tools: list[str] | None = None,
-        timeout: float | None = None,
-    ) -> Any:
-        """注册工具执行前钩子。可通过 tools 参数指定拦截特定工具，可篡改传入参数。"""
-        return _tool_bare_or_parameterized(
-            self._r, "before_tool_execute", func, tools=tools, timeout=timeout
-        )
-
-    @overload
-    def after_tool_execute(
-        self, func: AfterToolExecuteHookFunc, /
-    ) -> AfterToolExecuteHookFunc: ...
-    @overload
-    def after_tool_execute(
-        self, *, tools: list[str] | None = None, timeout: float | None = None
-    ) -> Callable[[AfterToolExecuteHookFunc], AfterToolExecuteHookFunc]: ...
-    def after_tool_execute(
-        self,
-        func: AfterToolExecuteHookFunc | None = None,
-        *,
-        tools: list[str] | None = None,
-        timeout: float | None = None,
-    ) -> Any:
-        """注册工具执行后钩子。可通过 tools 参数指定拦截特定工具，可篡改返回结果。"""
-        return _tool_bare_or_parameterized(
-            self._r, "after_tool_execute", func, tools=tools, timeout=timeout
-        )
-
-    @overload
-    def wrap_tool_execute(
-        self, func: WrapToolExecuteHookFunc, /
-    ) -> WrapToolExecuteHookFunc: ...
-    @overload
-    def wrap_tool_execute(
-        self, *, tools: list[str] | None = None, timeout: float | None = None
-    ) -> Callable[[WrapToolExecuteHookFunc], WrapToolExecuteHookFunc]: ...
-    def wrap_tool_execute(
-        self,
-        func: WrapToolExecuteHookFunc | None = None,
-        *,
-        tools: list[str] | None = None,
-        timeout: float | None = None,
-    ) -> Any:
-        """注册工具执行包裹钩子。以洋葱模型接管特定工具的执行逻辑。"""
-        return _tool_bare_or_parameterized(
-            self._r, "wrap_tool_execute", func, tools=tools, timeout=timeout
-        )
-
-    @overload
-    def on_tool_execute_error(
-        self, func: OnToolExecuteErrorHookFunc, /
-    ) -> OnToolExecuteErrorHookFunc: ...
-    @overload
-    def on_tool_execute_error(
-        self, *, tools: list[str] | None = None, timeout: float | None = None
-    ) -> Callable[[OnToolExecuteErrorHookFunc], OnToolExecuteErrorHookFunc]: ...
-    def on_tool_execute_error(
-        self,
-        func: OnToolExecuteErrorHookFunc | None = None,
-        *,
-        tools: list[str] | None = None,
-        timeout: float | None = None,
-    ) -> Any:
-        """注册工具执行异常钩子。捕获特定工具的崩溃异常，可用于自愈重试。"""
-        return _tool_bare_or_parameterized(
-            self._r, "on_tool_execute_error", func, tools=tools, timeout=timeout
-        )
+    before_tool_execute = ToolHookPoint[BeforeToolExecuteHookFunc](
+        "before_tool_execute"
+    )
+    """注册工具执行前钩子。可通过 tools 参数指定拦截特定工具，可篡改传入参数。"""
+    after_tool_execute = ToolHookPoint[AfterToolExecuteHookFunc]("after_tool_execute")
+    """注册工具执行后钩子。可通过 tools 参数指定拦截特定工具，可篡改返回结果。"""
+    wrap_tool_execute = ToolHookPoint[WrapToolExecuteHookFunc]("wrap_tool_execute")
+    """注册工具执行包裹钩子。以洋葱模型接管特定工具的执行逻辑。"""
+    on_tool_execute_error = ToolHookPoint[OnToolExecuteErrorHookFunc](
+        "on_tool_execute_error"
+    )
+    """注册工具执行异常钩子。捕获特定工具的崩溃异常，可用于自愈重试。"""
 
 
 class Hooks(AbstractCapability):
@@ -506,41 +437,68 @@ class Hooks(AbstractCapability):
         self._registry: dict[str, list[_HookEntry[Any]]] = {}
         self.on = _HookRegistration(self)
 
-    async def wrap_run(
-        self, context: RunContext, handler: WrapRunHandler
-    ) -> AgentRunResult[Any]:
-        """派发：洋葱模型组装与全周期执行接管"""
-        for entry in self._registry.get("before_run", []):
-            await _call_entry(entry, "before_run", context)
+    async def _dispatch_pipeline(
+        self,
+        hook_prefix: str,
+        context: RunContext,
+        handler: Callable,
+        get_entries: Callable[[str], list[_HookEntry[Any]]],
+        do_before: Callable[[_HookEntry[Any]], Awaitable[Any]],
+        get_wrap_kwargs: Callable[[Callable], dict[str, Any]],
+        invoke_chain: Callable[[Callable], Awaitable[Any]],
+        do_error: Callable[[_HookEntry[Any], BaseException], Awaitable[Any]],
+        do_after: Callable[[_HookEntry[Any], Any], Awaitable[Any]],
+    ) -> Any:
+        """核心泛型流水线引擎：消除重复代码并严格遵守 Protocol 签名传递 kwargs"""
+        for entry in get_entries(f"before_{hook_prefix}"):
+            await do_before(entry)
 
-        entries = self._registry.get("wrap_run", [])
         chain = handler
-        if entries:
-            for entry in reversed(entries):
+        wrap_entries = get_entries(f"wrap_{hook_prefix}")
+        if wrap_entries:
+            for entry in reversed(wrap_entries):
 
-                def _wrap(
-                    e: _HookEntry[Any], h: Callable[..., Any]
-                ) -> Callable[..., Any]:
-                    async def _wrapped() -> Any:
-                        return await _call_entry(e, "wrap_run", context, h)
+                def _wrap(e: _HookEntry[Any], h: Callable) -> Callable:
+                    async def _wrapped(*args, **kwargs) -> Any:
+                        return await _call_entry(
+                            e, f"wrap_{hook_prefix}", context, **get_wrap_kwargs(h)
+                        )
 
                     return _wrapped
 
                 chain = _wrap(entry, chain)
 
         try:
-            result = await chain()
+            result = await invoke_chain(chain)
         except BaseException as error:
-            for err_entry in reversed(self._registry.get("on_run_error", [])):
+            err_entries = get_entries(f"on_{hook_prefix}_error")
+            for err_entry in reversed(err_entries):
                 try:
-                    return await _call_entry(err_entry, "on_run_error", context, error)
+                    return await do_error(err_entry, error)
                 except BaseException as new_err:
                     error = new_err
             raise error
 
-        for after_entry in reversed(self._registry.get("after_run", [])):
-            result = await _call_entry(after_entry, "after_run", context, result)
+        for after_entry in reversed(get_entries(f"after_{hook_prefix}")):
+            res = await do_after(after_entry, result)
+            if res is not None:
+                result = res
         return result
+
+    async def wrap_run(
+        self, context: RunContext, handler: WrapRunHandler
+    ) -> AgentRunResult[Any]:
+        return await self._dispatch_pipeline(
+            "run",
+            context,
+            handler,
+            get_entries=lambda p: self._registry.get(p, []),
+            do_before=lambda e: _call_entry(e, "before_run", context),
+            get_wrap_kwargs=lambda h: {"handler": h},
+            invoke_chain=lambda c: c(),
+            do_error=lambda e, err: _call_entry(e, "on_run_error", context, error=err),
+            do_after=lambda e, res: _call_entry(e, "after_run", context, result=res),
+        )
 
     async def wrap_model_request(
         self,
@@ -548,48 +506,35 @@ class Hooks(AbstractCapability):
         llm_context: LLMContext[ChatRequest, ChatResponse],
         handler: WrapModelRequestHandler,
     ) -> ChatResponse:
-        """派发：洋葱模型接管网络请求及前后生命周期"""
-        for entry in self._registry.get("before_model_request", []):
-            llm_context = await _call_entry(
-                entry, "before_model_request", context, llm_context
-            )
+        async def do_before(e):
+            nonlocal llm_context
+            res = await _call_entry(e, "before_model_request", context, llm_context)
+            if res is not None:
+                llm_context = res
 
-        entries = self._registry.get("wrap_model_request", [])
-        chain = handler
-        if entries:
-            for entry in reversed(entries):
-
-                def _make_chain(
-                    e: _HookEntry[Any], h: Callable[..., Any]
-                ) -> Callable[..., Any]:
-                    async def _wrapped(
-                        ctx_inner: LLMContext[ChatRequest, ChatResponse],
-                    ) -> Any:
-                        return await _call_entry(
-                            e, "wrap_model_request", context, ctx_inner, h
-                        )
-
-                    return _wrapped
-
-                chain = _make_chain(entry, chain)
-
-        try:
-            response = await chain(llm_context)
-        except Exception as error:
-            for err_entry in reversed(self._registry.get("on_model_request_error", [])):
-                try:
-                    return await _call_entry(
-                        err_entry, "on_model_request_error", context, llm_context, error
-                    )
-                except Exception as new_err:
-                    error = new_err
-            raise error
-
-        for after_entry in reversed(self._registry.get("after_model_request", [])):
-            response = await _call_entry(
-                after_entry, "after_model_request", context, llm_context, response
-            )
-        return response
+        return await self._dispatch_pipeline(
+            "model_request",
+            context,
+            handler,
+            get_entries=lambda p: self._registry.get(p, []),
+            do_before=do_before,
+            get_wrap_kwargs=lambda h: {"request_context": llm_context, "handler": h},
+            invoke_chain=lambda c: c(llm_context),
+            do_error=lambda e, err: _call_entry(
+                e,
+                "on_model_request_error",
+                context,
+                request_context=llm_context,
+                error=err,
+            ),
+            do_after=lambda e, res: _call_entry(
+                e,
+                "after_model_request",
+                context,
+                request_context=llm_context,
+                response=res,
+            ),
+        )
 
     async def wrap_tool_validate(
         self,
@@ -598,51 +543,38 @@ class Hooks(AbstractCapability):
         args: str | dict[str, Any],
         handler: WrapToolValidateHandler,
     ) -> dict[str, Any]:
-        """派发：洋葱模型接管工具参数校验及生命周期"""
-        for entry in self._registry.get("before_tool_validate", []):
-            args = await _call_entry(
-                entry, "before_tool_validate", context, tool_name, args
+        async def do_before(e):
+            nonlocal args
+            res = await _call_entry(
+                e, "before_tool_validate", context, tool_name=tool_name, args=args
             )
+            if res is not None:
+                args = res
 
-        entries = self._registry.get("wrap_tool_validate", [])
-        chain = handler
-        if entries:
-            for entry in reversed(entries):
-
-                def _wrap(
-                    e: _HookEntry[Any], h: Callable[..., Any]
-                ) -> Callable[..., Any]:
-                    async def _wrapped(args_inner: str | dict[str, Any]) -> Any:
-                        return await _call_entry(
-                            e, "wrap_tool_validate", context, tool_name, args_inner, h
-                        )
-
-                    return _wrapped
-
-                chain = _wrap(entry, chain)
-
-        try:
-            validated_args = await chain(args)
-        except Exception as error:
-            for err_entry in reversed(self._registry.get("on_tool_validate_error", [])):
-                try:
-                    return await _call_entry(
-                        err_entry,
-                        "on_tool_validate_error",
-                        context,
-                        tool_name,
-                        args,
-                        error,
-                    )
-                except Exception as new_err:
-                    error = new_err
-            raise error
-
-        for after_entry in reversed(self._registry.get("after_tool_validate", [])):
-            validated_args = await _call_entry(
-                after_entry, "after_tool_validate", context, tool_name, validated_args
-            )
-        return validated_args
+        return await self._dispatch_pipeline(
+            "tool_validate",
+            context,
+            handler,
+            get_entries=lambda p: self._registry.get(p, []),
+            do_before=do_before,
+            get_wrap_kwargs=lambda h: {
+                "tool_name": tool_name,
+                "args": args,
+                "handler": h,
+            },
+            invoke_chain=lambda c: c(args),
+            do_error=lambda e, err: _call_entry(
+                e,
+                "on_tool_validate_error",
+                context,
+                tool_name=tool_name,
+                args=args,
+                error=err,
+            ),
+            do_after=lambda e, res: _call_entry(
+                e, "after_tool_validate", context, tool_name=tool_name, args=res
+            ),
+        )
 
     async def wrap_tool_execute(
         self,
@@ -651,55 +583,41 @@ class Hooks(AbstractCapability):
         arguments: dict[str, Any],
         handler: WrapToolExecuteHandler,
     ) -> Any:
-        """派发：洋葱模型接管工具执行（支持匹配名称）及生命周期"""
-        for entry in _filter_tool_entries(
-            self._registry.get("before_tool_execute", []), tool_name=tool_name
-        ):
-            arguments = await _call_entry(
-                entry, "before_tool_execute", context, tool_name, arguments
+        async def do_before(e):
+            nonlocal arguments
+            res = await _call_entry(
+                e,
+                "before_tool_execute",
+                context,
+                tool_name=tool_name,
+                arguments=arguments,
             )
+            if res is not None:
+                arguments = res
 
-        entries = _filter_tool_entries(
-            self._registry.get("wrap_tool_execute", []), tool_name=tool_name
+        return await self._dispatch_pipeline(
+            "tool_execute",
+            context,
+            handler,
+            get_entries=lambda p: _filter_tool_entries(
+                self._registry.get(p, []), tool_name=tool_name
+            ),
+            do_before=do_before,
+            get_wrap_kwargs=lambda h: {
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "handler": h,
+            },
+            invoke_chain=lambda c: c(arguments),
+            do_error=lambda e, err: _call_entry(
+                e, "on_tool_execute_error", context, tool_name=tool_name, error=err
+            ),
+            do_after=lambda e, res: _call_entry(
+                e,
+                "after_tool_execute",
+                context,
+                tool_name=tool_name,
+                arguments=arguments,
+                result=res,
+            ),
         )
-        chain = handler
-        if entries:
-            for entry in reversed(entries):
-
-                def _wrap(
-                    e: _HookEntry[Any], h: Callable[..., Any]
-                ) -> Callable[..., Any]:
-                    async def _wrapped(args_inner: dict[str, Any]) -> Any:
-                        return await _call_entry(
-                            e, "wrap_tool_execute", context, tool_name, args_inner, h
-                        )
-
-                    return _wrapped
-
-                chain = _wrap(entry, chain)
-
-        try:
-            result = await chain(arguments)
-        except Exception as error:
-            for err_entry in reversed(
-                _filter_tool_entries(
-                    self._registry.get("on_tool_execute_error", []), tool_name=tool_name
-                )
-            ):
-                try:
-                    return await _call_entry(
-                        err_entry, "on_tool_execute_error", context, tool_name, error
-                    )
-                except Exception as new_err:
-                    error = new_err
-            raise error
-
-        for after_entry in reversed(
-            _filter_tool_entries(
-                self._registry.get("after_tool_execute", []), tool_name=tool_name
-            )
-        ):
-            result = await _call_entry(
-                after_entry, "after_tool_execute", context, tool_name, arguments, result
-            )
-        return result

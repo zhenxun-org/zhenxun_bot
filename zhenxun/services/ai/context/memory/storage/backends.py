@@ -2,6 +2,7 @@ import asyncio
 import base64
 from collections.abc import Callable
 import datetime
+from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Any, cast
 
@@ -26,6 +27,7 @@ from zhenxun.services.ai.core.messages import (
     LLMContentPart,
     LLMMessage,
     SystemMessage,
+    TextPart,
     ToolMessage,
     UserMessage,
 )
@@ -34,13 +36,47 @@ from zhenxun.services.db_context import Model
 from zhenxun.utils.pydantic_compat import TypeAdapter, model_dump
 
 
+class AbstractMemoryRecord(Model):
+    """Tortoise ORM 短期记忆持久化基类 (Mixin)。"""
+
+    id = fields.UUIDField(pk=True, description="主键")
+    session_id = fields.CharField(max_length=255, index=True)
+    role = fields.CharField(max_length=32)
+    content = fields.JSONField()
+    api_context = fields.JSONField(null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    metadata = fields.JSONField(null=True)
+
+    class Meta:  # type: ignore
+        abstract = True
+
+
+class AbstractSlotRecord(Model):
+    """Tortoise ORM 记忆槽持久化基类 (Mixin)。"""
+
+    id = fields.CharField(
+        pk=True, max_length=128, description="复合主键: session_id + label"
+    )
+    session_id = fields.CharField(max_length=255, index=True)
+    label = fields.CharField(max_length=64, index=True)
+    content = fields.TextField()
+    size_limit = fields.IntField(default=2000)
+    pinned = fields.BooleanField(default=True)
+    scope = fields.CharField(max_length=255)
+    description = fields.CharField(max_length=255, default="")
+    created_at = fields.FloatField()
+    updated_at = fields.FloatField()
+
+    class Meta:  # type: ignore
+        abstract = True
+
+
 class DBMessageSerializer:
     """将 LLMMessage 与数据库 JSON 格式进行序列化/反序列化的帮助类"""
 
     @staticmethod
     def deserialize_content(content_raw: Any) -> list[LLMContentPart]:
-        from zhenxun.services.ai.core.messages import TextPart
-
+        """反序列化数据库中的 JSON 数据为 LLMMessage 消息内容部件列表"""
         content_parts: list[LLMContentPart] = []
         if isinstance(content_raw, list):
             adapter = TypeAdapter(LLMContentPart)
@@ -59,8 +95,7 @@ class DBMessageSerializer:
 
     @staticmethod
     def serialize_content(content_payload: Any) -> list[dict[str, Any]]:
-        from pathlib import Path
-
+        """将 LLMMessage 消息内容序列化为可存储于数据库的 JSON 格式"""
         if isinstance(content_payload, str):
             return [{"type": "text", "text": content_payload}]
         elif isinstance(content_payload, list):
@@ -96,6 +131,7 @@ class MemoryScope:
         self,
         rag_client: "ScopedRAGClient",
     ):
+        """初始化长期记忆作用域与 RAG 客户端"""
         self.rag_client = rag_client
         self._background_tasks: set[Any] = set()
 
@@ -164,13 +200,13 @@ class MemoryScope:
     async def forget(
         self, session: SessionMetadata, record_ids: list[str] | None = None
     ) -> int:
+        """从 RAG 向量数据库中删除指定的记忆记录"""
         return await self.rag_client.delete(
             record_ids=record_ids,
         )
 
     async def _reinforce_memories(self, records: list[BaseRecord]):
-        import time
-
+        """惰性强化记忆：更新被检索记忆的访问次数和最后访问时间"""
         now = time.time()
         for r in records:
             r.metadata["access_count"] = r.metadata.get("access_count", 0) + 1
@@ -179,15 +215,20 @@ class MemoryScope:
 
 
 class InMemoryChatContext(BaseChatContext):
+    """基于内存的聊天上下文存储后端"""
+
     def __init__(self):
+        """初始化内存聊天上下文"""
         self._messages: dict[str, list[LLMMessage]] = {}
 
     async def get_messages(self, session: SessionMetadata) -> list[LLMMessage]:
+        """获取指定会话的所有短期历史消息"""
         return list(self._messages.get(session.session_id, []))
 
     async def search(
         self, query: str, session: SessionMetadata, limit: int = 10
     ) -> list[LLMMessage]:
+        """在内存中简单检索包含查询词的历史消息"""
         results = []
         for msg in self._messages.get(session.session_id, []):
             if query in msg.extract_text:
@@ -199,6 +240,7 @@ class InMemoryChatContext(BaseChatContext):
     async def add_messages(
         self, session: SessionMetadata, messages: list[LLMMessage]
     ) -> None:
+        """向指定会话中追加历史消息"""
         if session.session_id not in self._messages:
             self._messages[session.session_id] = []
         self._messages[session.session_id].extend(messages)
@@ -206,9 +248,11 @@ class InMemoryChatContext(BaseChatContext):
     async def set_messages(
         self, session: SessionMetadata, messages: list[LLMMessage]
     ) -> None:
+        """覆盖设置指定会话的历史消息"""
         self._messages[session.session_id] = list(messages)
 
     async def clear(self, session: SessionMetadata) -> None:
+        """清空指定会话的全部历史消息"""
         self._messages.pop(session.session_id, None)
 
     async def clear_by_query(self, query: ScopeSelector) -> None:
@@ -221,22 +265,9 @@ class InMemoryChatContext(BaseChatContext):
             self._messages.pop(sid, None)
 
 
-class AbstractMemoryRecord(Model):
-    """Tortoise ORM 短期记忆持久化基类 (Mixin)。"""
-
-    id = fields.UUIDField(pk=True, description="主键")
-    session_id = fields.CharField(max_length=255, index=True)
-    role = fields.CharField(max_length=32)
-    content = fields.JSONField()
-    api_context = fields.JSONField(null=True)
-    created_at = fields.DatetimeField(auto_now_add=True)
-    metadata = fields.JSONField(null=True)
-
-    class Meta:  # type: ignore
-        abstract = True
-
-
 class TortoiseChatContext(BaseChatContext):
+    """基于 Tortoise ORM 的聊天上下文存储后端"""
+
     def __init__(
         self,
         model_class: type[AbstractMemoryRecord],
@@ -245,10 +276,12 @@ class TortoiseChatContext(BaseChatContext):
         ]
         | None = None,
     ):
+        """初始化 Tortoise ORM 聊天上下文存储后端"""
         self.model_class = model_class
         self.custom_save_hook = custom_save_hook
 
     def _row_to_message(self, row: AbstractMemoryRecord) -> LLMMessage:
+        """将数据库记录转换为 LLMMessage 实例"""
         content_parts = DBMessageSerializer.deserialize_content(row.content)
         metadata: dict[str, Any] | None = (
             row.metadata if isinstance(row.metadata, dict) else None
@@ -270,6 +303,7 @@ class TortoiseChatContext(BaseChatContext):
         return cast(LLMMessage, LLMMessage(role=role, **kwargs))
 
     async def get_messages(self, session: SessionMetadata) -> list[LLMMessage]:
+        """从数据库中查询并获取指定会话的短期历史消息"""
         rows = (
             await self.model_class.filter(session_id=session.session_id)
             .order_by("created_at")
@@ -280,6 +314,7 @@ class TortoiseChatContext(BaseChatContext):
     async def search(
         self, query: str, session: SessionMetadata, limit: int = 10
     ) -> list[LLMMessage]:
+        """在数据库中检索包含查询词的历史消息"""
         rows = (
             await self.model_class.filter(
                 session_id=session.session_id, content__icontains=query
@@ -293,6 +328,7 @@ class TortoiseChatContext(BaseChatContext):
     async def add_messages(
         self, session: SessionMetadata, messages: list[LLMMessage]
     ) -> None:
+        """向数据库中批量追加指定会话的历史消息"""
         if not messages:
             return
 
@@ -331,10 +367,12 @@ class TortoiseChatContext(BaseChatContext):
     async def set_messages(
         self, session: SessionMetadata, messages: list[LLMMessage]
     ) -> None:
+        """覆盖设置指定会话的数据库历史消息"""
         await self.clear(session)
         await self.add_messages(session, messages)
 
     async def clear(self, session: SessionMetadata) -> None:
+        """删除指定会话在数据库中的全部历史消息"""
         await self.model_class.filter(session_id=session.session_id).delete()
 
     async def clear_by_query(self, query: ScopeSelector) -> None:
@@ -357,31 +395,15 @@ def get_orm_chat_context(
     )
 
 
-class AbstractSlotRecord(Model):
-    """Tortoise ORM 记忆槽持久化基类 (Mixin)。"""
-
-    id = fields.CharField(
-        pk=True, max_length=128, description="复合主键: session_id + label"
-    )
-    session_id = fields.CharField(max_length=255, index=True)
-    label = fields.CharField(max_length=64, index=True)
-    content = fields.TextField()
-    size_limit = fields.IntField(default=2000)
-    pinned = fields.BooleanField(default=True)
-    scope = fields.CharField(max_length=255)
-    description = fields.CharField(max_length=255, default="")
-    created_at = fields.FloatField()
-    updated_at = fields.FloatField()
-
-    class Meta:  # type: ignore
-        abstract = True
-
-
 class TortoiseSlotContext(BaseSlotContext):
+    """基于 Tortoise ORM 的记忆槽存储后端"""
+
     def __init__(self, model_class: type[AbstractSlotRecord]):
+        """初始化 Tortoise ORM 记忆槽存储后端"""
         self.model_class = model_class
 
     def _row_to_slot(self, row: AbstractSlotRecord) -> MemorySlot:
+        """将数据库记忆槽记录转换为 MemorySlot 实例"""
         return MemorySlot(
             label=row.label,
             content=row.content,
@@ -394,6 +416,7 @@ class TortoiseSlotContext(BaseSlotContext):
         )
 
     async def get_slot(self, session: SessionMetadata, label: str) -> MemorySlot | None:
+        """查询并获取指定会话及作用域下 label 对应的记忆槽"""
         rows = await self.model_class.filter(
             session_id__in=session.accessible_scopes, label=label
         ).all()
@@ -405,6 +428,7 @@ class TortoiseSlotContext(BaseSlotContext):
         return None
 
     async def set_slot(self, session: SessionMetadata, slot: MemorySlot) -> None:
+        """保存或更新指定会话的记忆槽到数据库"""
         composite_id = f"{slot.scope}_{slot.label}"
 
         await self.model_class.update_or_create(
@@ -425,10 +449,12 @@ class TortoiseSlotContext(BaseSlotContext):
     async def delete_slot(
         self, session: SessionMetadata, label: str, scope: str
     ) -> None:
+        """从数据库中删除指定作用域和 label 的记忆槽"""
         composite_id = f"{scope}_{label}"
         await self.model_class.filter(id=composite_id).delete()
 
     async def list_pinned_slots(self, session: SessionMetadata) -> list[MemorySlot]:
+        """获取指定会话所有可访问的、置顶且非空的记忆槽"""
         rows = await self.model_class.filter(
             session_id__in=session.accessible_scopes, pinned=True
         ).all()
@@ -442,6 +468,7 @@ class TortoiseSlotContext(BaseSlotContext):
         return [s for s in merged.values() if s.content.strip()]
 
     async def list_all_slots(self, session: SessionMetadata) -> list[MemorySlot]:
+        """获取指定会话所有可访问的记忆槽列表"""
         rows = await self.model_class.filter(
             session_id__in=session.accessible_scopes
         ).all()
@@ -454,6 +481,7 @@ class TortoiseSlotContext(BaseSlotContext):
         return list(merged.values())
 
     async def clear_by_query(self, query: ScopeSelector) -> None:
+        """批量清理匹配指定前缀的所有记忆槽"""
         scope_prefix = query.scope_prefix
         await self.model_class.filter(session_id__startswith=scope_prefix).delete()
 

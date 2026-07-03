@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import copy
 import graphlib
 from typing import TYPE_CHECKING, Any
+
+from nonebot.utils import is_coroutine_callable
 
 from zhenxun.services.ai.core.messages import ChatRequest, ChatResponse
 from zhenxun.services.ai.core.options import GenerationConfig
@@ -91,10 +94,11 @@ class CombinedCapability(AbstractCapability):
     """
     组合能力容器。
     将多个 Capability 按顺序融合成一个复合的洋葱模型，
-    处理生命周期的正序/倒序和链式调用。
+    处理生命周期的正序/倒序 and 链式调用。
     """
 
     def __init__(self, capabilities: list[AbstractCapability]):
+        """初始化组合能力，对传入能力集进行展平去重和拓扑排序"""
         flat = []
         for c in capabilities:
             if isinstance(c, CombinedCapability):
@@ -111,6 +115,7 @@ class CombinedCapability(AbstractCapability):
         self.capabilities = sort_capabilities(deduped)
 
     async def for_run(self, context: RunContext) -> "AbstractCapability":
+        """为当前运行实例解析并更新所包裹的能力列表"""
         new_caps = []
         changed = False
         for cap in self.capabilities:
@@ -126,6 +131,7 @@ class CombinedCapability(AbstractCapability):
     async def get_generation_config(
         self, context: RunContext
     ) -> GenerationConfig | None:
+        """获取组合中所有能力合并后的生成配置"""
         final_config = None
         for cap in self.capabilities:
             cap_config = await cap.get_generation_config(context)
@@ -137,12 +143,14 @@ class CombinedCapability(AbstractCapability):
         return final_config
 
     async def get_system_prompts(self, context: RunContext) -> list[str]:
+        """获取组合中所有能力提供的系统提示词列表"""
         prompts = []
         for cap in self.capabilities:
             prompts.extend(await cap.get_system_prompts(context))
         return prompts
 
     async def get_tools(self, context: RunContext) -> list[Any]:
+        """获取组合中所有能力附带注册的工具列表"""
         tools = []
         for cap in self.capabilities:
             tools.extend(await cap.get_tools(context))
@@ -151,6 +159,7 @@ class CombinedCapability(AbstractCapability):
     async def prepare_tools(
         self, context: RunContext, tool_defs: list[Any]
     ) -> list[Any]:
+        """依次调用组合中所有能力的准备工具钩子处理工具定义"""
         current_defs = list(tool_defs)
         for cap in self.capabilities:
             res = await cap.prepare_tools(context, current_defs)
@@ -161,6 +170,7 @@ class CombinedCapability(AbstractCapability):
     async def wrap_run(
         self, context: RunContext, handler: WrapRunHandler
     ) -> "AgentRunResult[Any]":
+        """串联能力组合的 wrap_run 洋葱模型拦截器链"""
         chain = handler
         for cap in reversed(self.capabilities):
             chain = _make_wrap_link(cap, "wrap_run", context, {}, chain, None)
@@ -172,6 +182,7 @@ class CombinedCapability(AbstractCapability):
         llm_context: LLMContext[ChatRequest, ChatResponse],
         handler: WrapModelRequestHandler,
     ) -> ChatResponse:
+        """串联能力组合的 wrap_model_request 洋葱模型拦截器链"""
         chain = handler
         for cap in reversed(self.capabilities):
             chain = _make_wrap_link(
@@ -186,6 +197,7 @@ class CombinedCapability(AbstractCapability):
         args: str | dict[str, Any],
         handler: WrapToolValidateHandler,
     ) -> dict[str, Any]:
+        """串联能力组合的 wrap_tool_validate 洋葱模型拦截器链"""
         chain = handler
         for cap in reversed(self.capabilities):
             chain = _make_wrap_link(
@@ -205,6 +217,7 @@ class CombinedCapability(AbstractCapability):
         arguments: dict[str, Any],
         handler: WrapToolExecuteHandler,
     ) -> Any:
+        """串联能力组合的 wrap_tool_execute 洋葱模型拦截器链"""
         chain = handler
         for cap in reversed(self.capabilities):
             chain = _make_wrap_link(
@@ -250,15 +263,16 @@ class DynamicCapability(AbstractCapability):
     """动态能力注入：允许在运行时基于上下文生成真正的 Capability"""
 
     def __init__(self, capability_func: Callable):
+        """初始化动态能力"""
         self.capability_func = capability_func
 
     @classmethod
     def get_serialization_name(cls) -> str | None:
+        """获取反序列化标识"""
         return None
 
     async def for_run(self, context: RunContext) -> "AbstractCapability":
-        from nonebot.utils import is_coroutine_callable
-
+        """在运行时基于当前上下文动态实例化并执行真正的 Capability"""
         if is_coroutine_callable(self.capability_func):
             cap = await self.capability_func(context)
         else:
@@ -275,17 +289,19 @@ class WrapperCapability(AbstractCapability):
     """
 
     def __init__(self, wrapped: AbstractCapability):
+        """初始化代理包装器"""
         self.wrapped = wrapped
 
     @classmethod
     def get_serialization_name(cls) -> str | None:
+        """获取反序列化标识"""
         return None
 
     async def for_run(self, context: RunContext) -> "AbstractCapability":
+        """对内部包裹的实例执行运行时解析并深度克隆"""
         new_wrapped = await self.wrapped.for_run(context)
         if new_wrapped is self.wrapped:
             return self
-        import copy
 
         new_self = copy.copy(self)
         new_self.wrapped = new_wrapped
@@ -294,22 +310,27 @@ class WrapperCapability(AbstractCapability):
     async def get_generation_config(
         self, context: RunContext
     ) -> GenerationConfig | None:
+        """透传获取内部包裹实例的生成配置"""
         return await self.wrapped.get_generation_config(context)
 
     async def get_system_prompts(self, context: RunContext) -> list[str]:
+        """透传获取内部包裹实例的系统提示词"""
         return await self.wrapped.get_system_prompts(context)
 
     async def get_tools(self, context: RunContext) -> list[Any]:
+        """透传获取内部包裹实例的工具列表"""
         return await self.wrapped.get_tools(context)
 
     async def prepare_tools(
         self, context: RunContext, tool_defs: list[Any]
     ) -> list[Any]:
+        """透传执行内部包裹实例的准备工具钩子"""
         return await self.wrapped.prepare_tools(context, tool_defs)
 
     async def wrap_run(
         self, context: RunContext, handler: WrapRunHandler
     ) -> "AgentRunResult[Any]":
+        """透传执行内部包裹实例的 wrap_run 拦截器"""
         return await self.wrapped.wrap_run(context, handler)
 
     async def wrap_model_request(
@@ -318,6 +339,7 @@ class WrapperCapability(AbstractCapability):
         llm_context: LLMContext[ChatRequest, ChatResponse],
         handler: WrapModelRequestHandler,
     ) -> ChatResponse:
+        """透传执行内部包裹实例的 wrap_model_request 拦截器"""
         return await self.wrapped.wrap_model_request(context, llm_context, handler)
 
     async def wrap_tool_validate(
@@ -327,6 +349,7 @@ class WrapperCapability(AbstractCapability):
         args: str | dict[str, Any],
         handler: WrapToolValidateHandler,
     ) -> dict[str, Any]:
+        """透传执行内部包裹实例的 wrap_tool_validate 拦截器"""
         return await self.wrapped.wrap_tool_validate(context, tool_name, args, handler)
 
     async def wrap_tool_execute(
@@ -336,6 +359,7 @@ class WrapperCapability(AbstractCapability):
         arguments: dict[str, Any],
         handler: WrapToolExecuteHandler,
     ) -> Any:
+        """透传执行内部包裹实例的 wrap_tool_execute 拦截器"""
         return await self.wrapped.wrap_tool_execute(
             context, tool_name, arguments, handler
         )

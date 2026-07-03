@@ -16,6 +16,16 @@ class ContextConverter:
     def flatten_to_llm_messages(
         messages: Sequence[AgentMessage], context: Any | None = None
     ) -> list[LLMMessage]:
+        """
+        将包含 AgentEvent 和 LLMMessage 的混合消息序列，扁平化转换为大模型 API 专用的 LLMMessage 列表。
+
+        参数：
+            messages: 混合了 LLMMessage 和 AgentEvent 对象的原始业务消息序列。
+            context: 渲染 AgentEvent 所需的运行时上下文对象（如 RunContext）。
+
+        返回：
+            list[LLMMessage]: 扁平化转换后生成的纯底层大模型原生消息列表。
+        """  # noqa: E501
         flattened: list[LLMMessage] = []
 
         for msg in messages:

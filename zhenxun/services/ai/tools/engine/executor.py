@@ -13,6 +13,7 @@ from nonebot.adapters import Message as PlatformMessage
 
 from zhenxun.services.ai.capabilities import CombinedCapability
 from zhenxun.services.ai.core.exceptions import (
+    ControlFlowExit,
     ToolFatalError,
     ToolRetryError,
 )
@@ -24,11 +25,14 @@ from zhenxun.services.ai.core.stream_events import (
     ToolStreamChunkEvent,
     UserCustomEvent,
 )
+from zhenxun.services.ai.message_builder import MessageBuilder
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.tools.models import (
+    StateSyncResult,
     ToolOptions,
     ToolResult,
+    ToolResultChunk,
     ValidatedToolCall,
 )
 from zhenxun.services.log import logger
@@ -144,8 +148,6 @@ class ToolExecutor:
         available_tools: "ToolCollection | dict[str, Any] | None" = None,
     ) -> RunContext:
         """准备/克隆工具调用所使用的隔离 RunContext"""
-        from zhenxun.services.ai.run import RunContext
-
         safe_context = (
             context.clone_for_tool_call(tool_call_id, tool_name)
             if context
@@ -256,7 +258,6 @@ class ToolExecutor:
             available_tools = {}
         tool_name = validated.call.tool_name
         if not validated.args_valid or validated.tool is None:
-            from zhenxun.services.ai.core.exceptions import ControlFlowExit
 
             if isinstance(validated.validation_error, ControlFlowExit):
                 raise validated.validation_error
@@ -303,16 +304,12 @@ class ToolExecutor:
                     if not isinstance(result, ToolResult):
                         result = ToolResult(output=result)
 
-                    from zhenxun.services.ai.tools.models import StateSyncResult
-
                     if isinstance(result, StateSyncResult) and result.state_notice:
                         if safe_context:
                             safe_context.run.add_system_prompt(
                                 f"[系统通知(状态同步)]：{result.state_notice}"
                             )
                 except BaseException as e:
-                    from zhenxun.services.ai.core.exceptions import ControlFlowExit
-
                     if isinstance(e, ControlFlowExit):
                         raise e
                     if isinstance(e, asyncio.CancelledError):
@@ -394,8 +391,6 @@ class ToolExecutor:
             func_name = original_call.tool_name
 
             if isinstance(result_pair, BaseException):
-                from zhenxun.services.ai.core.exceptions import ControlFlowExit
-
                 if isinstance(result_pair, ControlFlowExit):
                     raise result_pair
                 if isinstance(result_pair, asyncio.CancelledError):
@@ -438,8 +433,6 @@ class ToolExecutionPolicy:
         """
         计算当前工具的绝对最大重试次数。
         优先使用工具级配置 (ToolOptions.max_retries)，如果未设置，则使用全局配置。
-        由于重试机制是保证 Agent 稳定性的防线，
-        即使全局为 0，底层默认也会给予至少 1 次的机会。
         """
         tool_retries = getattr(self.settings, "max_retries", None)
         if tool_retries is not None:
@@ -496,8 +489,6 @@ class NativeToolRunner(ToolRunner):
                 if isinstance(chunk, ToolResult):
                     res = chunk
                 else:
-                    from zhenxun.services.ai.tools.models import ToolResultChunk
-
                     chunk_obj = (
                         chunk
                         if isinstance(chunk, ToolResultChunk)
@@ -525,8 +516,6 @@ class NativeToolRunner(ToolRunner):
             final_result = res
         else:
             if str(type(res)).find("Message") != -1:
-                from zhenxun.services.ai.message_builder import MessageBuilder
-
                 uni_msg = (
                     MessageBuilder.message_to_unimessage(res)
                     if isinstance(res, PlatformMessage)

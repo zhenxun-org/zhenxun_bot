@@ -8,11 +8,15 @@ from zhenxun.services.log import logger
 
 
 class ChunkingStrategy(ABC):
+    """分块策略抽象基类，用于将长文本记录切分为多个短的 BaseRecord"""
+
     @abstractmethod
     def chunk(self, record: BaseRecord) -> list[BaseRecord]:
+        """将输入的记录切分为子记录列表。由子类具体实现"""
         raise NotImplementedError
 
     def clean_text(self, text: str) -> str:
+        """清洗和规范化文本，去除多余的空行和空白字符"""
         cleaned_text = re.sub(r"\n+", "\n", text)
         cleaned_text = re.sub(r"[ \t]+", " ", cleaned_text)
         return cleaned_text.strip()
@@ -20,6 +24,7 @@ class ChunkingStrategy(ABC):
     def _create_chunk_record(
         self, original_record: BaseRecord, chunk_number: int, content: str
     ) -> BaseRecord:
+        """根据原始记录创建分块后的 BaseRecord，并自动附带切片索引和父级ID等元数据"""
         meta_data = original_record.metadata.copy()
         meta_data["chunk_index"] = chunk_number
         meta_data["chunk_size"] = len(content)
@@ -44,6 +49,7 @@ class DocumentChunking(ChunkingStrategy):
         self.chunk_size = chunk_size
 
     def chunk(self, record: BaseRecord) -> list[BaseRecord]:
+        """按双换行将内容切分为段落，并将相邻段落合并为符合最大字符长度限制的分块"""
         if len(record.content) <= self.chunk_size:
             return [
                 self._create_chunk_record(record, 0, self.clean_text(record.content))
@@ -113,7 +119,7 @@ class RecursiveCharacterChunking(ChunkingStrategy):
         ]
 
     def _split_text(self, text: str, separators: list[str]) -> list[str]:
-        """核心递归切分逻辑"""
+        """核心递归切分逻辑。尝试使用给定的分隔符列表按优先级切分文本"""
         final_chunks = []
         separator = separators[-1]
         new_separators = []
@@ -187,6 +193,7 @@ class RecursiveCharacterChunking(ChunkingStrategy):
         return chunks
 
     def chunk(self, record: BaseRecord) -> list[BaseRecord]:
+        """使用递归字符切分方式，将文本切分为带有重叠部分的分块记录"""
         content = record.content.strip()
 
         if len(content) <= self.chunk_size:
@@ -219,6 +226,7 @@ class RowChunking(ChunkingStrategy):
         self.rows_per_chunk = rows_per_chunk
 
     def chunk(self, record: BaseRecord) -> list[BaseRecord]:
+        """将表格行数据按指定行数切分为块，每个块都带有相同的表头首部"""
         lines = record.content.splitlines()
         lines = [line for line in lines if line.strip()]
 
@@ -260,6 +268,7 @@ class DeduplicationProcessor:
         self.threshold = threshold
 
     async def process(self, records: list[BaseRecord]) -> list[BaseRecord]:
+        """对输入记录列表进行批处理内去重，过滤相似度达到或超过阈值的重复记录"""
         if not records or len(records) <= 1:
             return records
 
@@ -297,7 +306,9 @@ class BaseBatchNode(ABC):
     """批处理节点基类：一次性接收并处理全部记录"""
 
     @abstractmethod
-    async def process_batch(self, records: list[BaseRecord]) -> list[BaseRecord]: ...
+    async def process_batch(self, records: list[BaseRecord]) -> list[BaseRecord]:
+        """批量处理 BaseRecord 记录列表"""
+        ...
 
 
 class BaseMapNode(ABC):
@@ -306,7 +317,9 @@ class BaseMapNode(ABC):
     @abstractmethod
     async def process_one(
         self, record: BaseRecord
-    ) -> BaseRecord | list[BaseRecord] | None: ...
+    ) -> BaseRecord | list[BaseRecord] | None:
+        """处理单条 BaseRecord 记录，可返回修改后的记录、拆分后的多条记录，或 None（表示过滤该记录）"""  # noqa: E501
+        ...
 
 
 class DynamicChunkingNode(BaseBatchNode):
@@ -329,6 +342,7 @@ class DynamicChunkingNode(BaseBatchNode):
         self.strategies = custom_strategies or {".csv": RowChunking(rows_per_chunk=30)}
 
     async def process_batch(self, records: list[BaseRecord]) -> list[BaseRecord]:
+        """根据记录的元数据扩展名动态匹配并执行切块策略"""
         chunks = []
         for record in records:
             ext = record.metadata.get("extension", "")
@@ -338,7 +352,7 @@ class DynamicChunkingNode(BaseBatchNode):
 
 
 class BaseEmbeddingBatchNode(BaseBatchNode):
-    """批量向量化抽象基类：提取文本、分批请求 API 并将结果写回的公共逻辑"""
+    """批量向量化抽象基类：提取文本、分批请求 API 并将结果 write 回的公共逻辑"""
 
     def __init__(self, embedder, batch_size: int = 80):
         """
@@ -357,6 +371,7 @@ class BaseEmbeddingBatchNode(BaseBatchNode):
         pass
 
     async def process_batch(self, records: list[BaseRecord]) -> list[BaseRecord]:
+        """批量将文本记录提取并请求向量化接口，写回向量数据"""
         if not self.embedder or not records:
             return records
 
@@ -382,14 +397,15 @@ class BaseEmbeddingBatchNode(BaseBatchNode):
 
 
 class EmbeddingNode(BaseEmbeddingBatchNode):
-    """并发向量化初次构建节点"""
+    """并发向量化初次构建节点，只对有实际内容的记录进行向量化。"""
 
     def _filter_target_records(self, records: list[BaseRecord]) -> list[BaseRecord]:
+        """筛选出非空内容的记录进行向量化"""
         return [r for r in records if r.content.strip()]
 
 
 class DedupNode(BaseBatchNode):
-    """批次内查重节点"""
+    """批次内查重节点。在流水线中作为去重节点使用。"""
 
     def __init__(self, threshold: float):
         """
@@ -401,6 +417,7 @@ class DedupNode(BaseBatchNode):
         self.processor = DeduplicationProcessor(threshold=threshold)
 
     async def process_batch(self, records: list[BaseRecord]) -> list[BaseRecord]:
+        """调用去重处理器过滤本批次中的高度重复记录"""
         return await self.processor.process(records)
 
 
@@ -417,6 +434,7 @@ class StorageCommitNode(BaseBatchNode):
         self.storage = storage
 
     async def process_batch(self, records: list[BaseRecord]) -> list[BaseRecord]:
+        """根据记录的操作类型（保存、更新或删除）分类，并批量提交至存储后端"""
         if not records:
             return records
 
@@ -468,9 +486,11 @@ class IndexPipeline:
         self.max_workers = max_workers
 
     def add_node(self, node: BaseBatchNode | BaseMapNode):
+        """向处理流水线中追加一个节点"""
         self.nodes.append(node)
 
     async def run(self, records: list[BaseRecord]) -> list[BaseRecord]:
+        """并发调度处理引擎，运行并执行流水线中的所有处理节点，返回处理后的记录"""
         if not records:
             return []
 

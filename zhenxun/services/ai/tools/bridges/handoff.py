@@ -2,7 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, create_model
 
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.models import HandoffResult, ToolResult
 
@@ -19,6 +19,14 @@ class HandoffTool(BaseTool):
         target_description: str,
         input_schema: type[BaseModel] | Any | None = None,
     ):
+        """
+        初始化移交工具，为模型赋予转移对话控制权到指定实体的能力。
+
+        参数:
+            target_name: 被转移的目标接收者（Agent 或负责人）的唯一标识名称。
+            target_description: 目标接收者的职责或专长说明，供模型决策是否移交。
+            input_schema: 自定义移交数据结构，指定转移时所需携带的结构化参数。
+        """
         super().__init__(
             name=f"transfer_to_{target_name}",
             description=(

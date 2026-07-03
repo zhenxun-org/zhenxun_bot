@@ -50,3 +50,4 @@ class SlotMemoryCapability(AbstractCapability):
 
         toolkit = MemorySlotToolkit(**kwargs)
         return [toolkit]
+

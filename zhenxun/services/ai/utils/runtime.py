@@ -8,11 +8,11 @@ from zhenxun.services.ai.utils.scope import ScopeBuilder
 class ContextUtils:
     """
     从底层依赖容器 (deps) 中提取运行环境信息的纯静态工具类。
-
     """
 
     @staticmethod
     def extract_user_id(deps: Any) -> str | None:
+        """从依赖容器中提取当前用户的 ID"""
         if not deps:
             return None
         if hasattr(deps, "user_id") and getattr(deps, "user_id") is not None:
@@ -31,6 +31,7 @@ class ContextUtils:
 
     @staticmethod
     def extract_group_id(deps: Any) -> str | None:
+        """从依赖容器中提取当前群聊的 ID"""
         if not deps:
             return None
         if hasattr(deps, "group_id") and getattr(deps, "group_id") is not None:
@@ -42,6 +43,7 @@ class ContextUtils:
 
     @staticmethod
     def extract_platform(deps: Any) -> str:
+        """从依赖容器的 Bot 实例中提取当前聊天平台名称"""
         if not deps:
             return "unknown"
         if hasattr(deps, "platform") and getattr(deps, "platform") is not None:
@@ -57,6 +59,7 @@ class ContextUtils:
     def extract_concurrency_lock_id(
         context: Any, scope: Any, default_session_id: str
     ) -> str:
+        """根据并发隔离范围 scope 动态计算并返回当前会话的并发锁 ID"""
         from zhenxun.services.ai.flow.base import ConcurrencyScope
 
         scope = scope or ConcurrencyScope.GROUP
@@ -136,6 +139,7 @@ class PermissionUtils:
 
     @staticmethod
     async def check_superuser(context: Any) -> bool:
+        """异步校验当前运行上下文中的用户是否为超级用户"""
         bot = context.get_bot()
         event = context.get_event()
         if bot and event:
@@ -146,6 +150,7 @@ class PermissionUtils:
 
     @staticmethod
     async def check_admin_level(context: Any, min_level: int) -> bool:
+        """异步校验当前用户在全局或当前群聊中的管理权限等级是否达到最低要求"""
         if await PermissionUtils.check_superuser(context):
             return True
 

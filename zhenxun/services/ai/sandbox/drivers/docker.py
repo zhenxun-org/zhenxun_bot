@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 import aiodocker
 import anyio
 
+from zhenxun.configs.config import BotConfig
 from zhenxun.services.ai.config import get_llm_config
 from zhenxun.services.ai.core.exceptions import SandboxPathEscapeError, WorkspaceIOError
 from zhenxun.services.ai.sandbox.models import (
@@ -32,6 +33,7 @@ class DockerInteractiveTerminalSession(InteractiveTerminalSession):
     """PTY 交互式会话：接管 Docker Stream，带有防死循环 Token 截断机制"""
 
     def __init__(self, session: "DockerSandboxSession"):
+        """初始化 Docker PTY 交互式会话实例"""
         self.session = session
         self.exec_stream = None
         self.buffer = ""
@@ -39,6 +41,7 @@ class DockerInteractiveTerminalSession(InteractiveTerminalSession):
         self.ansi_escape = re.compile(r"(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]")
 
     async def start(self, cmd: str, env: dict[str, str] | None = None) -> None:
+        """在容器中异步开启 PTY 终端执行指定命令"""
         if not self.session.container:
             raise RuntimeError("沙箱容器未启动")
 
@@ -62,6 +65,7 @@ class DockerInteractiveTerminalSession(InteractiveTerminalSession):
         self._read_task = asyncio.create_task(self._read_loop())
 
     async def _read_loop(self):
+        """异步循环读取容器执行输出流，并写入本地缓冲区（包含防超长截断）"""
         try:
             while True:
                 if not self.exec_stream:
@@ -82,18 +86,22 @@ class DockerInteractiveTerminalSession(InteractiveTerminalSession):
             logger.debug(f"[PTY] 流读取结束: {e}")
 
     async def send_input(self, text: str) -> None:
+        """向容器的 PTY 终端输入标准输入数据"""
         if self.exec_stream:
             await self.exec_stream.write_in(text.encode("utf-8"))
 
     async def read_output(self, timeout: int = 5) -> str:  # noqa: ASYNC109
+        """获取缓冲区最新的 50 行终端输出内容"""
         lines = self.buffer.split("\n")
         return "\n".join(lines[-50:]).strip()
 
     async def interrupt(self) -> None:
+        """发送 Ctrl+C 中断信号以打断当前执行进程"""
         if self.exec_stream:
             await self.exec_stream.write_in(b"\x03")
 
     async def close(self) -> None:
+        """关闭 PTY 读取循环任务和 exec 流资源"""
         if self._read_task:
             self._read_task.cancel()
         if self.exec_stream:
@@ -105,33 +113,41 @@ class DockerSandboxProcessStream(SandboxProcessStream):
     """包装 aiodocker 的流，使其符合 SandboxProcessStream 协议"""
 
     def __init__(self, docker_stream):
+        """初始化封装的 Docker 流程管道流"""
         self.stream = docker_stream
 
     async def read(self) -> ProcessStreamMessage | None:
+        """异步读取管道流中的数据块并转换为 ProcessStreamMessage"""
         msg = await self.stream.read_out()
         if msg is None:
             return None
         return ProcessStreamMessage(stream_type=msg.stream, data=msg.data)
 
     async def write(self, data: bytes) -> None:
+        """向管道中异步写入数据字节"""
         await self.stream.write_in(data)
 
     async def close(self) -> None:
+        """关闭 Docker 管道流资源"""
         await self.stream.close()
 
 
 class DockerSandboxSession(BaseSandboxSession):
+    """Docker 驱动底层的具体沙箱会话通道实现"""
+
     def __init__(
         self,
         state: SandboxSessionState,
         container: Any,
     ):
+        """初始化 Docker 沙箱会话并传入 Docker 容器句柄"""
         super().__init__(state)
         self.container = container
         self._vfs_helper_installed = False
         self._workspace_created = False
 
     async def is_alive(self) -> bool:
+        """查询底层 Docker 容器是否正处于 Running 状态"""
         if not self.container:
             return False
         try:
@@ -141,9 +157,11 @@ class DockerSandboxSession(BaseSandboxSession):
             return False
 
     async def create_pty_session(self) -> InteractiveTerminalSession:
+        """创建交互式 Docker 终端会话实例"""
         return DockerInteractiveTerminalSession(self)
 
     async def _ensure_workspace(self):
+        """确保在容器内成功创建该会话的工作空间目录"""
         if not self._workspace_created and self.container:
             exec_inst = await self.container.exec(
                 cmd=["/bin/sh", "-c", f"mkdir -p '{self.workspace_path}'"]
@@ -162,6 +180,7 @@ class DockerSandboxSession(BaseSandboxSession):
         cwd: str | None = None,
         env: dict[str, str] | None = None,
     ) -> AsyncGenerator[SandboxProcessStream, None]:
+        """在指定工作目录下创建一个流式交互的进程通道"""
         cmd_list = ["/bin/sh", "-c", command] if isinstance(command, str) else command
         env_list = [f"{k}={v}" for k, v in env.items()] if env else None
 
@@ -178,7 +197,7 @@ class DockerSandboxSession(BaseSandboxSession):
             yield DockerSandboxProcessStream(raw_stream)
 
     async def _ensure_vfs_helper(self):
-        """预置路径安全探针"""
+        """确保在沙箱容器内装有路径安全分析二进制文件"""
         if self._vfs_helper_installed:
             return
         check = await self.run_process(f"test -x {RESOLVE_PATH_HELPER.install_path}")
@@ -191,7 +210,7 @@ class DockerSandboxSession(BaseSandboxSession):
     async def _validate_remote_path(
         self, path: str | Path, for_write: bool = False, base_dir: str | None = None
     ) -> Path:
-        """基于沙箱内真实环境的防软链接逃逸解析"""
+        """使用 VFS 探针对给定的沙箱路径进行安全性防逃逸校验"""
         base_dir = base_dir or self.workspace_path
         target_posix = coerce_posix_path(path).as_posix()
         is_write = "1" if for_write else "0"
@@ -227,6 +246,7 @@ class DockerSandboxSession(BaseSandboxSession):
         env: dict[str, str] | None = None,
         on_output: Any = None,
     ) -> SandboxExecutionResult:
+        """在容器中指定目录下执行非交互式进程并等待其运行结果"""
         from zhenxun.services.ai.core.exceptions import SandboxFatalError
 
         self.touch()
@@ -288,6 +308,7 @@ class DockerSandboxSession(BaseSandboxSession):
             return SandboxExecutionResult(exit_code=-1, error=str(e))
 
     async def read(self, path: str | Path) -> bytes:
+        """通过 Docker Tar 归档接口读取容器内的指定文件内容"""
         self.touch()
         secure_path = await self._validate_remote_path(path, for_write=False)
         try:
@@ -305,6 +326,7 @@ class DockerSandboxSession(BaseSandboxSession):
             raise WorkspaceIOError(str(path), f"读取文件异常: {e}")
 
     async def write(self, path: str | Path, data: bytes) -> bool:
+        """通过 Docker put_archive 接口将文件写入容器的指定路径"""
         self.touch()
         secure_path = await self._validate_remote_path(path, for_write=True)
 
@@ -328,12 +350,14 @@ class DockerSandboxSession(BaseSandboxSession):
             return False
 
     async def rm(self, path: str | Path, recursive: bool = False) -> bool:
+        """在容器内执行 rm 命令移除指定文件或目录"""
         secure_path = await self._validate_remote_path(path, for_write=True)
         flag = "-rf" if recursive else "-f"
         res = await self.run_process(f"rm {flag} '{secure_path.as_posix()}'")
         return res.exit_code == 0
 
     async def mkdir(self, path: str | Path, parents: bool = False) -> bool:
+        """在容器内执行 mkdir 命令创建目录"""
         secure_path = await self._validate_remote_path(path, for_write=True)
         flag = "-p" if parents else ""
         res = await self.run_process(f"mkdir {flag} '{secure_path.as_posix()}'")
@@ -342,6 +366,7 @@ class DockerSandboxSession(BaseSandboxSession):
     async def upload_raw_dir(
         self, local_dir_path: str, sandbox_target_path: str
     ) -> bool:
+        """通过打包 tar 归档将宿主机本地目录上传至容器内指定路径"""
         aio_path = anyio.Path(local_dir_path)
         if not await aio_path.exists() or not await aio_path.is_dir():
             return False
@@ -369,7 +394,7 @@ class DockerSandboxSession(BaseSandboxSession):
             return False
 
     async def close(self) -> None:
-        """关闭会话：仅清理工作区，不销毁共享容器"""
+        """关闭会话并在容器内清理本会话对应的工作空间目录"""
         try:
             if await self.is_alive():
                 await self.rm(self.workspace_path, recursive=True)
@@ -378,6 +403,8 @@ class DockerSandboxSession(BaseSandboxSession):
 
 
 class DockerSandboxClient(BaseSandboxClient):
+    """基于 Docker 实现的沙箱物理资源管理器类"""
+
     backend_id = "docker"
     _global_docker_client: ClassVar[Any] = None
     _containers: ClassVar[dict[str, Any]] = {}
@@ -390,9 +417,24 @@ class DockerSandboxClient(BaseSandboxClient):
         session_id: str,
         blueprint: SandboxBlueprint | None = None,
     ) -> BaseSandboxSession:
+        """建立或复用物理容器，并为该会话初始化专属的工作目录和 Python 虚拟环境"""
         bp = blueprint or SandboxBlueprint()
         eff_image = bp.image or get_llm_config().sandbox.docker_image
         eff_cname = bp.container_name
+
+        proxy_envs = []
+        if BotConfig.system_proxy:
+            sandbox_proxy = BotConfig.system_proxy.replace(
+                "127.0.0.1", "host.docker.internal"
+            ).replace("localhost", "host.docker.internal")
+
+            proxy_envs = [
+                f"HTTP_PROXY={sandbox_proxy}",
+                f"HTTPS_PROXY={sandbox_proxy}",
+                f"http_proxy={sandbox_proxy}",
+                f"https_proxy={sandbox_proxy}",
+                f"ALL_PROXY={sandbox_proxy}",
+            ]
 
         async with self._init_lock:
             if DockerSandboxClient._global_docker_client is None:
@@ -465,6 +507,7 @@ class DockerSandboxClient(BaseSandboxClient):
                         "HF_HOME=/tmp/hf_cache",
                         "JUPYTER_RUNTIME_DIR=/tmp/jupyter_runtime",
                         "JUPYTER_DATA_DIR=/tmp/jupyter_data",
+                        *proxy_envs,
                     ],
                     "Cmd": [
                         "/bin/sh",
@@ -476,6 +519,7 @@ class DockerSandboxClient(BaseSandboxClient):
                     "HostConfig": {
                         "PortBindings": port_bindings,
                         "Binds": binds,
+                        "ExtraHosts": ["host.docker.internal:host-gateway"],
                     },
                     "Labels": {
                         "zhenxun_component": "sandbox",
@@ -549,10 +593,11 @@ class DockerSandboxClient(BaseSandboxClient):
         return session
 
     async def resume(self, state: SandboxSessionState) -> BaseSandboxSession:
+        """暂不支持通过还原状态重建 Docker 沙箱会话"""
         raise NotImplementedError("Docker Driver 不支持无状态重建恢复。")
 
     async def delete(self, session: BaseSandboxSession) -> None:
-        """触发会话销毁及引用计数物理回收"""
+        """清理会话工作区，并当物理容器处于长闲置时触发物理销毁回收"""
         await session.close()
 
         from zhenxun.services.ai.sandbox.manager import sandbox_manager
@@ -584,6 +629,7 @@ class DockerSandboxClient(BaseSandboxClient):
 
     @classmethod
     async def close_env(cls):
+        """清理释放全部管理的 Docker 容器并关闭 Docker 客户端连接"""
         for cname, container in cls._containers.items():
             try:
                 await container.delete(force=True)
@@ -602,7 +648,7 @@ class DockerSandboxClient(BaseSandboxClient):
 
     @classmethod
     async def silent_prune_orphans(cls):
-        """供 manager 后台延迟调用的静默清理函数"""
+        """在系统启动时静默搜寻并强力删除带有残留标记的孤儿容器"""
         try:
             async with aiodocker.Docker() as docker:
                 await asyncio.wait_for(docker.system.info(), timeout=2.0)

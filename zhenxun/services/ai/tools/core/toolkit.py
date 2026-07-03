@@ -1,9 +1,10 @@
 from collections.abc import Callable
 import copy
+import inspect
 from typing import Any, ClassVar
 
 from zhenxun.services.ai.core.protocols.tool import ToolExecutable
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.tools.models import (
     ResolvedToolPayload,
@@ -51,19 +52,27 @@ class BaseToolkit:
             tools: 除了带有 @tool 装饰器的方法外，要额外动态注入的独立工具列表。
             instructions: 当前工具箱实例的系统提示词补充说明。
         """
+        base_config = getattr(self.__class__, "_default_config", ToolkitConfig())
+
         if config is not None:
             merged_dict = {
-                **model_dump(self._default_config, exclude_unset=True),
+                **model_dump(base_config, exclude_unset=True),
                 **model_dump(config, exclude_unset=True),
             }
             self.config = ToolkitConfig(**merged_dict)
         else:
-            self.config = ToolkitConfig(
-                prefix=prefix,
-                include=include,
-                exclude=exclude,
-                shared_options=shared_options,
-            )
+            overrides = {}
+            if prefix is not None:
+                overrides["prefix"] = prefix
+            if include is not None:
+                overrides["include"] = include
+            if exclude is not None:
+                overrides["exclude"] = exclude
+            if shared_options is not None:
+                overrides["shared_options"] = shared_options
+
+            merged_dict = {**model_dump(base_config, exclude_unset=True), **overrides}
+            self.config = ToolkitConfig(**merged_dict)
 
         if self.config.prefix is None:
             self.config.prefix = ""
@@ -101,6 +110,7 @@ class BaseToolkit:
     def _apply_global_settings(
         self, original_name: str, settings: ToolOptions
     ) -> ToolOptions:
+        """合并工具箱全局配置到单个工具的配置项中"""
         if self.config.shared_options:
             settings = self.config.shared_options.merge(settings)
 
@@ -143,15 +153,17 @@ class BaseToolkit:
         )
 
     async def get_tools(self, context: RunContext | None = None) -> dict[str, BaseTool]:
+        """获取该工具箱中所有合法注册的工具实例映射表"""
         if self._cached_tools is not None:
             return self._cached_tools
 
         tools_dict: dict[str, BaseTool] = {}
         for t in self._injected_tools:
             t.parent_toolkit = self
+            if self.config.prefix and not t.name.startswith(self.config.prefix):
+                t.name = f"{self.config.prefix}{t.name}"
+            t.settings = self._apply_global_settings(t.name, t.settings)
             tools_dict[t.name] = t
-
-        import inspect
 
         for name, member in inspect.getmembers(self.__class__):
             if hasattr(member, "__toolkit_tool__"):
@@ -201,6 +213,7 @@ class BaseToolkit:
         return f"<{tag_name}>\n{text}\n</{tag_name}>"
 
     def prefixed(self, prefix: str) -> "BaseToolkit":
+        """克隆工具箱并为其中所有工具追加统一的前缀"""
         new_tk = copy.copy(self)
         new_tk.config = model_copy(self.config, deep=True)
         current_prefix = new_tk.config.prefix or ""
@@ -209,6 +222,7 @@ class BaseToolkit:
         return new_tk
 
     def filtered(self, filter_func: Callable[[BaseTool], bool]) -> "BaseToolkit":
+        """克隆工具箱并通过自定义过滤器筛选其中的工具"""
         new_tk = copy.copy(self)
         new_tk.config = model_copy(self.config, deep=True)
         old_filter = self._instance_filter

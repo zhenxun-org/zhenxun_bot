@@ -115,10 +115,21 @@ class BaseOutputProcessor(Generic[OutputDataT]):
                 repaired_obj = json_repair.loads(text, skip_json_loads=True)
                 return model_validate(self.target_model, repaired_obj)
             except Exception as repair_error:
-                logger.error(
-                    f"LLM结构化输出校验最终失败: {repair_error}",
-                    e=repair_error,
+                logger.debug(
+                    "JSON修复或模型校验失败，将交由大模型进行反思自愈: "
+                    f"{type(repair_error).__name__}"
                 )
+                if isinstance(repair_error, ValidationError):
+                    error_msgs = []
+                    for err in repair_error.errors():
+                        loc = ".".join(str(x) for x in err["loc"]) or "root"
+                        msg = err.get("msg", "")
+                        error_msgs.append(f"字段 `{loc}`: {msg}")
+                    clean_error_str = "\n".join(error_msgs)
+                    raise SchemaParseError(
+                        f"数据内容未通过规则校验:\n{clean_error_str}"
+                    )
+
                 raise SchemaParseError(
                     f"JSON格式损坏或字段不匹配，未能通过Schema验证: {repair_error}"
                 )

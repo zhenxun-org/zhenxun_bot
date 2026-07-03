@@ -9,6 +9,12 @@ class ModelRetry(Exception):
     """用于通知大模型修正并重试的异常"""
 
     def __init__(self, message: str):
+        """
+        初始化用于通知大模型重试的异常。
+
+        参数：
+            message: 用于提示大模型的具体重试和自我纠错信息。
+        """
         self.message = message
         super().__init__(message)
 
@@ -17,6 +23,12 @@ class SchemaParseError(ModelRetry):
     """格式解析异常。当大模型返回的 JSON 损坏或不符合 Schema 时抛出。"""
 
     def __init__(self, message: str):
+        """
+        初始化 Schema 格式解析错误异常。
+
+        参数：
+            message: 详细的 JSON 解析失败或 Schema 校验报错信息。
+        """
         super().__init__(message)
 
 
@@ -24,6 +36,12 @@ class GuardrailViolationError(ModelRetry):
     """护栏违规异常。当大模型返回的数据格式正确，但违反业务规则时抛出。"""
 
     def __init__(self, message: str):
+        """
+        初始化安全护栏校验未通过的异常。
+
+        参数：
+            message: 触发业务护栏违规拦截的详细原因说明。
+        """
         super().__init__(message)
 
 
@@ -41,6 +59,13 @@ class ToolFatalError(ControlFlowExit):
     """
 
     def __init__(self, message: str, display_content: str | None = None):
+        """
+        初始化不可恢复的致命工具执行异常。
+
+        参数：
+            message: 供大模型及系统调试日志记录的底层致命错误详情。
+            display_content: 直接向终端用户呈现的友好拦截文案。
+        """
         self.message = message
         self.display_content = display_content or f"❌ 工具遇到致命错误: {message}"
         super().__init__(self.message)
@@ -50,6 +75,14 @@ class GuardrailFatalException(ControlFlowExit):
     """护栏致命拦截异常 (触发 ABORT/REJECT 时抛出)"""
 
     def __init__(self, guard_name: str, reason: str, display: str | None = None):
+        """
+        初始化护栏强制拦截中断异常。
+
+        参数：
+            guard_name: 拦截本次执行的安全护栏规则名称。
+            reason: 拦截或拒绝的底层业务决策详情。
+            display: 直接反馈给用户的风控友好提示消息。
+        """
         self.guard_name = guard_name
         self.reason = reason
         self.display = display or f"🛡️ 安全拦截: {reason}"
@@ -64,6 +97,12 @@ class ToolRetryError(Exception):
     """
 
     def __init__(self, message: str):
+        """
+        初始化触发大模型反思与自愈的可恢复工具错误。
+
+        参数：
+            message: 会被传递给大模型用于进行 Reflexion 的错误反馈 Prompt。
+        """
         self.message = message
         super().__init__(self.message)
 
@@ -76,6 +115,13 @@ class ToolFinishException(ToolFatalError):
     """
 
     def __init__(self, message: str, display_content: str | None = None):
+        """
+        初始化用于中断大模型思考循环并返回结果的结束异常。
+
+        参数：
+            message: 内部记录的中断异常信息.
+            display_content: 中断执行流后，向用户展现的最终文本。
+        """
         super().__init__(message, display_content)
 
 
@@ -83,6 +129,13 @@ class AbortException(ControlFlowExit):
     """异常中止当前 Agent 思考流。"""
 
     def __init__(self, reason: str, display: Any = None):
+        """
+        初始化用于强制中止 Agent 推理执行流的异常。
+
+        参数：
+            reason: 触发强制中断的技术或业务原因。
+            display: 中断后向用户展示的显示结果。
+        """
         self.reason = reason
         self.display = display
         super().__init__(f"Aborted: {reason}")
@@ -96,6 +149,13 @@ class InterventionHandledException(ControlFlowExit):
     """
 
     def __init__(self, message: str, display_content: str | None = None):
+        """
+        初始化干预处理成功以安全熔断生命周期的异常。
+
+        参数：
+            message: 内部调试与审计的干预详情描述。
+            display_content: 向发起干预的用户端展现的进度提醒提示。
+        """
         self.message = message
         self.display_content = display_content
         super().__init__(self.message)
@@ -105,6 +165,13 @@ class ConcurrencyRejectException(ControlFlowExit):
     """并发拒绝异常。当 Agent 设置为 REJECT 且正在忙碌时抛出。"""
 
     def __init__(self, message: str, display: Any = None):
+        """
+        初始化并发调度拒绝接收新任务的异常。
+
+        参数：
+            message: 系统内部拦截的并发冲突详细说明。
+            display: 提示给并发用户的友好限流排队通知。
+        """
         self.message = message
         self.display = display or "⏳ 智能体正在处理您的上一个请求，请稍后再试~"
         super().__init__(message)
@@ -114,6 +181,12 @@ class ConcurrencyInterruptException(ControlFlowExit):
     """并发打断异常。当 Agent 设置为 INTERRUPT 且被新请求打断时抛出。"""
 
     def __init__(self, message: str):
+        """
+        初始化并发抢占执行被打断的异常。
+
+        参数：
+            message: 系统内部调度器生成的抢占与接管日志描述。
+        """
         self.message = message
         super().__init__(message)
 
@@ -127,6 +200,14 @@ class NeedsInputException(Exception):
     def __init__(
         self, missing_field: str, missing_description: str, original_kwargs: dict
     ):
+        """
+        初始化 HITL 人机交互表单输入暂停请求的异常。
+
+        参数：
+            missing_field: 缺失的必填参数字段名。
+            missing_description: 字段的提示描述（通常由 Field 描述提取）。
+            original_kwargs: 抛出异常前工具已成功收集的其它参数字典。
+        """
         self.missing_field = missing_field
         self.missing_description = missing_description
         self.original_kwargs = original_kwargs
@@ -142,6 +223,13 @@ class NeedsAuthException(Exception):
     """
 
     def __init__(self, provider: str, message: str):
+        """
+        初始化因凭证失效需重新发起用户鉴权挂起的异常。
+
+        参数：
+            provider: 需要发起授权验证的外部 OAuth/API 服务商标识。
+            message: 授权校验失败的诊断描述。
+        """
         self.provider = provider
         self.message = message
         super().__init__(f"Needs auth for: {provider} - {message}")
@@ -151,6 +239,14 @@ class SandboxPathEscapeError(Exception):
     """当沙箱内的路径解析结果试图逃逸出允许的工作区根目录时抛出"""
 
     def __init__(self, path: str, resolved_path: str | None = None, reason: str = ""):
+        """
+        初始化路径安全越界逃逸拦截异常。
+
+        参数：
+            path: 引起逃逸嫌疑的原始路径参数。
+            resolved_path: 物理求值后的解析路径（如果有）。
+            reason: 触发路径校验失败的底层判决依据。
+        """
         self.path = path
         self.resolved_path = resolved_path
         self.reason = reason
@@ -166,6 +262,14 @@ class WorkspaceIOError(Exception):
     """沙箱文件系统读写操作失败"""
 
     def __init__(self, path: str, message: str, cause: Exception | None = None):
+        """
+        初始化沙箱文件系统底层读写操作失败的 IO 异常。
+
+        参数：
+            path: 读写发生故障的物理或沙箱逻辑路径。
+            message: 底层 IO 操作报错原因详细说明。
+            cause: 触发该 IO 错误的根源 Python 底层 Exception 实例。
+        """
         self.path = path
         self.cause = cause
         super().__init__(f"沙箱 IO 异常 [{path}]: {message}")
@@ -175,6 +279,13 @@ class SandboxFatalError(ToolFatalError):
     """沙箱底层容器发生致命崩溃（如 OOM, 被宿主机强杀等）"""
 
     def __init__(self, message: str, display_content: str | None = None):
+        """
+        初始化沙箱执行容器严重失联或崩溃的致命异常。
+
+        参数：
+            message: 容器底层抛出的系统异常详情或心跳超时诊断。
+            display_content: 向终端用户反馈的系统故障提醒。
+        """
         display = display_content or f"❌ 沙箱不可用: {message}"
         super().__init__(message, display_content=display)
 
@@ -188,6 +299,14 @@ class LLMException(Exception):
         details: dict[str, Any] | None = None,
         cause: Exception | None = None,
     ):
+        """
+        初始化底层大模型 API 调用及服务异常。
+
+        参数：
+            message: 通用的调用错误或失败总结说明。
+            details: 包含接口名、重试指示、服务端回传原始信息的字典。
+            cause: 触发此错误的根源协议请求异常实例。
+        """
         self.message = message
         self.details = details or {}
         self.cause = cause

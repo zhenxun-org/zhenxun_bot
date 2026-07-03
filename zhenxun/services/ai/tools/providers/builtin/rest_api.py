@@ -4,7 +4,7 @@ from typing import Any, Literal
 import httpx
 
 from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.models import ToolResult

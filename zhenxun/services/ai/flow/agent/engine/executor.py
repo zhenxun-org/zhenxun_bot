@@ -3,6 +3,7 @@ import asyncio
 import json
 from typing import Any, cast
 
+from zhenxun.services.ai.capabilities import CombinedCapability
 from zhenxun.services.ai.core.engine.context_renderer import ContextConverter
 from zhenxun.services.ai.core.engine.token_counter import (
     parse_usage_info,
@@ -36,9 +37,12 @@ from zhenxun.services.ai.core.stream_events import (
 )
 from zhenxun.services.ai.flow.agent.engine.directive import (
     DirectiveHandlerFunc,
+    directive_manager,
 )
 from zhenxun.services.ai.flow.agent.models import AgentRunResources, AgentState
+from zhenxun.services.ai.llm.engine.router import LLMOrchestrator
 from zhenxun.services.ai.run import AgentRunResult, RunContext
+from zhenxun.services.ai.run.session import session_manager
 from zhenxun.services.ai.tools.engine.executor import ToolExecutor
 from zhenxun.services.ai.tools.models import ToolResult
 from zhenxun.services.log import logger
@@ -279,9 +283,6 @@ class StandardAgentExecutor(BaseAgentExecutor):
         extra: dict[str, Any] | None = None,
         cancellation_token: Any = None,
     ) -> ChatResponse:
-        from zhenxun.services.ai.capabilities import CombinedCapability
-        from zhenxun.services.ai.llm.engine.router import LLMOrchestrator
-
         request = ChatRequest(
             messages=messages,
             config=config,
@@ -315,8 +316,6 @@ class StandardAgentExecutor(BaseAgentExecutor):
     ) -> AgentRunResult[Any]:
         """覆盖基类的模板方法，实现灵活的 while 控制流和 FOLLOW_UP 合并"""
         await self.on_start(state, resources)
-        from zhenxun.services.ai.run.session import session_manager
-
         session_info = await session_manager.get_or_create(
             resources.run_context.session_id or "default_session"
         )
@@ -388,9 +387,6 @@ class StandardAgentExecutor(BaseAgentExecutor):
         self, state: AgentState, resources: AgentRunResources
     ) -> None:
         run_context = resources.run_context
-
-        from zhenxun.services.ai.run.session import session_manager
-
         session_info = await session_manager.get_or_create(
             run_context.session_id or "default_session"
         )
@@ -499,8 +495,6 @@ class StandardAgentExecutor(BaseAgentExecutor):
                         None,
                     )
                     if return_part:
-                        from zhenxun.services.ai.tools.models import ToolResult
-
                         box["result"] = ToolResult(output=return_part.output)
             else:
                 client_tool_calls.append(call)
@@ -605,8 +599,6 @@ class StandardAgentExecutor(BaseAgentExecutor):
         tool_results = state.current_tool_results
         if not tool_calls or not tool_results:
             return
-
-        from zhenxun.services.ai.flow.agent.engine.directive import directive_manager
 
         for i, res_or_exc in enumerate(tool_results):
             original_call = tool_calls[i]

@@ -1,12 +1,13 @@
 import asyncio
 from collections.abc import AsyncIterator
+import contextlib
 from typing import TYPE_CHECKING, Any
 import uuid
 
+from nonebot.params import Depends
+
 if TYPE_CHECKING:
     from zhenxun.services.ai.flow.workflow.nodes import NodeSource
-    from zhenxun.services.ai.run import StreamedRunResult
-
 
 from zhenxun.services.ai.core.exceptions import ControlFlowExit, ToolRetryError
 from zhenxun.services.ai.core.messages import PromptInput, UsageInfo
@@ -18,9 +19,16 @@ from zhenxun.services.ai.flow.workflow.types import (
     StepOutput,
     WorkflowRunResult,
 )
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run.context import RunContext
+from zhenxun.services.ai.run.models import (
+    AgentRunEnd,
+    AgentRunError,
+    AgentRunResult,
+    StreamedRunResult,
+)
 from zhenxun.services.ai.tools.core.tool import FunctionTool
 from zhenxun.services.log import logger
+from zhenxun.utils.message import MessageUtils
 
 
 class Workflow(BaseRunnable[WorkflowRunResult]):
@@ -52,6 +60,7 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         safe_context: RunContext,
         final_output: StepOutput,
     ) -> WorkflowRunResult:
+        """根据执行链上的全量输出构建最终的工作流执行结果对象"""
         flat_outputs = {}
 
         def _extract(out: StepOutput):
@@ -91,8 +100,6 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
 
     def bind(self, **kwargs: Any) -> Any:
         """DI 注入语法糖"""
-        from nonebot.params import Depends
-
         async def _dependency() -> "Workflow":
             return self
 
@@ -112,8 +119,6 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         返回:
             WorkflowRunResult: 包含执行状态、断点快照、各节点产出的全量工作流结果对象。
         """
-        from zhenxun.utils.message import MessageUtils
-
         ctx = RunContext()
         bot = ctx.get_bot()
         event = ctx.get_event()
@@ -186,8 +191,6 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
 
             raise e
 
-    import contextlib
-
     @contextlib.asynccontextmanager
     async def run_stream(
         self,
@@ -197,9 +200,6 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         **kwargs: Any,
     ) -> AsyncIterator["StreamedRunResult[Any]"]:
         """对齐 BaseRunnable 接口的流式上下文管理器"""
-        from zhenxun.services.ai.run import StreamedRunResult
-        from zhenxun.services.ai.run.models import AgentRunError
-
         event_bus = EventBus()
         if context:
             context.run.event_bus = event_bus
@@ -226,7 +226,7 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         context: RunContext | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
-        """原 arun_stream 逻辑改名，供内部 _execution_task 调用"""
+        """流式执行工作流节点树的内部实现"""
         session_id = (
             context.session_id if context and context.session_id else f"wf_{self.id}"
         )
@@ -251,9 +251,6 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
             if final_output:
                 logger.debug(f"🏭 **工作流 [{self.name}] 运行结束**")
 
-                from zhenxun.services.ai.run import AgentRunResult
-                from zhenxun.services.ai.run.models import AgentRunEnd
-
                 wf_result = self._build_result(
                     initial_input, safe_context, final_output
                 )
@@ -272,6 +269,7 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         user_auth_data: dict[str, Any] | None = None,
         context: RunContext | None = None,
     ) -> WorkflowRunResult:
+        """在工作流发生挂起或断点后，传入人工反馈数据继续运行"""
         safe_context = context or RunContext(session_id=f"wf_{self.id}")
         safe_context.state.update(run_result.state)
 
@@ -301,6 +299,7 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         return self._build_result(resume_input, safe_context, final_output)
 
     def as_tool(self, tool_name: str | None = None) -> FunctionTool:
+        """将工作流封装并导出为可供 Agent 直接调用的 FunctionTool 实例"""
         async def _execute_workflow_tool(prompt: str, context: RunContext) -> str:
             run_result = await self.run(prompt=prompt, context=context)
             output = run_result.final_output

@@ -1,4 +1,4 @@
-from .decorators import Rules, tool
+from .decorators import Rules, tool, toolkit
 from .schema import (
     FieldPermission,
     RequireAdminLevel,
@@ -20,4 +20,5 @@ __all__ = [
     "RequireSuperUser",
     "Rules",
     "tool",
+    "toolkit",
 ]

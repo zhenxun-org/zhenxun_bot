@@ -162,20 +162,29 @@ class StepMeta(BaseModel):
     """承载工作流节点装饰器元数据的内部模型"""
 
     name: str | None = None
+    """节点名称"""
     requires_confirmation: bool = False
+    """是否需要在执行前触发人工二次确认"""
     confirmation_message: str | None = None
+    """二次确认的审批提示消息"""
     failure_policy: Any = None
+    """节点执行失败时的降级/容错策略"""
 
 
 class ConditionMeta(BaseModel):
     name: str | None = None
+    """条件判定节点名称"""
     if_true: list[Any] = Field(default_factory=list)
+    """条件为真（True）时执行的后继节点列表"""
     if_false: list[Any] = Field(default_factory=list)
+    """条件为假（False）时执行的后继节点列表"""
 
 
 class RouterMeta(BaseModel):
     name: str | None = None
+    """多路分发路由节点名称"""
     choices: list[Any] = Field(default_factory=list)
+    """路由器可供选择的分支路由列表"""
 
 
 class Steps(BaseNode):

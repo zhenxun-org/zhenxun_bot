@@ -462,7 +462,6 @@ class CircuitBreakerManager:
 
     def get_best_fallback_route(self, route_names: list[str]) -> str:
         """选择处于熔断冷却最少或最健康的备选路由"""
-
         def get_cooldown(name: str) -> float:
             stats = self.state.routes.get(name)
             return stats.cooldown_until if stats else 0.0

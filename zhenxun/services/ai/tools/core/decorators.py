@@ -4,53 +4,99 @@ from collections.abc import Callable
 from typing import Any
 
 from zhenxun.services.ai.capabilities import AbstractCapability
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run.context import RunContext
+from zhenxun.services.ai.tools.core.capabilities import (
+    AdminLevelCapability,
+    ApprovalCapability,
+    CacheCapability,
+    FallbackCapability,
+    GroupOnlyCapability,
+    InteractiveCapability,
+    LifecycleCapability,
+    SuperuserCapability,
+)
 from zhenxun.services.ai.tools.models import ToolOptions
+from zhenxun.utils.pydantic_compat import model_copy
 
 
-def _update_settings(func: Callable, **kwargs) -> Callable:
-    """叠加协议底层：创建或更新函数的 __tool_settings__"""
-    if not hasattr(func, "__tool_settings__"):
-        setattr(func, "__tool_settings__", ToolOptions())
-    settings: ToolOptions = getattr(func, "__tool_settings__")
-    for k, v in kwargs.items():
-        if k == "capabilities":
-            settings.capabilities.extend(v)
-        elif k == "metadata":
-            settings.metadata.update(v)
+def toolkit(
+    rules: list[ToolOptions] | ToolOptions | None = None,
+    prefix: str = "",
+    instructions: str | None = None,
+):
+    """
+    类级别的工具箱装饰器，用于向内部所有 @tool 统一下发配置规则、名称前缀以及工具箱级系统提示词说明。
+
+    参数:
+        rules: 声明式规则集合或单个规则，应用于工具箱内所有工具。
+        prefix: 工具箱内所有工具的名称前缀，通常以下划线结尾。
+        instructions: 工具箱级别的系统提示词补充说明，大模型可见。
+
+    返回:
+        Callable: 装饰器函数，接收一个类并返回该类。
+    """  # noqa: E501
+
+    def decorator(cls):
+        merged_options = ToolOptions()
+        if rules:
+            rule_list = rules if isinstance(rules, list) else [rules]
+            for r in rule_list:
+                if isinstance(r, ToolOptions):
+                    merged_options = merged_options.merge(r)
+
+        from zhenxun.services.ai.tools.models import ToolkitConfig
+
+        base_config = getattr(cls, "_default_config", None) or ToolkitConfig()
+        new_config = model_copy(base_config, deep=True)
+
+        if prefix:
+            new_config.prefix = prefix
+
+        if new_config.shared_options:
+            new_config.shared_options = new_config.shared_options.merge(merged_options)
         else:
-            setattr(settings, k, v)
-    return func
+            new_config.shared_options = merged_options
+
+        cls._default_config = new_config
+
+        if instructions is not None:
+            cls.default_instructions = instructions
+
+        return cls
+
+    return decorator
 
 
 def require_sandbox(
     python_packages: list[str] | None = None,
     node_packages: list[str] | None = None,
     system_packages: list[str] | None = None,
-):
+) -> ToolOptions:
     """显式声明该工具所需安装的沙箱环境依赖"""
-
-    def decorator(func):
-        setattr(
-            func,
-            "__sandbox_requirements__",
-            {
-                "python": python_packages or [],
-                "node": node_packages or [],
-                "system": system_packages or [],
-            },
-        )
-        return func
-
-    return decorator
+    return ToolOptions(
+        sandbox_requirements={
+            "python": python_packages or [],
+            "node": node_packages or [],
+            "system": system_packages or [],
+        }
+    )
 
 
 class ToolkitMethodDescriptor:
     """用于 Toolkit 类方法的描述符，确保在实例化时绑定正确的 self 并生成 FunctionTool"""
 
     def __init__(
-        self, func: Callable, name: str, description: str, settings: ToolOptions
+        self, func: Callable, name: str, description: str | None, settings: ToolOptions
     ):
+        """
+        初始化 Toolkit 类方法描述符。
+
+        参数:
+            func: 底层的 Python 可执行函数对象。
+            name: 大模型识别与调用的工具名。
+            description: 大模型阅读的工具功能描述说明。
+            settings: 工具的声明式高阶配置项 (ToolOptions)。
+        """
         self.func = func
         self.name = name
         self.description = description
@@ -64,7 +110,6 @@ class ToolkitMethodDescriptor:
         import types
 
         from zhenxun.services.ai.tools.core.tool import FunctionTool
-        from zhenxun.utils.pydantic_compat import model_copy
 
         bound_func = types.MethodType(self.func, instance)
         return FunctionTool(
@@ -82,6 +127,7 @@ class ToolkitMethodDescriptor:
 def tool(
     name: str | None = None,
     description: str | None = None,
+    rules: list[ToolOptions] | ToolOptions | None = None,
     settings: ToolOptions | None = None,
     tags: list[str] | None = None,
     auto_register: bool = False,
@@ -91,23 +137,26 @@ def tool(
     将普通函数或类方法注册为 LLM 工具的统一装饰器大一统。
 
     参数:
-        name: 工具的名称(英文字母及下划线)。
-            大模型将看到此名称。如果为空则默认使用函数名。
-        description: 工具描述。
-            大模型将基于此决定何时、如何使用该工具。如果为空，将读取函数 docstring。
-        settings: 工具的高阶配置对象 (ToolOptions)。
-            用于控制极速缓存、人工审批拦截、静默执行等扩展能力。
-        tags: 工具的标签列表。
-            用于被 Agent 的智能字符串路由识别并进行能力注入。
-        auto_register: 是否自动注册到当前命名空间的工具注册表。
-            默认为 False，开发者需要显式传递实例。若为 True 方可通过字符串调用。
-        require_prefix: 是否自动添加插件命名空间前缀（仅对游离函数生效）。默认为 False。
+        name: 工具的名称(英文字母及下划线)，大模型将看到此名称，如果为空则默认使用函数名。
+        description: 工具描述，大模型将基于此决定何时、如何使用该工具，如果为空，将读取函数 docstring。
+        rules: 声明式规则集合预设列表，用于接收通过 Rules.xxx() 生成的策略载荷并组合。
+        settings: 工具的高阶配置对象 (ToolOptions)，用于控制极速缓存、人工审批拦截、静默执行等扩展能力。
+        tags: 工具的标签列表，用于被 Agent 的智能字符串路由识别并进行能力注入。
+        auto_register: 是否自动注册到当前命名空间的工具注册表，默认为 False，若为 True 方可通过字符串调用。
+        require_prefix: 是否自动添加插件命名空间前缀（仅对游离函数生效），默认为 False。
     返回:
         Callable | FunctionTool: 包装后的函数或方法。
-    """
+    """  # noqa: E501
 
     def decorator(func: Callable):
         base_settings = settings or ToolOptions()
+
+        if rules:
+            rule_list = rules if isinstance(rules, list) else [rules]
+            for r in rule_list:
+                if isinstance(r, ToolOptions):
+                    base_settings = base_settings.merge(r)
+
         if tags:
             base_settings.tags = list(set(base_settings.tags + tags))
         existing_settings = getattr(func, "__tool_settings__", None)
@@ -116,10 +165,13 @@ def tool(
 
         reqs = getattr(func, "__sandbox_requirements__", None)
         if reqs:
-            base_settings.sandbox_requirements = reqs
+            if not base_settings.sandbox_requirements:
+                base_settings.sandbox_requirements = reqs
+            else:
+                base_settings.sandbox_requirements.update(reqs)
 
         tool_name = name or func.__name__
-        tool_desc = description or func.__doc__ or "未提供描述"
+        tool_desc = description
 
         import inspect
 
@@ -172,30 +224,19 @@ def tool(
     return decorator
 
 
-def with_cache(ttl: int = 3600, cache_function: Callable | None = None):
+def with_cache(ttl: int = 3600, cache_function: Callable | None = None) -> ToolOptions:
     """开启极速缓存，阻止参数相同的重复请求发往底层。"""
-
-    from zhenxun.services.ai.tools.core.capabilities import CacheCapability
-
-    def decorator(func: Callable):
-        return _update_settings(
-            func,
-            capabilities=[CacheCapability(ttl=ttl, cache_function=cache_function)],
-        )
-
-    return decorator
+    return ToolOptions(
+        capabilities=[CacheCapability(ttl=ttl, cache_function=cache_function)]
+    )
 
 
-def silent():
+def silent() -> ToolOptions:
     """静默执行。工具执行过程与结果不会作为界面流渲染给用户，仅作大模型内部参考。"""
-
-    def decorator(func: Callable):
-        return _update_settings(func, silent=True)
-
-    return decorator
+    return ToolOptions(silent=True)
 
 
-def direct_reply():
+def direct_reply() -> ToolOptions:
     """直出模式。工具执行完毕后强制中断大模型的思考循环，将工具输出作为最终回答返回。"""
 
     class DirectReplyCapability(AbstractCapability):
@@ -209,139 +250,70 @@ def direct_reply():
                 return EndRunResult(output=result.output)
             return EndRunResult(output=result)
 
-    def decorator(func: Callable):
-        return _update_settings(func, capabilities=[DirectReplyCapability()])
-
-    return decorator
+    return ToolOptions(capabilities=[DirectReplyCapability()])
 
 
-def interactive():
+def interactive() -> ToolOptions:
     """开启交互式参数补全。如果参数缺失或校验失败，
     会主动通过 Bot 向用户提问要求补全。"""
-    from zhenxun.services.ai.tools.core.capabilities import InteractiveCapability
-
-    def decorator(func: Callable):
-        return _update_settings(func, capabilities=[InteractiveCapability()])
-
-    return decorator
+    return ToolOptions(capabilities=[InteractiveCapability()])
 
 
-def require_approval():
+def require_approval() -> ToolOptions:
     """高危操作标记。调用前将拦截并发送至群组要求超管人工审核。"""
-    from zhenxun.services.ai.tools.core.capabilities import ApprovalCapability
-
-    def decorator(func: Callable):
-        return _update_settings(func, capabilities=[ApprovalCapability()])
-
-    return decorator
+    return ToolOptions(capabilities=[ApprovalCapability()])
 
 
-def fallback(tool_name: str):
+def fallback(tool_name: str) -> ToolOptions:
     """降级备用工具。主工具执行失败时自动路由至备用工具。"""
-    from zhenxun.services.ai.tools.core.capabilities import FallbackCapability
-
-    def decorator(func: Callable):
-        return _update_settings(
-            func,
-            capabilities=[FallbackCapability(fallback_tool_name=tool_name)],
-        )
-
-    return decorator
+    return ToolOptions(capabilities=[FallbackCapability(fallback_tool_name=tool_name)])
 
 
-def before_execute(hook_func: Callable):
+def before_execute(hook_func: Callable) -> ToolOptions:
     """生命周期拦截：在工具即将执行前触发，可在此篡改全局状态或通过依赖注入访问当前参数。"""
-    from zhenxun.services.ai.tools.core.capabilities import LifecycleCapability
-
-    def decorator(func: Callable):
-        return _update_settings(
-            func, capabilities=[LifecycleCapability(before_execute=hook_func)]
-        )
-
-    return decorator
+    return ToolOptions(capabilities=[LifecycleCapability(before_execute=hook_func)])
 
 
-def after_execute(hook_func: Callable):
+def after_execute(hook_func: Callable) -> ToolOptions:
     """生命周期拦截：在工具执行完毕后触发，可在此修改将发往大模型的返回结果。"""
-    from zhenxun.services.ai.tools.core.capabilities import LifecycleCapability
-
-    def decorator(func: Callable):
-        return _update_settings(
-            func, capabilities=[LifecycleCapability(after_execute=hook_func)]
-        )
-
-    return decorator
+    return ToolOptions(capabilities=[LifecycleCapability(after_execute=hook_func)])
 
 
-def validate_args(hook_func: Callable):
+def validate_args(hook_func: Callable) -> ToolOptions:
     """生命周期拦截：在工具反序列化校验前触发。如果校验失败直接抛出异常，将触发大模型重试机制。"""
-    from zhenxun.services.ai.tools.core.capabilities import LifecycleCapability
-
-    def decorator(func: Callable):
-        return _update_settings(
-            func, capabilities=[LifecycleCapability(validate_args=hook_func)]
-        )
-
-    return decorator
+    return ToolOptions(capabilities=[LifecycleCapability(validate_args=hook_func)])
 
 
-def prepare_tool(hook_func: Callable):
+def prepare_tool(hook_func: Callable) -> ToolOptions:
     """生命周期拦截：在向大模型渲染 JSON Schema 前触发，
     可在此动态修改该工具的定义或返回 None 对大模型隐藏。"""
-    from zhenxun.services.ai.tools.core.capabilities import LifecycleCapability
-
-    def decorator(func: Callable):
-        return _update_settings(
-            func, capabilities=[LifecycleCapability(prepare_tool=hook_func)]
-        )
-
-    return decorator
+    return ToolOptions(capabilities=[LifecycleCapability(prepare_tool=hook_func)])
 
 
-def require_superuser():
+def require_superuser() -> ToolOptions:
     """仅限超级管理员使用。若调用者无权限，该工具将直接对大模型隐藏。"""
-    from zhenxun.services.ai.tools.core.capabilities import SuperuserCapability
-
-    def decorator(func: Callable):
-        return _update_settings(func, capabilities=[SuperuserCapability()])
-
-    return decorator
+    return ToolOptions(capabilities=[SuperuserCapability()])
 
 
-def require_admin_level(min_level: int = 1):
+def require_admin_level(min_level: int = 1) -> ToolOptions:
     """仅限满足指定群聊权限等级的用户使用。"""
-    from zhenxun.services.ai.tools.core.capabilities import AdminLevelCapability
-
-    def decorator(func: Callable):
-        return _update_settings(
-            func,
-            capabilities=[AdminLevelCapability(min_level)],
-            metadata={"admin_level": min_level},
-        )
-
-    return decorator
+    return ToolOptions(
+        capabilities=[AdminLevelCapability(min_level)],
+        metadata={"admin_level": min_level},
+    )
 
 
-def require_group():
+def require_group() -> ToolOptions:
     """限制该工具仅能在群聊环境中被大模型调用。"""
-    from zhenxun.services.ai.tools.core.capabilities import GroupOnlyCapability
-
-    def decorator(func: Callable):
-        return _update_settings(func, capabilities=[GroupOnlyCapability()])
-
-    return decorator
+    return ToolOptions(capabilities=[GroupOnlyCapability()])
 
 
-def require_minimum_gold(amount: int):
+def require_minimum_gold(amount: int) -> ToolOptions:
     """需满足一定的金币余额才可调用，同时执行后会自动扣除该金币。"""
-
-    def decorator(func: Callable):
-        return _update_settings(func, metadata={"cost_gold": amount})
-
-    return decorator
+    return ToolOptions(metadata={"cost_gold": amount})
 
 
-def require_session_state(key: str, expected_value: Any = None):
+def require_session_state(key: str, expected_value: Any = None) -> ToolOptions:
     """需要当前执行上下文中包含指定状态变量，否则隐藏工具"""
 
     class StateDependencyCapability(AbstractCapability):
@@ -356,10 +328,7 @@ def require_session_state(key: str, expected_value: Any = None):
                 return tool_defs
             return []
 
-    def decorator(func: Callable):
-        return _update_settings(func, capabilities=[StateDependencyCapability()])
-
-    return decorator
+    return ToolOptions(capabilities=[StateDependencyCapability()])
 
 
 class Rules:
@@ -367,6 +336,15 @@ class Rules:
     [命名空间] 大模型工具规则与权限装饰器聚合。
     用于控制工具的极速缓存、沙箱要求、前端静默以及人机交互审批等。
     """
+
+    @staticmethod
+    def combine(*rules: ToolOptions) -> ToolOptions:
+        """打包组合多个规则预设载荷"""
+        base = ToolOptions()
+        for r in rules:
+            if isinstance(r, ToolOptions):
+                base = base.merge(r)
+        return base
 
     sandbox = staticmethod(require_sandbox)
     """环境：声明执行该工具所需的物理沙箱及 pip/npm 包依赖"""

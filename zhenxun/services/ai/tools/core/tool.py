@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import copy
 import hashlib
 import inspect
 import json
@@ -6,18 +7,22 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
+from zhenxun.services.ai.capabilities import CombinedCapability
 from zhenxun.services.ai.core.exceptions import (
+    ControlFlowExit,
     NeedsInputException,
     ToolFatalError,
     ToolRetryError,
 )
 from zhenxun.services.ai.core.models import ToolDefinition
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run.context import RunContext
+from zhenxun.services.ai.tools.core.capabilities import InteractiveCapability
 from zhenxun.services.ai.tools.models import (
     ResolvedToolPayload,
     ToolOptions,
     ToolResult,
 )
+from zhenxun.services.ai.utils.utils import wrap_to_async
 from zhenxun.services.log import logger
 from zhenxun.utils.pydantic_compat import model_dump, model_json_schema, model_validate
 
@@ -112,8 +117,6 @@ class BaseTool:
 
     def clone_with_options(self, override: Any) -> "BaseTool":
         """创建当前工具的浅拷贝，并覆盖 ToolOptions 和基本属性"""
-        import copy
-
         new_tool = copy.copy(self)
 
         if hasattr(override, "to_tool_options"):
@@ -153,8 +156,6 @@ class BaseTool:
             self, "_param_model", None
         )
         schema_hint = build_schema_hint(validation_model)
-
-        from zhenxun.services.ai.tools.core.capabilities import InteractiveCapability
 
         if any(
             isinstance(c, InteractiveCapability) for c in self.settings.capabilities
@@ -225,10 +226,6 @@ class BaseTool:
         )
 
         if context and self.settings.capabilities:
-            from zhenxun.services.ai.capabilities import (
-                CombinedCapability,
-            )
-
             combined_cap = CombinedCapability(self.settings.capabilities)
             defs = await combined_cap.prepare_tools(context, [tool_def])
             if not defs:
@@ -239,8 +236,6 @@ class BaseTool:
 
     async def resolve(self, context: RunContext | None = None) -> ResolvedToolPayload:
         """实现 ToolResolvable 协议，将自身解析为标准 Payload"""
-        import copy
-
         definition = await self.get_definition(context)
         if definition is None:
             return ResolvedToolPayload()
@@ -288,8 +283,6 @@ class BaseTool:
         try:
             return await self._core_execution(context_to_pass, **kwargs)
         except Exception as e:
-            from zhenxun.services.ai.core.exceptions import ControlFlowExit
-
             if not isinstance(e, ControlFlowExit):
                 logger.error(f"工具 {self.name} 执行抛出异常，将交由底层引擎处理: {e}")
             raise
@@ -381,8 +374,6 @@ class FunctionTool(BaseTool):
         super().__init__(name=name, description=description, settings=settings)
 
         self._original_func = func
-        from zhenxun.services.ai.utils.utils import wrap_to_async
-
         self.__name__ = self.name
         self._func = wrap_to_async(func)
         self._schema_built = False

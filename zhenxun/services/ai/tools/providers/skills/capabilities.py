@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from zhenxun.services.ai.capabilities import AbstractCapability
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.tools.providers.skills.manager import skill_manager
 from zhenxun.services.ai.tools.providers.skills.models import Skill, SkillSource
 from zhenxun.services.ai.tools.providers.skills.toolkit import SkillMetaToolkit
@@ -18,6 +18,13 @@ class SkillCapability(AbstractCapability):
         skills: Sequence[str | Path | Skill | SkillSource] | None = None,
         namespace: str | None = None,
     ):
+        """
+        初始化技能库挂载能力组件。
+
+        参数:
+            skills: 需要挂载到该环境下的技能列表，支持名称、路径、Skill 实例或 SkillSource。
+            namespace: 该技能库所处的作用域命名空间，若不指定则自动推导。
+        """  # noqa: E501
         self.skills = skills or []
         self.namespace = namespace or infer_plugin_namespace()
 
