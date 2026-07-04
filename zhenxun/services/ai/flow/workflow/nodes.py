@@ -6,8 +6,8 @@ from typing import Any, cast
 from zhenxun.services.ai.core.messages import PromptInput
 from zhenxun.services.ai.flow.base import BaseRunnable
 from zhenxun.services.ai.flow.workflow.base import BaseNode
+from zhenxun.services.ai.flow.workflow.policies import BaseFailurePolicy
 from zhenxun.services.ai.flow.workflow.types import (
-    BaseFailurePolicy,
     StepInput,
     StepOutput,
     StepType,
@@ -47,8 +47,6 @@ class Step(BaseNode):
         name: str | None = None,
         executor: NodeSource | None = None,
         prompt: PromptInput | None = None,
-        requires_confirmation: bool = False,
-        confirmation_message: str | None = None,
         failure_policy: BaseFailurePolicy | None = None,
     ):
         """
@@ -58,8 +56,6 @@ class Step(BaseNode):
             name: 步骤的名称，为空则自动取执行器的名称，默认 None。
             executor: 该步骤要运行的核心执行器（支持 RunnableNode 或 Callable 依赖注入）。
             prompt: 该步骤的初始输入或提示词定义，默认 None。
-            requires_confirmation: 标记该节点在执行前是否需要人工介入授权，默认 False。
-            confirmation_message: 挂起等待授权时展示的提示文案，默认 None。
             failure_policy: 该节点执行失败时的错误处理策略，默认使用中断策略。
         """  # noqa: E501
         actual_name = name or getattr(
@@ -67,8 +63,6 @@ class Step(BaseNode):
         )
         super().__init__(
             name=actual_name,
-            requires_confirmation=requires_confirmation,
-            confirmation_message=confirmation_message,
             failure_policy=failure_policy,
         )
         self.executor = executor
@@ -200,7 +194,6 @@ class Steps(BaseNode):
         yield StepOutput(
             content=all_outputs[-1].content if all_outputs else "No steps executed",
             success=all(o.success for o in all_outputs),
-            is_paused=any(getattr(o, "is_paused", False) for o in all_outputs),
             steps=all_outputs,
         )
 
@@ -409,7 +402,6 @@ class Loop(BaseNode):
         yield StepOutput(
             content=all_results[-1].content if all_results else "No iterations run",
             success=all(o.success for o in all_results),
-            is_paused=any(getattr(o, "is_paused", False) for o in all_results),
             steps=all_results,
         )
 
@@ -516,7 +508,6 @@ class Parallel(BaseNode):
         yield StepOutput(
             content="\n\n".join(aggregated_content_parts),
             success=not has_any_failure,
-            is_paused=any(getattr(o, "is_paused", False) for o in all_outputs),
             steps=all_outputs,
             stop=any(getattr(o, "stop", False) for o in all_outputs),
         )
@@ -532,16 +523,12 @@ class NodeFactory:
         cls,
         executor: NodeSource,
         name: str | None = None,
-        requires_confirmation: bool = False,
-        confirmation_message: str | None = None,
         failure_policy: Any = None,
     ) -> BaseNode:
         """底层物理实例化分发"""
         kwargs = {
             "name": name,
             "executor": executor,
-            "requires_confirmation": requires_confirmation,
-            "confirmation_message": confirmation_message,
             "failure_policy": failure_policy,
         }
         if isinstance(executor, BaseRunnable):

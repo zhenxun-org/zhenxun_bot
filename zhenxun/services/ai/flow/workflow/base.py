@@ -8,10 +8,12 @@ from zhenxun.services.ai.core.exceptions import (
     ControlFlowExit,
     ToolFatalError,
 )
-from zhenxun.services.ai.flow.workflow.types import (
+from zhenxun.services.ai.flow.workflow.policies import (
     AbortPolicy,
     BaseFailurePolicy,
     PolicyAction,
+)
+from zhenxun.services.ai.flow.workflow.types import (
     StepInput,
     StepOutput,
     StepType,
@@ -26,8 +28,6 @@ class BaseNode(ABC):
     def __init__(
         self,
         name: str,
-        requires_confirmation: bool = False,
-        confirmation_message: str | None = None,
         failure_policy: BaseFailurePolicy | None = None,
     ):
         """
@@ -35,14 +35,10 @@ class BaseNode(ABC):
 
         参数:
             name: 节点的唯一名称标识。
-            requires_confirmation: 标记该节点在执行前是否需要人工介入授权 (HITL)，默认 False。
-            confirmation_message: 挂起等待授权时，向前端/群聊展示的提示文案，默认 None。
             failure_policy: 该节点执行失败时的错误恢复与自愈策略，
                 默认使用中断策略 (AbortPolicy)。
-        """  # noqa: E501
+        """
         self.name = name
-        self.requires_confirmation = requires_confirmation
-        self.confirmation_message = confirmation_message
         self.failure_policy = failure_policy or AbortPolicy()
 
     @property
@@ -79,7 +75,7 @@ class BaseNode(ABC):
                 content=content,
                 success=False,
                 stop=True,
-                error=str(e)
+                error=f"{type(e).__name__}: {e}"
                 if isinstance(e, AbortException | ToolFatalError)
                 else None,
             )
@@ -110,10 +106,10 @@ class BaseNode(ABC):
             output = StepOutput(
                 step_name=self.name,
                 step_type=self.node_type,
-                content=f"节点执行失败，已通过策略自动跳过: {e}",
+                content=f"节点执行失败，已通过策略自动跳过: {type(e).__name__} - {e}",
                 success=False,
                 stop=False,
-                error=str(e),
+                error=f"{type(e).__name__}: {e}",
             )
             return "break", output, None, None
         else:
@@ -121,10 +117,10 @@ class BaseNode(ABC):
             output = StepOutput(
                 step_name=self.name,
                 step_type=self.node_type,
-                content=f"执行崩溃: {e}",
+                content=f"执行崩溃: {type(e).__name__} - {e}",
                 success=False,
                 stop=True,
-                error=str(e),
+                error=f"{type(e).__name__}: {e}",
             )
             return "break", output, None, None
 
@@ -168,36 +164,11 @@ class BaseNode(ABC):
         logger.debug(f"  ⚙️ [节点] `{self.name}` 开始执行...")
 
         cached_out = context.state.get("__completed_steps__", {}).get(self.name)
-        if (
-            cached_out
-            and cached_out.success
-            and not getattr(cached_out, "is_paused", False)
-        ):
+        if cached_out and cached_out.success:
             logger.debug(f"⏭️ 快进跳过已完成节点: {self.name}")
 
             yield cached_out
             return
-
-        if self.requires_confirmation:
-            if not context.state.get(f"__hitl_confirmed_{self.name}"):
-                msg = (
-                    self.confirmation_message
-                    or f"⚠️ 工作流即将执行高危步骤：[{self.name}]，等待授权..."
-                )
-                logger.debug(f"  ⏸️ **[节点挂起]** `{self.name}`: {msg}")
-
-                output = StepOutput(
-                    step_name=self.name,
-                    step_type=self.node_type,
-                    content="[任务已挂起，等待人工授权/输入]",
-                    success=True,
-                    stop=True,
-                    is_paused=True,
-                    pause_reason=msg,
-                )
-
-                yield output
-                return
 
         current_input = step_input
         attempt = 1

@@ -72,19 +72,7 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         if final_output:
             _extract(final_output)
 
-        paused_step = next(
-            (
-                v.step_name
-                for v in reversed(list(flat_outputs.values()))
-                if getattr(v, "is_paused", False) and v.step_name
-            ),
-            None,
-        )
-        status = (
-            "paused"
-            if paused_step
-            else ("completed" if final_output and final_output.success else "error")
-        )
+        status = "completed" if final_output and final_output.success else "error"
 
         return WorkflowRunResult(
             workflow_id=self.id,
@@ -95,7 +83,6 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
             step_outputs=flat_outputs,
             last_step_content=final_output.content if final_output else None,
             final_output=final_output,
-            paused_step_name=paused_step,
         )
 
     def bind(self, **kwargs: Any) -> Any:
@@ -133,12 +120,6 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
                     else "执行完毕"
                 )
                 await MessageUtils.build_message(msg).send(reply_to=reply_to)
-            elif res.status == "paused":
-                pause_msg = (
-                    f"⏸️ 工作流执行已被挂起，停在步骤: {res.paused_step_name}。"
-                    "请提供授权或人工输入后继续。"
-                )
-                await MessageUtils.build_message(pause_msg).send(reply_to=reply_to)
             elif res.status == "error":
                 err_msg = res.final_output.error if res.final_output else "未知异常"
                 await MessageUtils.build_message(
@@ -263,40 +244,6 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         except Exception:
             pass
 
-    async def acontinue_run(
-        self,
-        run_result: WorkflowRunResult,
-        user_auth_data: dict[str, Any] | None = None,
-        context: RunContext | None = None,
-    ) -> WorkflowRunResult:
-        """在工作流发生挂起或断点后，传入人工反馈数据继续运行"""
-        safe_context = context or RunContext(session_id=f"wf_{self.id}")
-        safe_context.state.update(run_result.state)
-
-        safe_context.state["__completed_steps__"] = run_result.step_outputs.copy()
-        for step_name, out in run_result.step_outputs.items():
-            safe_context.upstream_results[step_name] = out.content
-
-        if run_result.paused_step_name:
-            safe_context.state[f"__hitl_confirmed_{run_result.paused_step_name}"] = True
-            if user_auth_data:
-                safe_context.state[f"__hitl_input_{run_result.paused_step_name}"] = (
-                    user_auth_data
-                )
-
-        resume_input = StepInput(
-            input=run_result.original_input,
-            previous_step_content=run_result.last_step_content,
-        )
-
-        logger.debug(
-            f"🚀 工作流 [{self.name}] 状态已恢复，"
-            f"正在快进到步骤: {run_result.paused_step_name}..."
-        )
-
-        final_output = await self.root_steps.aexecute(resume_input, safe_context)
-
-        return self._build_result(resume_input, safe_context, final_output)
 
     def as_tool(self, tool_name: str | None = None) -> FunctionTool:
         """将工作流封装并导出为可供 Agent 直接调用的 FunctionTool 实例"""
