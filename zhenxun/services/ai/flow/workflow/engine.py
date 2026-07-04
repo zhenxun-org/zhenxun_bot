@@ -87,6 +87,7 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
 
     def bind(self, **kwargs: Any) -> Any:
         """DI 注入语法糖"""
+
         async def _dependency() -> "Workflow":
             return self
 
@@ -244,9 +245,9 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         except Exception:
             pass
 
-
     def as_tool(self, tool_name: str | None = None) -> FunctionTool:
         """将工作流封装并导出为可供 Agent 直接调用的 FunctionTool 实例"""
+
         async def _execute_workflow_tool(prompt: str, context: RunContext) -> str:
             run_result = await self.run(prompt=prompt, context=context)
             output = run_result.final_output

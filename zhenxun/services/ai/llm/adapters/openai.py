@@ -73,6 +73,7 @@ class OpenAICompatAdapter(BaseAdapter):
         config = identity.generation_config
 
         from zhenxun.services.ai.core.messages import ChatRequest
+
         request = ChatRequest(messages=messages, config=config)
         return await self.prepare_advanced_request(
             identity=identity,

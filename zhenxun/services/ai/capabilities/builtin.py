@@ -56,7 +56,6 @@ class StuckDetectionCapability(AbstractCapability):
         llm_context: LLMContext[ChatRequest, ChatResponse],
         handler: WrapModelRequestHandler,
     ) -> ChatResponse:
-
         max_repeated_errors = 3
         action_hashes = []
         messages = list(llm_context.request.messages)

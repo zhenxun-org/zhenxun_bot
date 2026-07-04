@@ -699,7 +699,6 @@ class Agent(
         )
 
         async def _execution_task():
-
             cancel_token = safe_context.run.cancellation_token or CancellationToken()
             safe_context.run.cancellation_token = cancel_token
 

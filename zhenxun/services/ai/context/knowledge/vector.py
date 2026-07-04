@@ -240,7 +240,7 @@ class VectorKnowledge(BaseKnowledge):
             return
 
         all_results.sort(key=lambda x: x.score, reverse=True)
-        all_results = all_results[:self.inject_limit]
+        all_results = all_results[: self.inject_limit]
 
         formatted_results = []
         for result in all_results:
@@ -312,8 +312,7 @@ class VectorKnowledge(BaseKnowledge):
         for result in results:
             doc_name = result.record.metadata.get("name", "未命名文档")
             formatted_results.append(
-                f"📄 来源: {doc_name}\n"
-                f"片段内容:\n{result.record.content}"
+                f"📄 来源: {doc_name}\n" f"片段内容:\n{result.record.content}"
             )
 
         final_text = "\n\n======\n\n".join(formatted_results)

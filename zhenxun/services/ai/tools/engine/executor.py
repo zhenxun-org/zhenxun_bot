@@ -258,7 +258,6 @@ class ToolExecutor:
             available_tools = {}
         tool_name = validated.call.tool_name
         if not validated.args_valid or validated.tool is None:
-
             if isinstance(validated.validation_error, ControlFlowExit):
                 raise validated.validation_error
 

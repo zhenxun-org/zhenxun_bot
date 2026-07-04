@@ -40,6 +40,7 @@ class ChatHistoryFacade:
         if not self._backend:
             return
         from zhenxun.services.ai.core.engine.context_renderer import ContextConverter
+
         msgs = messages if isinstance(messages, Sequence) else [messages]
         flattened = ContextConverter.flatten_to_llm_messages(msgs)
         if flattened:
