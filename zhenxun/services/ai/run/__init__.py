@@ -12,8 +12,8 @@ from .hitl import HITLController
 from .hooks import Hooks
 from .models import (
     AgentRunResult,
+    AgentTask,
     StreamedRunResult,
-    Task,
 )
 from .session import session_manager
 from .ui import UIController
@@ -21,6 +21,7 @@ from .ui import UIController
 __all__ = [
     "GLOBAL_CAPABILITIES",
     "AgentRunResult",
+    "AgentTask",
     "BlackboardManager",
     "CancellationToken",
     "HITLController",
@@ -30,7 +31,6 @@ __all__ = [
     "NoneBotDeps",
     "RunContext",
     "StreamedRunResult",
-    "Task",
     "UIController",
     "get_current_run_context",
     "register_global_capability",

@@ -82,7 +82,7 @@ class AgentProfileResolver:
 
 
 class CapabilityBuilder:
-    """拦截器能力组装器：负责合并 Agent, Task, Profile 和全局的中间件"""
+    """拦截器能力组装器：负责合并 Agent, AgentTask, Profile 和全局的中间件"""
 
     @staticmethod
     async def build_for_run(
@@ -225,7 +225,7 @@ class ContextBuilder:
             static_instructions.append("\n\n".join(persona_parts))
 
             if instruction:
-                static_instructions.append("## 本次任务指令 (Task)")
+                static_instructions.append("## 本次任务指令 (AgentTask)")
 
         if instruction:
             if isinstance(instruction, PromptTemplate):

@@ -7,7 +7,7 @@ from zhenxun.services.ai.core.exceptions import (
     InterventionHandledException,
 )
 from zhenxun.services.ai.core.models import CancellationToken
-from zhenxun.services.ai.run.models import Task
+from zhenxun.services.ai.run.models import AgentTask
 from zhenxun.services.ai.run.session import LockContext, session_manager
 from zhenxun.services.log import logger
 
@@ -33,7 +33,7 @@ async def apply_concurrency_policy(
         policy: 当发生并发锁占用时执行的策略（允许、拒绝、中断、排队）。
         cancel_token: 运行时用于监听取消请求的取消令牌实例。
         intervention_policy: 用户消息干预策略（转向、追加）。
-        message: 并发竞争发生时新入站的用户请求消息或 Task 载荷。
+        message: 并发竞争发生时新入站的用户请求消息或 AgentTask 载荷。
 
     返回：
         AsyncGenerator: 返回异步生成器，供 async with 消费，包裹大模型的整个执行环节。
@@ -58,7 +58,7 @@ async def apply_concurrency_policy(
 
                 actual_msg = message
 
-                if isinstance(message, Task):
+                if isinstance(message, AgentTask):
                     actual_msg = message.description
                 elif hasattr(message, "extract_plain_text"):
                     actual_msg = message.extract_plain_text()

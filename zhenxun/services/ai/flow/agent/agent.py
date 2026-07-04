@@ -41,8 +41,8 @@ from zhenxun.services.ai.llm.builder import IntentBuilder
 from zhenxun.services.ai.message_builder import MessageBuilder
 from zhenxun.services.ai.run import (
     AgentRunResult,
+    AgentTask,
     RunContext,
-    Task,
 )
 from zhenxun.services.ai.run.context import AgentDepsT
 from zhenxun.services.ai.run.di import DependencyInjector
@@ -595,7 +595,7 @@ class Agent(
 
     async def run(
         self,
-        prompt: PromptInput | Task | None = None,
+        prompt: PromptInput | AgentTask | None = None,
         *,
         config: AgentConfig | dict | None = None,
         deps: AgentDepsT | None = None,
@@ -606,7 +606,7 @@ class Agent(
         智能体单次运行阻塞核心入口，内部使用上下文管理器静默消费事件流直至执行结束。
 
         参数:
-            prompt: 用户输入的消息内容或标准数据契约任务对象 (Task)。
+            prompt: 用户输入的消息内容或标准数据契约任务对象 (AgentTask)。
             deps: 强类型的外部依赖注入对象 (例如 NoneBot 的 Bot, Event)。
             context: 显式传入的运行时与会话上下文 (RunContext)。
             config: 单次运行时的动态配置覆盖字典或对象。
@@ -623,7 +623,7 @@ class Agent(
     @contextlib.asynccontextmanager
     async def run_stream(
         self,
-        prompt: PromptInput | Task | None = None,
+        prompt: PromptInput | AgentTask | None = None,
         *,
         config: AgentConfig | dict | None = None,
         deps: AgentDepsT | None = None,
@@ -746,16 +746,16 @@ class Agent(
                 task.cancel()
 
     def _parse_task_prompt(
-        self, prompt: PromptInput | Task | None
-    ) -> tuple[Task | None, Any | None, list[Any], Any, list[Any]]:
-        """解析输入意图，提取数据契约 (Task)"""
+        self, prompt: PromptInput | AgentTask | None
+    ) -> tuple[AgentTask | None, Any | None, list[Any], Any, list[Any]]:
+        """解析输入意图，提取数据契约 (AgentTask)"""
         task_obj = None
         final_prompt_payload = None
         extra_tools = []
         run_output_type = self.response_model
         task_guardrails = []
 
-        if isinstance(prompt, Task):
+        if isinstance(prompt, AgentTask):
             task_obj = prompt
             if task_obj.response_model:
                 run_output_type = task_obj.response_model
@@ -782,7 +782,7 @@ class Agent(
 
     async def on_state_init(
         self,
-        prompt: PromptInput | Task | None = None,
+        prompt: PromptInput | AgentTask | None = None,
         context: RunContext[AgentDepsT] | None = None,
         config: AgentConfig | None = None,
         cancellation_token: Any = None,
@@ -997,7 +997,7 @@ class Agent(
 
     async def _run_step(
         self,
-        prompt: PromptInput | Task | None = None,
+        prompt: PromptInput | AgentTask | None = None,
         *,
         context: RunContext[AgentDepsT],
         config: AgentConfig,

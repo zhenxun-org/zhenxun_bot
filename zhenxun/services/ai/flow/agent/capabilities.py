@@ -11,7 +11,7 @@ from zhenxun.services.ai.core.exceptions import UpstreamServerException
 from zhenxun.services.ai.core.messages import TaskLifecycleEvent
 from zhenxun.services.ai.core.options import BaseOutputDefinition, ToolOutput
 from zhenxun.services.ai.guardrails import parse_guardrails
-from zhenxun.services.ai.run import AgentRunResult, RunContext, Task
+from zhenxun.services.ai.run import AgentRunResult, AgentTask, RunContext
 from zhenxun.services.log import logger
 
 
@@ -113,7 +113,7 @@ class OutputValidationCapability(AbstractCapability):
 class TaskTrackingCapability(AbstractCapability):
     """数据契约任务状态追踪与事件遥测组件"""
 
-    def __init__(self, task: Task, agent_name: str):
+    def __init__(self, task: AgentTask, agent_name: str):
         self.task = task
         self.agent_name = agent_name
 

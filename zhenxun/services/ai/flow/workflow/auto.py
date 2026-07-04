@@ -34,8 +34,8 @@ class AutoWorkflow(Workflow):
             attr = getattr(self, attr_name)
             if hasattr(attr, "__workflow_meta__"):
                 methods_meta[attr_name] = attr.__workflow_meta__
-                if attr.__workflow_meta__.get("paths"):
-                    router_paths.update(attr.__workflow_meta__["paths"])
+                if attr.__workflow_meta__.paths:
+                    router_paths.update(attr.__workflow_meta__.paths)
 
         if not methods_meta:
             logger.warning(
@@ -46,19 +46,17 @@ class AutoWorkflow(Workflow):
         top_level_methods = {
             k: v
             for k, v in methods_meta.items()
-            if not any(t in router_paths for t in v.get("triggers", []))
+            if not any(t in router_paths for t in v.triggers)
         }
         branch_methods = {
             k: v
             for k, v in methods_meta.items()
-            if any(t in router_paths for t in v.get("triggers", []))
+            if any(t in router_paths for t in v.triggers)
         }
 
         ts = graphlib.TopologicalSorter()
         for name, meta in top_level_methods.items():
-            valid_triggers = [
-                t for t in meta.get("triggers", []) if t in top_level_methods
-            ]
+            valid_triggers = [t for t in meta.triggers if t in top_level_methods]
             ts.add(name, *valid_triggers)
 
         try:
@@ -72,14 +70,14 @@ class AutoWorkflow(Workflow):
             step_nodes = []
             for n in ready_nodes:
                 meta = top_level_methods[n]
-                if meta["type"] in ("router", "entry_router"):
+                if meta.type in ("router", "entry_router"):
                     choices = []
-                    for path in meta.get("paths", []):
+                    for path in meta.paths:
                         branch_name = next(
                             (
                                 bk
                                 for bk, bv in branch_methods.items()
-                                if path in bv.get("triggers", [])
+                                if path in bv.triggers
                             ),
                             None,
                         )

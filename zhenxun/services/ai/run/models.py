@@ -232,7 +232,7 @@ class TaskResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class Task(BaseModel):
+class AgentTask(BaseModel):
     """标准化数据契约（意图载体 Payload），定义大模型需要做什么及产出什么格式"""
 
     id: str = Field(default_factory=lambda: __import__("uuid").uuid4().hex)
@@ -263,7 +263,7 @@ class Task(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @model_validator(mode="after")
-    def _parse_and_set_guardrails(self) -> "Task":
+    def _parse_and_set_guardrails(self) -> "AgentTask":
         from zhenxun.services.ai.guardrails import parse_guardrails
 
         self._parsed_guardrails = parse_guardrails(self.guardrails)
@@ -272,8 +272,8 @@ class Task(BaseModel):
 
 __all__ = [
     "AgentRunResult",
+    "AgentTask",
     "OutputDataT",
     "StreamedRunResult",
-    "Task",
     "TaskResult",
 ]

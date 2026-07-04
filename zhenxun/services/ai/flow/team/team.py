@@ -19,7 +19,7 @@ from zhenxun.services.ai.flow.team.router import BaseRouter
 from zhenxun.services.ai.flow.team.strategy import (
     BaseTeamStrategy,
 )
-from zhenxun.services.ai.run import AgentRunResult, RunContext, Task
+from zhenxun.services.ai.run import AgentRunResult, AgentTask, RunContext
 from zhenxun.services.ai.tools.providers.skills.models import Skill, SkillSource
 from zhenxun.utils.utils import infer_plugin_namespace
 
@@ -239,7 +239,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
 
     async def run(
         self,
-        prompt: PromptInput | Task | None = None,
+        prompt: PromptInput | AgentTask | None = None,
         *,
         context: "RunContext | None" = None,
         capabilities: list[CapabilitySource] | None = None,
@@ -250,7 +250,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
         团队级运行阻塞核心入口，内部静默分配任务给成员直至汇总结束。
 
         参数:
-            prompt: 派发给多智能体团队的任务描述 or 契约对象 (Task)。
+            prompt: 派发给多智能体团队的任务描述 or 契约对象 (AgentTask)。
             context: 显式传入的会话与运行上下文。
             capabilities: 仅针对本次团队执行动态注入的临时拦截器列表。
             kwargs: 透传的其他附加参数。
@@ -278,7 +278,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
     @contextlib.asynccontextmanager
     async def run_stream(
         self,
-        prompt: PromptInput | Task | None = None,
+        prompt: PromptInput | AgentTask | None = None,
         *,
         context: "RunContext | None" = None,
         capabilities: list[CapabilitySource] | None = None,

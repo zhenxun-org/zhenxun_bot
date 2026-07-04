@@ -1,8 +1,12 @@
 from abc import ABC, abstractmethod
+import copy
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from zhenxun.services.ai.llm.api import generate_structured
+from zhenxun.services.log import logger
 
 
 class StepType(str, Enum):
@@ -13,9 +17,6 @@ class StepType(str, Enum):
     PARALLEL = "Parallel"
     CONDITION = "Condition"
     ROUTER = "Router"
-
-
-
 
 
 class StepInput(BaseModel):
@@ -60,9 +61,6 @@ class StepOutput(BaseModel):
 
     steps: list["StepOutput"] | None = None
     """嵌套步骤的输出结果集合（如复合节点 Loop、Parallel 的内部产出）"""
-
-
-
 
 
 class WorkflowRunResult(BaseModel):
@@ -206,15 +204,8 @@ class SelfHealingPolicy(BaseFailurePolicy):
         counts[key] = counts.get(key, 0) + 1
 
         if counts[key] > self.max_retries:
-            from zhenxun.services.log import logger
-
             logger.warning(f"节点 '{node.name}' 自愈次数达上限，宣告失败。")
             return PolicyResult(action=PolicyAction.ABORT)
-
-        import copy
-
-        from zhenxun.services.ai.llm.api import generate_structured
-        from zhenxun.services.log import logger
 
         class HealedInput(BaseModel):
             """自愈后输入结构"""
@@ -257,3 +248,45 @@ class SelfHealingPolicy(BaseFailurePolicy):
         except Exception as e:
             logger.error(f"自愈过程发生大模型调用异常: {e}")
             return PolicyResult(action=PolicyAction.ABORT)
+
+
+class StepMeta(BaseModel):
+    """承载工作流节点装饰器元数据的内部模型"""
+
+    name: str | None = None
+    """节点名称"""
+    requires_confirmation: bool = False
+    """是否需要在执行前触发人工二次确认"""
+    confirmation_message: str | None = None
+    """二次确认的审批提示消息"""
+    failure_policy: Any = None
+    """节点执行失败时的降级/容错策略"""
+
+
+class ConditionMeta(BaseModel):
+    name: str | None = None
+    """条件判定节点名称"""
+    if_true: list[Any] = Field(default_factory=list)
+    """条件为真（True）时执行的后继节点列表"""
+    if_false: list[Any] = Field(default_factory=list)
+    """条件为假（False）时执行的后继节点列表"""
+
+
+class RouterMeta(BaseModel):
+    name: str | None = None
+    """多路分发路由节点名称"""
+    choices: list[Any] = Field(default_factory=list)
+    """路由器可供选择的分支路由列表"""
+
+
+class AutoNodeMeta(BaseModel):
+    """自动化工作流装饰器专用强类型元数据（替代原有裸字典）"""
+
+    type: str
+    """节点类型: entry, listen, router, entry_router"""
+    triggers: list[str] = Field(default_factory=list)
+    """触发当前节点执行的前置依赖节点"""
+    logic: str = "OR"
+    """触发逻辑 (AND / OR)"""
+    paths: list[str] = Field(default_factory=list)
+    """路由节点的流转分支 (Choices)"""

@@ -1,8 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Callable, Sequence
+import copy
 from typing import Any, cast
-
-from pydantic import BaseModel, Field
 
 from zhenxun.services.ai.core.messages import PromptInput
 from zhenxun.services.ai.flow.base import BaseRunnable
@@ -13,8 +12,9 @@ from zhenxun.services.ai.flow.workflow.types import (
     StepOutput,
     StepType,
 )
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run import AgentTask, RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
+from zhenxun.services.ai.run.models import AgentRunEnd
 from zhenxun.services.log import logger
 
 NodeSource = BaseNode | BaseRunnable | Callable
@@ -83,9 +83,7 @@ class Step(BaseNode):
     ) -> AsyncIterator[Any]:
         if False:
             yield None
-        raise NotImplementedError(
-            "This is a facade. Real execution happens in subclasses."
-        )
+        raise NotImplementedError("这是一个外观门面，实际的执行发生在子类中。")
 
 
 class RunnableNode(Step):
@@ -94,27 +92,28 @@ class RunnableNode(Step):
     async def run_stream(
         self, step_input: StepInput, context: RunContext
     ) -> AsyncIterator[Any]:
-        import copy
-
-        from zhenxun.services.ai.flow.base import BaseRunnable
-        from zhenxun.services.ai.run import Task
-
         executor = cast(BaseRunnable, self.executor)
-        prompt_data = self.prompt if self.prompt is not None else step_input.input
 
-        if isinstance(prompt_data, Task):
+        if isinstance(step_input.previous_step_content, AgentTask):
+            prompt_data = step_input.previous_step_content
+            prev_content_to_append = None
+        else:
+            prompt_data = self.prompt if self.prompt is not None else step_input.input
+            prev_content_to_append = step_input.previous_step_content
+
+        if isinstance(prompt_data, AgentTask):
             prompt_data = copy.copy(prompt_data)
-            if step_input.previous_step_content:
-                prev_content = str(step_input.previous_step_content)
+            if prev_content_to_append:
+                prev_content = str(prev_content_to_append)
                 prompt_data.description = (
                     f"### 🔙 [上游节点执行输出]\n{prev_content}\n\n"
                     f"### 🎯 [当前需执行的任务]\n{prompt_data.description}"
                 )
             context.run.user_input = prompt_data.description
         else:
-            if step_input.previous_step_content:
+            if prev_content_to_append:
                 prompt_data = (
-                    f"[上游节点执行输出]:\n{step_input.previous_step_content}\n\n"
+                    f"[上游节点执行输出]:\n{prev_content_to_append}\n\n"
                     f"[当前需执行的任务]:\n{prompt_data or ''}"
                 )
             context.run.user_input = str(prompt_data) if prompt_data else ""
@@ -126,8 +125,6 @@ class RunnableNode(Step):
             prompt=prompt_data, context=sandbox_context
         ) as stream_result:
             async for event in stream_result.stream_events():
-                from zhenxun.services.ai.run.models import AgentRunEnd
-
                 if isinstance(event, AgentRunEnd):
                     final_result = event.result
                 yield event
@@ -156,35 +153,6 @@ class FunctionNode(Step):
             yield res
         else:
             yield StepOutput(content=res, success=True)
-
-
-class StepMeta(BaseModel):
-    """承载工作流节点装饰器元数据的内部模型"""
-
-    name: str | None = None
-    """节点名称"""
-    requires_confirmation: bool = False
-    """是否需要在执行前触发人工二次确认"""
-    confirmation_message: str | None = None
-    """二次确认的审批提示消息"""
-    failure_policy: Any = None
-    """节点执行失败时的降级/容错策略"""
-
-
-class ConditionMeta(BaseModel):
-    name: str | None = None
-    """条件判定节点名称"""
-    if_true: list[Any] = Field(default_factory=list)
-    """条件为真（True）时执行的后继节点列表"""
-    if_false: list[Any] = Field(default_factory=list)
-    """条件为假（False）时执行的后继节点列表"""
-
-
-class RouterMeta(BaseModel):
-    name: str | None = None
-    """多路分发路由节点名称"""
-    choices: list[Any] = Field(default_factory=list)
-    """路由器可供选择的分支路由列表"""
 
 
 class Steps(BaseNode):
@@ -569,8 +537,6 @@ class NodeFactory:
         failure_policy: Any = None,
     ) -> BaseNode:
         """底层物理实例化分发"""
-        from zhenxun.services.ai.flow.base import BaseRunnable
-
         kwargs = {
             "name": name,
             "executor": executor,
@@ -599,36 +565,6 @@ class NodeFactory:
             return item
 
         if isinstance(item, BaseRunnable) or callable(item):
-            cond_meta = getattr(item, "__workflow_condition_meta__", None)
-            if cond_meta:
-                final_name = name or cond_meta.name or "ConditionGroup"
-                return Condition(
-                    evaluator=item,
-                    steps=cond_meta.if_true,
-                    else_steps=cond_meta.if_false,
-                    name=final_name,
-                )
-
-            router_meta = getattr(item, "__workflow_router_meta__", None)
-            if router_meta:
-                final_name = name or router_meta.name or "RouterGroup"
-                return Router(
-                    selector=item,
-                    choices=router_meta.choices,
-                    name=final_name,
-                )
-
-            step_meta = getattr(item, "__workflow_step_meta__", None)
-            if step_meta:
-                final_name = name or step_meta.name
-                return NodeFactory._create_step(
-                    executor=item,
-                    name=final_name,
-                    requires_confirmation=step_meta.requires_confirmation,
-                    confirmation_message=step_meta.confirmation_message,
-                    failure_policy=step_meta.failure_policy,
-                )
-
             return NodeFactory._create_step(executor=item, name=name)
 
         raise ValueError(

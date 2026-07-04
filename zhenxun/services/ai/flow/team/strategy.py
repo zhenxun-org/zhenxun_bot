@@ -17,7 +17,7 @@ from zhenxun.services.ai.flow.team.models import (
     TeamAction,
 )
 from zhenxun.services.ai.flow.team.router import BaseRouter
-from zhenxun.services.ai.run import RunContext, Task
+from zhenxun.services.ai.run import AgentTask, RunContext
 from zhenxun.services.ai.tools.bridges.delegate import DelegateTool
 from zhenxun.services.log import logger
 
@@ -44,7 +44,11 @@ class BaseTeamStrategy(ABC):
         return PromptTemplate(template).render(**kwargs)
 
     async def generate_plan(
-        self, team: "Team", prompt: str | Task | None, context: RunContext, **kwargs
+        self,
+        team: "Team",
+        prompt: str | AgentTask | None,
+        context: RunContext,
+        **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
         """
         核心决策生成器 (Action Yielding Pattern)。
@@ -137,7 +141,11 @@ class RouteStrategy(BaseTeamStrategy):
             self.state_flow = state_flow
 
     async def generate_plan(
-        self, team: "Team", prompt: str | Task | None, context: RunContext, **kwargs
+        self,
+        team: "Team",
+        prompt: str | AgentTask | None,
+        context: RunContext,
+        **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
         router = self.router
         if not router:
@@ -266,7 +274,7 @@ class RouteStrategy(BaseTeamStrategy):
                 )
                 continue
 
-            yield FinishAction(result=run_result.output)
+            yield FinishAction(result=run_result)
             break
 
 
@@ -297,7 +305,11 @@ class CoordinateStrategy(BaseTeamStrategy):
         self.leader_tools = leader_tools or []
 
     async def generate_plan(
-        self, team: "Team", prompt: str | Task | None, context: RunContext, **kwargs
+        self,
+        team: "Team",
+        prompt: str | AgentTask | None,
+        context: RunContext,
+        **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
         delegation_tools = []
         for m in team.members:
@@ -338,7 +350,7 @@ class CoordinateStrategy(BaseTeamStrategy):
 
         leader_res = yield CallAction(agent=leader_agent, task=prompt)
 
-        yield FinishAction(result=leader_res.output)
+        yield FinishAction(result=leader_res)
 
 
 class BroadcastStrategy(BaseTeamStrategy):
@@ -367,10 +379,14 @@ class BroadcastStrategy(BaseTeamStrategy):
         self.leader_tools = leader_tools or []
 
     async def generate_plan(
-        self, team: "Team", prompt: str | Task | None, context: RunContext, **kwargs
+        self,
+        team: "Team",
+        prompt: str | AgentTask | None,
+        context: RunContext,
+        **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
         task_desc_str = (
-            prompt.description if isinstance(prompt, Task) else (prompt or "")
+            prompt.description if isinstance(prompt, AgentTask) else (prompt or "")
         )
 
         if context.run.event_bus:
@@ -413,7 +429,7 @@ class BroadcastStrategy(BaseTeamStrategy):
 
         leader_res = yield CallAction(agent=leader_agent, task=synthesize_prompt)
 
-        yield FinishAction(result=leader_res.output)
+        yield FinishAction(result=leader_res)
 
 
 class TaskStrategy(BaseTeamStrategy):
@@ -471,7 +487,11 @@ class TaskStrategy(BaseTeamStrategy):
             self.leader_tools.append(self.bb_toolkit)
 
     async def generate_plan(
-        self, team: "Team", prompt: str | Task | None, context: RunContext, **kwargs
+        self,
+        team: "Team",
+        prompt: str | AgentTask | None,
+        context: RunContext,
+        **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
         from zhenxun.services.ai.flow.team.models import TaskBoardState, TaskNodeStatus
         from zhenxun.services.ai.flow.team.task_tools import TaskPlanningToolkit
@@ -542,6 +562,10 @@ class TaskStrategy(BaseTeamStrategy):
                     goal_str = getattr(prompt, "description", None) or (
                         str(prompt) if prompt else ""
                     )
+                    expected_out = getattr(prompt, "expected_output", None)
+                    if expected_out:
+                        goal_str += f"\n\n### 🎯 [预期产出要求]\n{expected_out}"
+
                     planner_prompt = f"""### 🎯 用户的终极目标 (Original Goal)
 {goal_str}
 

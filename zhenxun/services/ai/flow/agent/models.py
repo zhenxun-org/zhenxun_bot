@@ -165,7 +165,7 @@ class AgentRunResources(BaseModel):
     memory_writer: Any | None = None
     """用于将对话历史安全落盘的写入器"""
     run_scoped_cap: Any | None = None
-    """聚合了 Agent/Task/全局 的复合能力拦截器 (CombinedCapability)"""
+    """聚合了 Agent/AgentTask/全局 的复合能力拦截器 (CombinedCapability)"""
     task_obj: Any | None = None
     """(如有) 解析后的结构化数据任务契约"""
     toolkits: list[Any] = Field(default_factory=list)

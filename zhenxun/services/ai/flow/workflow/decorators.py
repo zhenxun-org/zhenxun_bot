@@ -1,6 +1,8 @@
 from collections.abc import Callable
 from typing import Any
 
+from zhenxun.services.ai.flow.workflow.types import AutoNodeMeta
+
 
 def AND(*triggers: str) -> dict[str, Any]:
     """逻辑与：所有前置方法都完成才执行"""
@@ -22,12 +24,7 @@ def entry() -> Callable:
         setattr(
             func,
             "__workflow_meta__",
-            {
-                "type": "entry",
-                "triggers": [],
-                "logic": "OR",
-                "paths": [],
-            },
+            AutoNodeMeta(type="entry"),
         )
         return func
 
@@ -45,19 +42,13 @@ def listen(condition: str | dict[str, Any]) -> Callable:
 
     def decorator(func: Callable) -> Callable:
         if isinstance(condition, str):
-            meta = {
-                "type": "listen",
-                "triggers": [condition],
-                "logic": "OR",
-                "paths": [],
-            }
+            meta = AutoNodeMeta(type="listen", triggers=[condition])
         elif isinstance(condition, dict):
-            meta = {
-                "type": "listen",
-                "triggers": condition["triggers"],
-                "logic": condition.get("logic", "OR"),
-                "paths": [],
-            }
+            meta = AutoNodeMeta(
+                type="listen",
+                triggers=condition.get("triggers", []),
+                logic=condition.get("logic", "OR"),
+            )
         else:
             raise TypeError("listen condition 必须是字符串或 AND/OR 函数的返回值")
 
@@ -75,15 +66,15 @@ def router(
     """
 
     def decorator(func: Callable) -> Callable:
-        meta = {"type": "router", "triggers": [], "logic": "OR", "paths": paths or []}
+        meta = AutoNodeMeta(type="router", paths=paths or [])
         if isinstance(condition, str):
-            meta["triggers"] = [condition]
+            meta.triggers = [condition]
         elif isinstance(condition, dict):
-            meta["triggers"] = condition["triggers"]
-            meta["logic"] = condition.get("logic", "OR")
+            meta.triggers = condition.get("triggers", [])
+            meta.logic = condition.get("logic", "OR")
 
         if not condition:
-            meta["type"] = "entry_router"
+            meta.type = "entry_router"
 
         setattr(func, "__workflow_meta__", meta)
         return func

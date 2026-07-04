@@ -18,6 +18,7 @@ from zhenxun.services.ai.flow.team.strategy import BaseTeamStrategy
 from zhenxun.services.ai.run import AgentRunResult, RunContext
 from zhenxun.services.ai.run.models import AgentRunEnd
 from zhenxun.services.log import logger
+from zhenxun.utils.pydantic_compat import model_construct
 
 
 class TeamRunner:
@@ -228,7 +229,9 @@ class TeamRunner:
         logger.info(f"🏁 **团队 [{self.team.name}]** 协作圆满结束！")
 
         if not isinstance(final_result, AgentRunResult):
-            final_result = AgentRunResult(output=final_result, usage=cumulative_usage)
+            final_result = model_construct(
+                AgentRunResult, output=final_result, usage=cumulative_usage
+            )
         else:
             final_result.usage += cumulative_usage
 
