@@ -1,30 +1,17 @@
 import asyncio
-from typing import Any, Protocol
+from typing import Any
 
 from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent, UserCustomEvent
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.run.di import Inject
 from zhenxun.services.ai.sandbox.models import (
     SandboxBlueprint,
-    SandboxExecutionResult,
 )
 from zhenxun.services.ai.tools.core.decorators import Rules, tool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.models import ToolResult
 from zhenxun.services.log import logger
 from zhenxun.utils.pydantic_compat import model_copy
-
-
-class PythonPluginProtocol(Protocol):
-    @property
-    def supports_state(self) -> bool: ...
-
-    async def execute(
-        self,
-        code: str,
-        timeout: int = 30,
-        injected_code: str | None = None,
-    ) -> SandboxExecutionResult: ...
 
 
 class SandboxToolkit(BaseToolkit):
@@ -384,7 +371,7 @@ class SandboxToolkit(BaseToolkit):
     @tool(
         name="write_sandbox_file",
         description="将文本内容写入沙箱文件系统中，支持保存大块数据或配置，避免超过对话上下文。",
-        rules=[Rules.silent()]
+        rules=[Rules.silent()],
     )
     async def write_sandbox_file(
         self, path: str, content: str, context: RunContext, sandbox: Inject.Sandbox
@@ -406,7 +393,7 @@ class SandboxToolkit(BaseToolkit):
     @tool(
         name="read_sandbox_file",
         description="从沙箱文件系统中读取指定文件的文本内容。",
-        rules=[Rules.silent()]
+        rules=[Rules.silent()],
     )
     async def read_sandbox_file(
         self, path: str, context: RunContext, sandbox: Inject.Sandbox

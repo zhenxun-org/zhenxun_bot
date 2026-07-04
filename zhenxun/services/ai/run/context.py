@@ -383,6 +383,7 @@ def set_run_context(ctx: RunContext):
 
 
 def _is_run_context_type(annotation: Any) -> bool:
+    """判断类型标注是否为 RunContext 类型或其子类。"""
     if annotation is RunContext:
         return True
     origin = get_origin(annotation)

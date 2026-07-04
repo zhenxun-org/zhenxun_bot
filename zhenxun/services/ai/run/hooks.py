@@ -25,6 +25,7 @@ class HookTimeoutError(TimeoutError):
     """当 Hook 函数执行超过配置的时间时抛出此异常。"""
 
     def __init__(self, hook_name: str, func_name: str, timeout: float):
+        """初始化 HookTimeoutError 异常实例。"""
         self.hook_name = hook_name
         self.func_name = func_name
         self.timeout = timeout
@@ -228,6 +229,7 @@ class OnToolExecuteErrorHookFunc(Protocol):
 
 
 async def _call_func(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """统一执行同步或异步的可调用函数。"""
     if is_coroutine_callable(func):
         return await func(*args, **kwargs)
     return func(*args, **kwargs)
@@ -311,7 +313,10 @@ def _tool_bare_or_parameterized(
 
 
 class BoundHookPoint(Generic[_FuncT]):
+    """绑定到具体实例的 Hook 注册点。"""
+
     def __init__(self, key: str, registry_holder: Any):
+        """初始化绑定的 Hook 注册点。"""
         self.key = key
         self.registry_holder = registry_holder
 
@@ -326,21 +331,29 @@ class BoundHookPoint(Generic[_FuncT]):
     def __call__(
         self, func: _FuncT | None = None, *, timeout: float | None = None
     ) -> Any:
+        """支持装饰器语法注册钩子函数。"""
         return _bare_or_parameterized(
             self.registry_holder._r, self.key, func, timeout=timeout
         )
 
 
 class HookPoint(Generic[_FuncT]):
+    """描述符形式的 Hook 注册点。"""
+
     def __init__(self, key: str):
+        """初始化 Hook 描述符。"""
         self.key = key
 
     def __get__(self, instance: Any, owner: Any) -> BoundHookPoint[_FuncT]:
+        """通过描述符协议绑定 Hook 实例。"""
         return BoundHookPoint(self.key, instance)
 
 
 class BoundToolHookPoint(Generic[_FuncT]):
+    """绑定到具体实例的工具级别 Hook 注册点。"""
+
     def __init__(self, key: str, registry_holder: Any):
+        """初始化绑定的工具 Hook 注册点。"""
         self.key = key
         self.registry_holder = registry_holder
 
@@ -359,16 +372,21 @@ class BoundToolHookPoint(Generic[_FuncT]):
         tools: list[str] | None = None,
         timeout: float | None = None,
     ) -> Any:
+        """支持装饰器语法注册工具钩子函数。"""
         return _tool_bare_or_parameterized(
             self.registry_holder._r, self.key, func, tools=tools, timeout=timeout
         )
 
 
 class ToolHookPoint(Generic[_FuncT]):
+    """描述符形式的工具级别 Hook 注册点。"""
+
     def __init__(self, key: str):
+        """初始化工具 Hook 描述符。"""
         self.key = key
 
     def __get__(self, instance: Any, owner: Any) -> BoundToolHookPoint[_FuncT]:
+        """通过描述符协议绑定工具 Hook 实例。"""
         return BoundToolHookPoint(self.key, instance)
 
 
@@ -376,10 +394,12 @@ class _HookRegistration:
     """Hooks 装饰器注册辅助类，用于各阶段钩子的声明式注册"""
 
     def __init__(self, hooks: "Hooks"):
+        """初始化钩子注册辅助实例。"""
         self._hooks = hooks
 
     @property
     def _r(self) -> dict[str, list[_HookEntry[Any]]]:
+        """获取底层注册的钩子字典。"""
         return self._hooks._registry
 
     before_run = HookPoint[BeforeRunHookFunc]("before_run")
@@ -434,6 +454,7 @@ class Hooks(AbstractCapability):
     """
 
     def __init__(self):
+        """初始化 Hooks 拦截器实例。"""
         self._registry: dict[str, list[_HookEntry[Any]]] = {}
         self.on = _HookRegistration(self)
 
@@ -449,7 +470,7 @@ class Hooks(AbstractCapability):
         do_error: Callable[[_HookEntry[Any], BaseException], Awaitable[Any]],
         do_after: Callable[[_HookEntry[Any], Any], Awaitable[Any]],
     ) -> Any:
-        """核心泛型流水线引擎：消除重复代码并严格遵守 Protocol 签名传递 kwargs"""
+        """核心泛型流水线引擎，按阶段分发并执行注册的钩子链。"""
         for entry in get_entries(f"before_{hook_prefix}"):
             await do_before(entry)
 
@@ -488,6 +509,7 @@ class Hooks(AbstractCapability):
     async def wrap_run(
         self, context: RunContext, handler: WrapRunHandler
     ) -> AgentRunResult[Any]:
+        """接管并包裹 Agent 运行生命周期的执行。"""
         return await self._dispatch_pipeline(
             "run",
             context,
@@ -506,6 +528,7 @@ class Hooks(AbstractCapability):
         llm_context: LLMContext[ChatRequest, ChatResponse],
         handler: WrapModelRequestHandler,
     ) -> ChatResponse:
+        """接管并包裹 LLM 大模型请求的网络交互过程。"""
         async def do_before(e):
             nonlocal llm_context
             res = await _call_entry(e, "before_model_request", context, llm_context)
@@ -543,6 +566,7 @@ class Hooks(AbstractCapability):
         args: str | dict[str, Any],
         handler: WrapToolValidateHandler,
     ) -> dict[str, Any]:
+        """接管并包裹工具参数的校验过程。"""
         async def do_before(e):
             nonlocal args
             res = await _call_entry(
@@ -583,6 +607,7 @@ class Hooks(AbstractCapability):
         arguments: dict[str, Any],
         handler: WrapToolExecuteHandler,
     ) -> Any:
+        """接管并包裹特定工具的物理执行逻辑。"""
         async def do_before(e):
             nonlocal arguments
             res = await _call_entry(

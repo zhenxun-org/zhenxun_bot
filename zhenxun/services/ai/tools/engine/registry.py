@@ -26,6 +26,7 @@ class ToolCollection(list[T], Generic[T]):
     """支持按索引和按名称获取的工具集合 (List + Dict)"""
 
     def __init__(self, iterable: Iterable[T] | None = None):
+        """初始化工具集合。"""
         super().__init__(iterable or [])
         self._name_cache: dict[str, T] = {}
         self._build_name_cache()
@@ -79,9 +80,11 @@ class ToolCollection(list[T], Generic[T]):
             self._name_cache[value.name.lower()] = value
 
     def get(self, key: str, default: Any = None) -> T | Any:
+        """通过名称获取工具，若不存在则返回默认值。"""
         return self._name_cache.get(key.lower(), default)
 
     def append(self, object: T) -> None:
+        """向集合中添加工具，并更新名称缓存。"""
         name = object.name
         if name.lower() in self._name_cache:
             old_tool = self._name_cache[name.lower()]
@@ -95,16 +98,19 @@ class ToolCollection(list[T], Generic[T]):
         self._name_cache[name.lower()] = object
 
     def extend(self, iterable: Iterable[T]) -> None:
+        """批量添加工具到集合中。"""
         for t in iterable:
             self.append(t)
 
     def remove(self, value: T) -> None:
+        """从集合中移除指定工具，并同步更新缓存。"""
         super().remove(value)
         name = getattr(value, "name", None)
         if name and name.lower() in self._name_cache:
             del self._name_cache[name.lower()]
 
     def pop(self, index: SupportsIndex = -1) -> T:
+        """弹出指定位置的工具，并从缓存中移除。"""
         tool = super().pop(index)
         name = getattr(tool, "name", None)
         if name and name.lower() in self._name_cache:
@@ -112,6 +118,7 @@ class ToolCollection(list[T], Generic[T]):
         return tool
 
     def filter_by_names(self, names: list[str] | None = None) -> "ToolCollection[T]":
+        """根据名称列表筛选并返回新的工具子集合。"""
         if names is None:
             return self
         return ToolCollection(
@@ -123,16 +130,20 @@ class ToolCollection(list[T], Generic[T]):
         )
 
     def clear(self) -> None:
+        """清空集合及所有名称缓存。"""
         super().clear()
         self._name_cache.clear()
 
     def keys(self):
+        """获取所有工具名称缓存的键。"""
         return self._name_cache.keys()
 
     def values(self):
+        """获取所有已缓存的工具实例。"""
         return self._name_cache.values()
 
     def items(self):
+        """获取所有工具名称与实例的键值对。"""
         return self._name_cache.items()
 
 
@@ -145,11 +156,13 @@ class _StringResolver:
     def __init__(
         self, name: str, manager: "ToolProviderManager", default_namespace: str
     ):
+        """初始化字符串路由解析器。"""
         self.name = name
         self.manager = manager
         self.default_namespace = default_namespace
 
     async def resolve(self, context: RunContext | None = None) -> ResolvedToolPayload:
+        """解析字符串路由并返回匹配的工具载荷。"""
         if self.name in self.manager._macro_resolvers:
             resolver = self.manager._macro_resolvers[self.name]
             resolved = (
@@ -192,11 +205,13 @@ class _QueryResolver:
     def __init__(
         self, query: Query, manager: "ToolProviderManager", default_namespace: str
     ):
+        """初始化查询对象路由解析器。"""
         self.query = query
         self.manager = manager
         self.default_namespace = default_namespace
 
     async def resolve(self, context: RunContext | None = None) -> ResolvedToolPayload:
+        """执行查询以解析并返回匹配的工具载荷。"""
         payload = ResolvedToolPayload()
         namespaces_to_search = []
 
@@ -235,10 +250,12 @@ class _CallableResolver:
     """
 
     def __init__(self, func: Callable, manager: "ToolProviderManager"):
+        """初始化可调用对象路由解析器。"""
         self.func = func
         self.manager = manager
 
     async def resolve(self, context: RunContext | None = None) -> ResolvedToolPayload:
+        """将可调用对象转换为函数工具并返回其解析载荷。"""
         for candidate in (
             getattr(self.func, "__tool_name__", None),
             getattr(self.func, "__name__", None),
@@ -263,12 +280,14 @@ class _TypeAdapterResolver:
         manager: "ToolProviderManager",
         default_namespace: str,
     ):
+        """初始化类型适配器解析器。"""
         self.item = item
         self.resolver_func = resolver_func
         self.manager = manager
         self.default_namespace = default_namespace
 
     async def resolve(self, context: RunContext | None = None) -> ResolvedToolPayload:
+        """执行类型适配器函数并解析返回对应的工具载荷。"""
         resolved = (
             await self.resolver_func(self.item)
             if is_coroutine_callable(self.resolver_func)
@@ -285,11 +304,13 @@ class ToolProviderManager:
     _instance: "ToolProviderManager | None" = None
 
     def __new__(cls) -> Self:
+        """单例模式的实例创建方法。"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cast(Self, cls._instance)
 
     def __init__(self):
+        """初始化工具提供者管理器。"""
         if hasattr(self, "_initialized") and self._initialized:
             return
 
@@ -304,11 +325,13 @@ class ToolProviderManager:
         self._type_resolvers: dict[type, Callable] = {}
 
     def register_macro_resolver(self, macro_str: str, resolver_func: Callable) -> None:
+        """注册宏解析器函数。"""
         self._macro_resolvers[macro_str] = resolver_func
 
     def register_type_resolver(
         self, target_type: type, resolver_func: Callable
     ) -> None:
+        """注册特定类型的工具解析函数。"""
         self._type_resolvers[target_type] = resolver_func
 
     def register(self, provider: ToolProvider):
@@ -445,6 +468,7 @@ class ToolProviderManager:
         excluded_servers: list[str] | None = None,
         namespaces: list[str] | None = None,
     ) -> ToolCollection:
+        """获取已解析完成的所有可用工具集合。"""
         has_filters = (
             allowed_servers is not None
             or excluded_servers is not None
@@ -462,11 +486,13 @@ class ToolProviderManager:
         return tools
 
     async def resolve_specific_tools(self, tool_names: list[str]) -> ToolCollection:
+        """根据名称列表检索并返回特定的工具集合。"""
         return await self._query_engine(names=tool_names, include_providers=True)
 
     async def get_function_tools(
         self, names: list[str] | None = None
     ) -> ToolCollection:
+        """获取本地注册的所有函数工具集合。"""
         return await self._query_engine(names=names, include_providers=False)
 
     def _normalize_to_resolver(self, item: Any, default_ns: str) -> Any:
