@@ -34,10 +34,11 @@ class LLMAdapterFactory:
         from .jina import JinaAdapter
         from .mimo import MiMoAdapter
         from .minimax import MiniMaxAdapter
-        from .openai import OpenAIAdapter
+        from .openai import OpenAIAdapter, OpenAIResponsesAdapter
         from .openrouter import OpenRouterAdapter
 
         cls.register_adapter(OpenAIAdapter())
+        cls.register_adapter(OpenAIResponsesAdapter())
         cls.register_adapter(OpenRouterAdapter())
         cls.register_adapter(DeepSeekAdapter())
         cls.register_adapter(JinaAdapter())

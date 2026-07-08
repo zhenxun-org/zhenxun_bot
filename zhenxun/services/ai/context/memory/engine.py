@@ -9,7 +9,7 @@ from zhenxun.services.ai.context.memory.models import MemoryConfig
 from zhenxun.services.ai.context.memory.types import SessionMetadata
 from zhenxun.services.ai.core.engine.context_renderer import ContextConverter
 from zhenxun.services.ai.core.messages import AgentMessage
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_memory as logger
 from zhenxun.utils.pydantic_compat import model_copy
 
 

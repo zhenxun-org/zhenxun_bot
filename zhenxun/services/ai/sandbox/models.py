@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_sandbox as logger
 from zhenxun.utils.pydantic_compat import model_dump
 
 if TYPE_CHECKING:
@@ -337,7 +337,6 @@ class SandboxBlueprint(BaseModel):
 
     def with_local_dir(self, path: str, local_dir: str) -> "SandboxBlueprint":
         """声明预置本地宿主机完整目录"""
-        from zhenxun.services.log import logger
 
         for bm in self.bind_mounts:
             if path.startswith(bm.sandbox_path) or bm.sandbox_path.startswith(path):
@@ -369,8 +368,6 @@ class SandboxBlueprint(BaseModel):
     ) -> "SandboxBlueprint":
         """声明宿主机物理目录双向挂载 (Bind Mount)"""
         from pathlib import Path
-
-        from zhenxun.services.log import logger
 
         if remote_path in self.entries:
             logger.warning(

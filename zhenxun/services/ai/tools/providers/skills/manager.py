@@ -20,7 +20,7 @@ from zhenxun.services.ai.tools.providers.skills.models import (
     SkillEnvConfig,
     SkillFrontmatter,
 )
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_dump, model_validate
 from zhenxun.utils.utils import infer_plugin_namespace
 

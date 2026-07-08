@@ -4,7 +4,7 @@ from typing_extensions import TypeVar
 
 from jinja2 import Environment
 
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_core as logger
 from zhenxun.utils.pydantic_compat import model_dump
 
 if TYPE_CHECKING:

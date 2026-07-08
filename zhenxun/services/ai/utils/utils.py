@@ -3,6 +3,7 @@ from collections.abc import Callable
 import functools
 import inspect
 import threading
+from typing import Any
 
 
 def wrap_to_async(func: Callable) -> Callable:
@@ -55,3 +56,37 @@ def wrap_to_async(func: Callable) -> Callable:
     setattr(async_wrapper, "__is_async_wrapper__", True)
     setattr(async_wrapper, "_is_coroutine", True)
     return async_wrapper
+
+
+def parse_routing_string(route_str: str, default_namespace: str) -> dict[str, Any]:
+    """
+    统一的声明式路由字符串解析函数。
+
+    支持格式:
+    - "namespace.target"
+    - "*.target" (等价于 global.target)
+    - "target" (使用 default_namespace)
+
+    target 支持:
+    - "*" (全选)
+    - "#tag1#tag2" (按标签筛选)
+    - "name" (按精确名称筛选)
+    """
+    if "." in route_str:
+        ns, target = route_str.split(".", 1)
+        if ns == "*":
+            ns = "global"
+    else:
+        ns = default_namespace
+        target = route_str
+
+    result: dict[str, Any] = {"namespace": ns}
+
+    if target == "*":
+        pass
+    elif target.startswith("#"):
+        result["tags"] = [t for t in target.split("#") if t]
+    else:
+        result["name"] = target
+
+    return result

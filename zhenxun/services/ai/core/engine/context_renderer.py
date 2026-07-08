@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from zhenxun.services.ai.core.messages import AgentEvent, AgentMessage, LLMMessage
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_core as logger
 
 
 class ContextConverter:

@@ -10,7 +10,7 @@ from zhenxun.services.ai.core.options import (
     GenerationConfig,
     ResponseFormat,
 )
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.pydantic_compat import model_json_schema, model_validate
 
 
@@ -43,17 +43,6 @@ class OpenAIIntentNamespace:
         return self._builder
 
 
-class DeepSeekIntentNamespace:
-    """DeepSeek 专属高级参数构建域"""
-
-    def __init__(self, builder: "IntentBuilder"):
-        self._builder = builder
-
-    def disable_thinking(self) -> "IntentBuilder":
-        """显式关闭 DeepSeek 的思维链"""
-        self._builder._config.deepseek_options.thinking = False
-        return self._builder
-
 
 class IntentBuilder:
     """
@@ -72,9 +61,6 @@ class IntentBuilder:
     def openai(self) -> OpenAIIntentNamespace:
         return OpenAIIntentNamespace(self)
 
-    @property
-    def deepseek(self) -> DeepSeekIntentNamespace:
-        return DeepSeekIntentNamespace(self)
 
     def with_reasoning(self, level: str | None = None) -> Self:
         """
@@ -85,9 +71,6 @@ class IntentBuilder:
             self._config.common.reasoning_effort = level
             if level.lower() != "none":
                 self._config.gemini_options.include_thoughts = True
-                self._config.deepseek_options.thinking = True
-            else:
-                self._config.deepseek_options.thinking = False
         return self
 
     def with_local_cache(self, ttl: int = 3600) -> Self:

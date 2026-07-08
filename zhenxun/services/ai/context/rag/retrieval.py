@@ -4,7 +4,7 @@ import time
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from zhenxun.services.ai.context.rag.models import QueryRequest, SearchResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_rag as logger
 
 if TYPE_CHECKING:
     from zhenxun.services.ai.context.rag.backends.storages import StorageBackend

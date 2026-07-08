@@ -125,6 +125,7 @@ CAP_DEEPSEEK_V4 = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.TEXT},
     supports_tool_calling=True,
+    supports_thinking_toggle=True,
     reasoning_mode=ReasoningMode.EFFORT,
     reasoning_visibility="visible",
     reasoning_effort_map={"minimal": "low"},
@@ -133,6 +134,7 @@ CAP_MINIMAX_REASONING = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.TEXT},
     supports_tool_calling=True,
+    supports_thinking_toggle=True,
     reasoning_mode=ReasoningMode.EFFORT,
     reasoning_visibility="visible",
 )
@@ -146,6 +148,15 @@ CAP_GLM_MULTIMODAL = ModelCapabilities(
     },
     output_modalities={ModelModality.TEXT},
     supports_tool_calling=True,
+    supports_thinking_toggle=True,
+)
+
+CAP_GLM_REASONING = ModelCapabilities(
+    input_modalities={ModelModality.TEXT},
+    output_modalities={ModelModality.TEXT},
+    supports_tool_calling=True,
+    supports_thinking_toggle=True,
+    reasoning_mode=ReasoningMode.EFFORT,
 )
 
 CAP_MINIMAX_MULTIMODAL = ModelCapabilities(
@@ -158,6 +169,7 @@ CAP_MIMO_TEXT = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.TEXT},
     supports_tool_calling=True,
+    supports_thinking_toggle=True,
     supported_native_tools={"web_search"},
     reasoning_effort_map={"max": "high", "xhigh": "high", "minimal": "low"},
 )
@@ -171,6 +183,7 @@ CAP_MIMO_MULTIMODAL = ModelCapabilities(
     },
     output_modalities={ModelModality.TEXT, ModelModality.AUDIO},
     supports_tool_calling=True,
+    supports_thinking_toggle=True,
     supported_native_tools={"web_search"},
     reasoning_effort_map={"max": "high", "xhigh": "high", "minimal": "low"},
 )
@@ -180,28 +193,28 @@ CAP_OPENAI_TTS = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.AUDIO},
     supports_tool_calling=False,
-    default_voice_id="alloy",
+    default_voice_id="alloy"
 )
 
 CAP_GEMINI_TTS = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.AUDIO},
     supports_tool_calling=False,
-    default_voice_id="Aoede",
+    default_voice_id="Aoede"
 )
 
 CAP_MINIMAX_TTS = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.AUDIO},
     supports_tool_calling=False,
-    default_voice_id="female-shaonv",
+    default_voice_id="female-shaonv"
 )
 
 CAP_MIMO_TTS = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.AUDIO},
     supports_tool_calling=False,
-    default_voice_id="mimo_default",
+    default_voice_id="mimo_default"
 )
 
 CAP_TEXT_EMBEDDING = ModelCapabilities(
@@ -289,7 +302,7 @@ _ROUTING_TABLE: list[tuple[list[str], ModelCapabilities, int]] = [
         CTX_256K,
     ),
     (["glm-5v*"], CAP_GLM_MULTIMODAL, CTX_200K),
-    (["glm-5*", "glm-4.7*", "glm-4.6*"], STANDARD_TEXT_TOOL_CAPABILITIES, CTX_200K),
+    (["glm-5*", "glm-4.7*", "glm-4.6*"], CAP_GLM_REASONING, CTX_200K),
     (["*MiniMax-M2*", "*minimax-m2*"], CAP_MINIMAX_REASONING, CTX_200K),
     (["gpt-4*", "gpt-3.5*", "gpt-*"], CAP_OPENAI_MULTIMODAL, CTX_128K),
     (["o1-*", "o3-*"], CAP_OPENAI_REASONING, CTX_128K),

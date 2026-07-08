@@ -5,6 +5,8 @@ from typing_extensions import Self
 
 from pydantic import BaseModel, Field
 
+from zhenxun.utils.utils import infer_plugin_namespace
+
 
 class ScopeSelector(BaseModel):
     """领域驱动：统一的作用域与实体资源选择器"""
@@ -196,7 +198,6 @@ class ScopeBuilder:
     ) -> ScopeSelector:
         """解析当前上下文依赖并生成作用域选择器实例。"""
         from zhenxun.services.ai.utils.runtime import ContextUtils
-        from zhenxun.utils.utils import infer_plugin_namespace
 
         selector = ScopeSelector(base_prefix=prefix)
         if "platform" in self._dims:

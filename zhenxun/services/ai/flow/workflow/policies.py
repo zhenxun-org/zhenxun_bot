@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from zhenxun.services.ai.flow.workflow.types import StepInput
 from zhenxun.services.ai.llm.api import generate_structured
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_flow as logger
 
 
 class PolicyAction(str, Enum):

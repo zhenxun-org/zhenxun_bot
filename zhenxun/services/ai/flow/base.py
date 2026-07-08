@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from pydantic import BaseModel, Field
 
+from zhenxun.services.ai.core.exceptions import ControlFlowExit
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.run.ui import UIController
+from zhenxun.services.ai.utils.logger import log_flow as logger
 
 if TYPE_CHECKING:
     from zhenxun.services.ai.flow.agent.models import Persona
@@ -121,8 +123,7 @@ class BaseRunnable(ABC, Generic[T_RunResult]):
         **kwargs: Any,
     ) -> T_RunResult:
         """阻塞式核心运行入口，安全捕获内部抛出的静默退出信号"""
-        from zhenxun.services.ai.core.exceptions import ControlFlowExit
-        from zhenxun.services.log import logger
+
 
         try:
             async with self.run_stream(

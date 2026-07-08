@@ -108,7 +108,7 @@ class AgentSessionManager:
                         count += 1
                     if task and not task.done():
                         task.cancel()
-                from zhenxun.services.log import logger
+                from zhenxun.services.ai.utils.logger import log_agent as logger
 
                 if count > 0:
                     logger.info(

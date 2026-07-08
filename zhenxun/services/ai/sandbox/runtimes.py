@@ -12,7 +12,7 @@ from zhenxun.services.ai.sandbox.models import (
     LanguageProfile,
     SandboxExecutionResult,
 )
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_sandbox as logger
 from zhenxun.utils.utils import infer_plugin_namespace
 
 

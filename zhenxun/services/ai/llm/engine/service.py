@@ -45,7 +45,7 @@ from zhenxun.services.ai.core.protocols.llm import (
 from zhenxun.services.ai.core.protocols.middleware import LLMMiddleware
 from zhenxun.services.ai.llm.system.models import RetryConfig
 from zhenxun.services.ai.llm.system.network import HealthManager, LLMHttpClient
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -86,7 +86,7 @@ class LLMModel(
         )
         self.model_name = model_detail.model_name
         self.temperature = model_detail.temperature
-        self.generation_max_tokens = model_detail.generation_max_tokens
+        self.max_output_tokens = model_detail.max_output_tokens
 
         self._is_closed = False
         self._ref_count = 0

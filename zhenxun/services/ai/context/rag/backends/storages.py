@@ -11,6 +11,7 @@ from zhenxun.services.ai.context.rag.models import (
     SearchResult,
 )
 from zhenxun.services.ai.context.rag.retrieval import FilterEvaluator
+from zhenxun.services.ai.utils.logger import log_rag as logger
 from zhenxun.services.ai.utils.scope import ScopeSelector
 from zhenxun.services.db_context import Model
 
@@ -124,8 +125,6 @@ class DictStorageBackend(StorageBackend):
                             SearchResult(record=self._records[r_id], score=float(score))
                         )
                 except ValueError as e:
-                    from zhenxun.services.log import logger
-
                     logger.warning(
                         "⚠️ DictStorage 中缓存的向量维度与当前查询维度不匹配，"
                         f"跳过向量检索。原因: {e}"
@@ -284,8 +283,6 @@ class TortoiseStorageBackend(StorageBackend):
                             )
                         )
                 except ValueError as e:
-                    from zhenxun.services.log import logger
-
                     logger.warning(
                         "⚠️ 数据库中缓存的向量维度与当前模型查询维度不匹配，"
                         f"已安全跳过向量检索(降级为稀疏匹配)。原因: {e}"
@@ -579,8 +576,6 @@ class LanceDBStorageBackend(StorageBackend):
                     .to_list()
                 )
             except Exception as e:
-                from zhenxun.services.log import logger
-
                 logger.warning(f"LanceDB FTS 检索失败(可能是由于尚未创建FTS索引): {e}")
                 return []
         else:

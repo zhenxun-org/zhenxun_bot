@@ -10,7 +10,7 @@ from mcp.types import JSONRPCMessage
 from zhenxun.services.ai.sandbox.addons.base import BaseMcpProxyExtension
 from zhenxun.services.ai.sandbox.protocols import SupportsStreamExecution
 from zhenxun.services.ai.sandbox.registry import SandboxRegistry
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_sandbox as logger
 from zhenxun.utils.pydantic_compat import model_dump_json, model_validate
 
 

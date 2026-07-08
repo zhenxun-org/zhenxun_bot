@@ -6,12 +6,16 @@ from typing_extensions import Self
 
 from pydantic import BaseModel
 
-from zhenxun.services.ai.capabilities import AbstractCapability, DynamicCapability
+from zhenxun.services.ai.capabilities import (
+    AbstractCapability,
+    CapabilitySource,
+    DynamicCapability,
+)
 from zhenxun.services.ai.core.exceptions import ConcurrencyInterruptException
 from zhenxun.services.ai.core.messages import PromptInput
 from zhenxun.services.ai.core.models import CancellationToken
 from zhenxun.services.ai.core.stream_events import EventBus
-from zhenxun.services.ai.flow.agent.agent import CapabilitySource, ToolSource
+from zhenxun.services.ai.flow.agent.agent import ToolSource
 from zhenxun.services.ai.flow.agent.models import Persona
 from zhenxun.services.ai.flow.base import BaseRunnable
 from zhenxun.services.ai.flow.team.models import TeamRuntimeConfig, Transition
@@ -115,6 +119,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
         leader_model: str | None = None,
         leader_tools: list[ToolSource] | None = None,
         custom_prompt: str | None = None,
+        max_handoffs: int = 3,
     ) -> Self:
         """
         应用路由策略，基于挂载的 Router 进行最合适的专家动态分发。
@@ -128,6 +133,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
             leader_model: 路由节点 (Leader) 使用的大模型名称，若为空则默认继承全局。
             leader_tools: 挂载给路由节点 (Leader) 的专属工具列表。
             custom_prompt: 自定义系统提示词，用于覆盖默认的路由系统提示词。
+            max_handoffs: 同一会话中允许连续移交的最大次数，防止无限踢皮球。
         """
         from zhenxun.services.ai.flow.team.strategy import RouteStrategy
 
@@ -138,6 +144,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
             leader_model=leader_model,
             leader_tools=leader_tools,
             custom_prompt=custom_prompt,
+            max_handoffs=max_handoffs,
         )
         self.selector_func = selector_func
         return self
@@ -147,6 +154,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
         leader_model: str | None = None,
         leader_tools: list[ToolSource] | None = None,
         custom_prompt: str | None = None,
+        max_delegations: int = 3,
     ) -> Self:
         """
         应用协作策略，Leader 自主规划并主动将子任务委派给 Sub-Agents，最后汇总结果。
@@ -158,6 +166,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
             leader_model: 协调节点 (Leader) 使用的大模型名称，若为空则默认继承全局。
             leader_tools: 挂载给协调节点 (Leader) 的专属附加工具列表。
             custom_prompt: 自定义系统提示词，用于覆盖默认的协调系统提示词。
+            max_delegations: 允许向同一个专员连续委派失败的最大重试次数。
         """
         from zhenxun.services.ai.flow.team.strategy import CoordinateStrategy
 
@@ -165,6 +174,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
             leader_model=leader_model,
             leader_tools=leader_tools,
             custom_prompt=custom_prompt,
+            max_delegations=max_delegations,
         )
         return self
 
@@ -198,8 +208,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
         leader_model: str | None = None,
         leader_tools: list[ToolSource] | None = None,
         max_iterations: int = 15,
-        blackboard_schema: type[BaseModel] | None = None,
-        initial_blackboard_state: BaseModel | None = None,
+        blackboard: type[BaseModel] | BaseModel | None = None,
         custom_prompt: str | None = None,
     ) -> Self:
         """
@@ -213,18 +222,16 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
             leader_model: 规划节点 (Leader) 使用的大模型名称，若为空则默认继承全局。
             leader_tools: 挂载给规划节点 (Leader) 的专属附加工具列表。
             max_iterations: 引擎驱动的状态机最大迭代/循环次数，防止死循环。
-            blackboard_schema: 团队共享黑板的数据结构类型 (Pydantic Model 类)。
-            initial_blackboard_state: 共享黑板的初始数据状态实例。
+            blackboard: (可选) 团队共享黑板。可传入 Schema 类型类，或直接传入带有初始数据的 Schema 实例对象。
             custom_prompt: 自定义系统提示词，用于覆盖默认的规划系统提示词。
-        """
+        """  # noqa: E501
         from zhenxun.services.ai.flow.team.strategy import TaskStrategy
 
         self.strategy = TaskStrategy(
             leader_model=leader_model,
             leader_tools=leader_tools,
             max_iterations=max_iterations,
-            blackboard_schema=blackboard_schema,
-            initial_blackboard_state=initial_blackboard_state,
+            blackboard=blackboard,
             custom_prompt=custom_prompt,
         )
         return self

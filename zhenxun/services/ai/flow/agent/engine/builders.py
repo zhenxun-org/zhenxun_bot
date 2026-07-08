@@ -6,9 +6,7 @@ from typing import Any, cast
 from nonebot.utils import is_coroutine_callable
 
 from zhenxun.services.ai.capabilities import (
-    AbstractCapability,
     CombinedCapability,
-    DynamicCapability,
 )
 from zhenxun.services.ai.context.memory.builder import MemoryBuilder
 from zhenxun.services.ai.context.memory.engine import MemoryReader, MemoryWriter
@@ -22,13 +20,13 @@ from zhenxun.services.ai.flow.agent.capabilities import (
     TaskTrackingCapability,
 )
 from zhenxun.services.ai.flow.agent.models import Persona
-from zhenxun.services.ai.run import GLOBAL_CAPABILITIES, RunContext
+from zhenxun.services.ai.run import RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.tools.engine.registry import (
     ToolCollection,
     tool_provider_manager,
 )
-from zhenxun.services.ai.tools.models import GlobalToolFilter, ResolvedToolPayload
+from zhenxun.services.ai.tools.models import ResolvedToolPayload
 from zhenxun.services.ai.utils.scope import ScopeSelector
 from zhenxun.utils.pydantic_compat import model_copy
 
@@ -135,22 +133,21 @@ class CapabilityBuilder:
         if task_obj:
             dynamic_caps.append(TaskTrackingCapability(task_obj, agent_name))
 
-        run_level_caps = []
-        if profile_capabilities:
-            for cap in profile_capabilities:
-                if isinstance(cap, AbstractCapability):
-                    run_level_caps.append(cap)
-                elif callable(cap):
-                    run_level_caps.append(DynamicCapability(cap))
+        from zhenxun.services.ai.capabilities.manager import capability_manager
 
-        base_caps = GLOBAL_CAPABILITIES.get("global", []).copy()
-        if namespace != "global" and namespace in GLOBAL_CAPABILITIES:
-            base_caps.extend(GLOBAL_CAPABILITIES[namespace])
+        run_level_caps = capability_manager.resolve_capabilities(
+            profile_capabilities or [], namespace
+        )
+        agent_level_caps = capability_manager.resolve_capabilities(
+            agent_capabilities or [], namespace
+        )
+
+        auto_caps = capability_manager.get_auto_apply_capabilities(namespace)
 
         combined_cap = CombinedCapability(
-            base_caps
+            auto_caps
             + getattr(context, "capabilities", [])
-            + agent_capabilities
+            + agent_level_caps
             + run_level_caps
             + dynamic_caps
         )
@@ -298,7 +295,6 @@ class ToolBuilder:
         toolset_funcs: list[Any],
         system_tools: list[Any],
         namespace: str,
-        tool_filter: GlobalToolFilter | None,
         run_context: RunContext,
         run_scoped_cap: CombinedCapability,
     ) -> ResolvedToolPayload:
@@ -309,9 +305,8 @@ class ToolBuilder:
         参数：
             tool_definitions: 静态工具或工具集合的定义列表。
             toolset_funcs: 待依赖注入解析的工具集生成函数列表。
-            system_tools: 系统默认强制集成的工具定义列表。
+            system_tools: 系统默认强制集成的工具定义列表.
             namespace: 会话命名空间。
-            tool_filter: 全局的工具过滤条件，此处为占位。
             run_context: 运行上下文对象实例.
             run_scoped_cap: 运行域下的合并能力中间件，用于提供特定的能力工具。
 
@@ -411,14 +406,14 @@ class ToolBuilder:
             current_tool_defs = list(_cap_res)
 
         final_defs_map = {d.name.lower(): d for d in current_tool_defs if d}
-        final_effective_tools = ToolCollection()
+        final_effective_tools_list = []
         for t_exec in effective_tools:
             t_name = getattr(t_exec, "name", "unknown")
             if t_name.lower() in final_defs_map:
                 cloned_tool = copy.copy(t_exec)
                 cloned_tool._dynamic_def = final_defs_map[t_name.lower()]
-                final_effective_tools.append(cloned_tool)
-        return final_effective_tools
+                final_effective_tools_list.append(cloned_tool)
+        return ToolCollection(final_effective_tools_list)
 
 
 class SessionBuilder:

@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_sandbox as logger
 
 if TYPE_CHECKING:
     from zhenxun.services.ai.sandbox.drivers.base import BaseSandboxSession

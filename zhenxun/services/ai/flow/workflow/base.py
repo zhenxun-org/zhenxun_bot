@@ -19,7 +19,7 @@ from zhenxun.services.ai.flow.workflow.types import (
     StepType,
 )
 from zhenxun.services.ai.run import RunContext
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_flow as logger
 
 
 class BaseNode(ABC):

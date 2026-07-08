@@ -88,7 +88,8 @@ class ContextUtils:
     @staticmethod
     def generate_session_meta(
         bot: Bot,
-        event: Event,
+        event: Event | None = None,
+        deps: Any | None = None,
         scope_builder: ScopeBuilder | None = None,
         prefix: str = "",
         namespace: str | None = None,
@@ -104,7 +105,8 @@ class ContextUtils:
         if scope_builder is None:
             scope_builder = Isolation.AGENT_USER()
 
-        deps = NoneBotDeps(bot=bot, event=event)
+        if deps is None:
+            deps = NoneBotDeps(bot=bot, event=event) if event else NoneBotDeps(bot=bot)
         selector = scope_builder.resolve(
             deps=deps,
             prefix=prefix,

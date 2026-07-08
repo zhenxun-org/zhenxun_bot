@@ -15,7 +15,9 @@ from zhenxun.services.ai.core.stream_events import (
 )
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.run.models import AgentRunEnd, AgentRunStart, AgentRunSummary
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_agent as logger
+from zhenxun.utils.message import MessageUtils
+from zhenxun.utils.platform import PlatformUtils
 
 
 class TelemetrySubscriber:
@@ -122,7 +124,7 @@ class DefaultUISubscriber:
 
     async def _send_to_platform(self, display: Any):
         """将通用的显示内容或富文本消息部件渲染并发送至具体的聊天平台"""
-        if not self.bot or not self.event or not display:
+        if not self.bot or not display:
             return
 
         if (
@@ -144,9 +146,27 @@ class DefaultUISubscriber:
             display = msg
 
         if isinstance(display, UniMessage):
-            await display.send(self.event, bot=self.bot, reply_to=self.reply_to)
+            if self.event:
+                await display.send(self.event, bot=self.bot, reply_to=self.reply_to)
+            else:
+                target = PlatformUtils.get_target(
+                    user_id=self.context.get_user_id(),
+                    group_id=self.context.get_group_id(),
+                )
+                if target:
+                    await display.send(target=target, bot=self.bot)
         else:
-            await self.bot.send(self.event, str(display))
+            if self.event:
+                await self.bot.send(self.event, str(display))
+            else:
+                target = PlatformUtils.get_target(
+                    user_id=self.context.get_user_id(),
+                    group_id=self.context.get_group_id(),
+                )
+                if target:
+                    await MessageUtils.build_message(str(display)).send(
+                        target=target, bot=self.bot
+                    )
 
     async def on_tool_stream(self, event: ToolStreamChunkEvent):
         """处理工具流式数据块事件，仅在 verbose 开启时发送给平台"""

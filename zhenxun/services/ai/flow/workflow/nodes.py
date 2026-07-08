@@ -15,7 +15,7 @@ from zhenxun.services.ai.flow.workflow.types import (
 from zhenxun.services.ai.run import AgentTask, RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.run.models import AgentRunEnd
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_flow as logger
 
 NodeSource = BaseNode | BaseRunnable | Callable
 """工作流节点来源，可以是图元、可执行引擎或原生函数"""

@@ -131,6 +131,8 @@ class ModelCapabilities(BaseModel):
     """模型支持的输出模态集合。"""
     supports_tool_calling: bool = False
     """是否支持工具调用能力。"""
+    supports_thinking_toggle: bool = False
+    """是否支持通过 {"thinking": {"type": "enabled/disabled"}} 显式控制思考模式。"""
     is_embedding_model: bool = False
     """是否为嵌入模型。"""
     is_rerank_model: bool = False
@@ -187,7 +189,7 @@ class ModelDetail(BaseModel):
     """模型是否可用。"""
     temperature: float | None = None
     """采样温度参数。"""
-    generation_max_tokens: int | None = None
+    max_output_tokens: int | None = None
     """单次生成最大 Token 数。"""
     api_type: str | None = None
     """API 类型标识。"""
@@ -197,6 +199,10 @@ class ModelDetail(BaseModel):
     """显式声明的主任务类型 (如 'image_generation')。"""
     path_prefix: str | None = Field(default=None)
     """中转路由前缀，例如 '/cogvideox' 或 '/minimax'。"""
+    max_input_tokens: int | None = None
+    """最大输入上下文窗口（用于控制记忆压缩策略）"""
+    reasoning_effort: str | None = None
+    """该模型的默认思考/推理等级（如 'high', 'low', 'none'）"""
 
 
 __all__ = [

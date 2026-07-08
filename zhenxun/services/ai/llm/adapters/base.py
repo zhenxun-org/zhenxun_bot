@@ -47,7 +47,7 @@ from zhenxun.services.ai.core.messages import (
     ThoughtPart,
 )
 from zhenxun.services.ai.core.models import ModelIdentity
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.log_sanitizer import sanitize_for_logging
 
 if TYPE_CHECKING:
@@ -496,8 +496,7 @@ class BaseAdapter(ABC):
     async def parse_speech_response(
         self, identity: ModelIdentity, raw_response: httpx.Response
     ) -> AudioResponse:
-        """解析语音响应并委派给 `audio_handler`。
-        注意传入的是 httpx.Response 的 raw 对象"""
+        """解析语音响应并委派给 `audio_handler`"""
         if self.audio_handler:
             return await self.audio_handler.parse_speech_response(
                 adapter=self, identity=identity, raw_response=raw_response

@@ -4,8 +4,8 @@ from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.run.di import Inject
 from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
-from zhenxun.services.ai.tools.models import ToolResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.tools.models import ResolvedToolPayload, ToolResult
+from zhenxun.services.ai.utils.logger import log_tool as logger
 
 
 class HITLToolkit(BaseToolkit):
@@ -23,6 +23,12 @@ class HITLToolkit(BaseToolkit):
         "用户回答后，你将收到答案并可以继续任务。"
     )
 
+    async def resolve(self, context: RunContext | None = None) -> ResolvedToolPayload:
+        """智能环境感知：如果处于无真实用户交互的后台环境(如定时任务)，自动隐身以节省Token"""
+        if context is None or context.get_event() is None:
+            return ResolvedToolPayload()
+        return await super().resolve(context)
+
     @tool(
         name="ask_user_for_help",
         description="向当前对话的用户提出问题以获取信息或指导。当你无法独立完成任务时，请调用此工具。",
@@ -33,6 +39,7 @@ class HITLToolkit(BaseToolkit):
         hitl: Inject.HITL,
         context: RunContext,
     ) -> ToolResult:
+
         try:
             user_reply = await hitl.ask_text(
                 f"🤖 [AI 提问]\n{question}\n\n(请在 60 秒内回复，或回复'取消')",
@@ -47,8 +54,8 @@ class HITLToolkit(BaseToolkit):
             raise e
 
         logger.info(f"收到用户求助回复: {user_reply}")
-        if context and context.run.event_bus:
-            await context.run.event_bus.emit(
+        if context:
+            await context.run.emit(
                 ToolStreamChunkEvent(
                     tool_name=context.call.tool_name, content="🗣️ 已收到用户的回复"
                 )

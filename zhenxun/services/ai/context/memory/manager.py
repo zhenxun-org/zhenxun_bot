@@ -11,6 +11,7 @@ from zhenxun.services.ai.context.memory.storage.interfaces import (
     BaseSlotContext,
 )
 from zhenxun.services.ai.context.rag.backends import Embedder, StorageBackend
+from zhenxun.services.ai.utils.logger import log_memory as logger
 from zhenxun.services.ai.utils.scope import BaseScopeBuilder
 from zhenxun.utils.utils import infer_plugin_namespace
 
@@ -64,14 +65,11 @@ class MemoryCleaner(BaseScopeBuilder["MemoryCleaner"]):
 
     async def clear_all(self):
         """一键清理指定范围下的所有生命周期记忆（对话、槽位、RAG）"""
-        from zhenxun.services.log import logger
-
         await self.clear_short_term()
         await self.clear_slots()
         await self.clear_long_term()
         logger.info(
-            f"🧹 [MemoryCleaner] 成功清理作用域 '{self._selector.scope_prefix}'"
-            "下的所有记忆痕迹！"
+            f"🧹 成功清理作用域 '{self._selector.scope_prefix}'下的所有记忆痕迹！"
         )
 
 

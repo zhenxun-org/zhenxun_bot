@@ -22,19 +22,23 @@ class StablePrefix:
     """
 
     def __init__(self):
+        """初始化稳定前缀实例。"""
         self._snapshot: StablePrefixSnapshot | None = None
         self._version = 0
 
     @property
     def fingerprint(self) -> str:
+        """获取当前快照的唯一指纹。"""
         return self._snapshot.fingerprint if self._snapshot else "<unbuilt>"
 
     @property
     def version(self) -> int:
+        """获取当前前缀的版本号。"""
         return self._version
 
     @property
     def built(self) -> bool:
+        """判断当前是否已构建快照。"""
         return self._snapshot is not None
 
     def build(self, system_prompt: list[str], tools: list[Any]) -> bool:
@@ -50,9 +54,11 @@ class StablePrefix:
         return True
 
     def invalidate(self):
+        """使当前前缀快照失效。"""
         self._snapshot = None
 
     def to_context(self) -> tuple[list[str], list[Any]]:
+        """将前缀快照导出为上下文元组。"""
         if not self._snapshot:
             raise RuntimeError("StablePrefix.to_context() called before build()")
         return self._snapshot.system_prompt, self._snapshot.tools
@@ -60,6 +66,7 @@ class StablePrefix:
     def _take_snapshot(
         self, system_prompt: list[str], tools: list[Any]
     ) -> StablePrefixSnapshot:
+        """为系统提示词与工具列表生成指纹快照。"""
         parsed_tools = []
         for t in tools:
             if hasattr(t, "name"):
@@ -83,19 +90,24 @@ class AppendOnlyLog:
     """追加写入模式 of 对话日志管理器"""
 
     def __init__(self):
+        """初始化追加对话日志。"""
         self._entries: list[Any] = []
 
     @property
     def length(self) -> int:
+        """获取当前对话日志的条数。"""
         return len(self._entries)
 
     def append(self, message: Any):
+        """向对话日志中追加单条消息。"""
         self._entries.append(message)
 
     def extend(self, messages: list[Any]):
+        """批量追加多条消息到对话日志。"""
         self._entries.extend(messages)
 
     def clear(self):
+        """清空所有对话日志。"""
         self._entries.clear()
 
     def to_messages(self) -> list[Any]:
@@ -110,6 +122,7 @@ class AppendOnlyContextManager:
     """
 
     def __init__(self):
+        """初始化上下文管理器。"""
         self.prefix = StablePrefix()
         self.log = AppendOnlyLog()
         self._last_sync_count = 0

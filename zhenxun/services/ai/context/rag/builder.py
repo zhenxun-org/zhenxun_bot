@@ -23,7 +23,7 @@ from zhenxun.services.ai.context.rag.retrieval import (
     RerankRetriever,
     VectorDBRetriever,
 )
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_rag as logger
 
 
 class RAGBuilder:

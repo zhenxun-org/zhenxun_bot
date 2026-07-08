@@ -18,7 +18,7 @@ from zhenxun.services.ai.core.messages import (
     VideoPart,
 )
 from zhenxun.services.ai.llm.manager import get_default_model
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_memory as logger
 from zhenxun.utils.pydantic_compat import model_copy
 
 
@@ -126,7 +126,7 @@ class MessageDropper(BaseMemoryReducer):
             return messages, False, current_tokens
 
         logger.info(
-            "✂️ [MemoryCompression] 触发硬截断丢弃策略 | 原因: "
+            "✂️ 触发硬截断丢弃策略 | 原因: "
             f"当前 Token 预估 ({current_tokens}) 仍超过硬性上限 ({self.trigger_tokens})，"  # noqa: E501
             "开始丢弃最旧的历史对话..."
         )
@@ -199,7 +199,7 @@ class ToolPrunerReducer(BaseMemoryReducer):
             reasons.append(f"工具调用轮数超限 ({tool_turns} > {self.max_turns})")
 
         logger.info(
-            f"✂️ [MemoryCompression] 触发工具结果修剪策略 | 原因: {' 且 '.join(reasons)}"
+            f"✂️ 触发工具结果修剪策略 | 原因: {' 且 '.join(reasons)}"
         )
 
         from zhenxun.services.ai.core.messages import ToolReturnPart

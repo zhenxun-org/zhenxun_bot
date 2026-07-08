@@ -3,12 +3,14 @@
 """
 
 from dataclasses import dataclass, field
+import fnmatch
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from zhenxun.services.ai.core.messages import ToolCallPart, UsageInfo
 from zhenxun.services.ai.run.context import RunContext
+from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_dump, model_validate
 
 if TYPE_CHECKING:
@@ -211,11 +213,12 @@ class ToolOverride(BaseModel):
     async def resolve(self, context: RunContext | None = None) -> "ResolvedToolPayload":
         from zhenxun.services.ai.tools.engine.registry import tool_provider_manager
         from zhenxun.services.ai.tools.models import ResolvedToolPayload
-        from zhenxun.services.log import logger
 
-        found_tools = await tool_provider_manager.resolve_specific_tools([self.name])
-        if found_tools:
-            base_tool = found_tools[0]
+        payload = await tool_provider_manager.resolve_tools(
+            [self.name], context=context
+        )
+        if payload and payload.tools:
+            base_tool = payload.tools[0]
             if hasattr(base_tool, "clone_with_options"):
                 cloned_tool = base_tool.clone_with_options(self)
                 if hasattr(cloned_tool, "resolve"):
@@ -231,17 +234,8 @@ class ToolOverride(BaseModel):
         return ResolvedToolPayload()
 
 
-class GlobalToolFilter(BaseModel):
-    """全局宏观工具过滤器"""
-
-    allowed_servers: list[str] | None = None
-    """仅允许的服务端名称列表"""
-    excluded_servers: list[str] | None = None
-    """需要排除的服务端名称列表"""
-
-
 class ValidatedToolCall(BaseModel):
-    """工具调用验证结果载体（解耦验证与执行）"""
+    """工具调用验证结果载体"""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -265,22 +259,68 @@ class Query(BaseModel):
     用于在 Agent 中精确或批量筛选加载特定命名空间、特定标签的工具。
     """
 
-    name: str | None = Field(default=None)
-    """如果提供，则必须与工具的名称完全一致。"""
+    name: str | list[str] | None = Field(default=None)
+    """如果提供，则工具的最终解析名称必须等于该字符串或在列表中。"""
+    toolkit: str | list[str] | None = Field(default=None)
+    """如果提供，则工具必须属于指定的 Toolkit (支持字符串或列表)。"""
     tags: list[str] | None = Field(default=None)
     """如果提供，则工具必须包含这里列出的所有标签 (交集/AND匹配)。"""
+    exclude_tags: list[str] | None = Field(default=None)
+    """如果提供，则工具不能包含这里列出的任何标签 (排斥过滤)。"""
     namespace: str | None = Field(default=None)
-    """必填(由系统补充或显式声明)。限制搜索的插件命名空间，'global' 将跨全插件搜索。"""
+    """限制搜索的插件命名空间。如果不指定，将自动推导为调用者所在的插件；
+    'global' 将跨全插件搜索。"""
     metadata_filter: dict[str, Any] | None = Field(default=None)
     """如果提供，则工具的 metadata 必须包含这里列出的所有键值对。"""
 
     def match(self, tool: "BaseTool") -> bool:
         """判断某个工具或工具箱是否符合当前 Query 的筛选条件"""
+
+        def _match_pattern(val: str, pattern: str | list[str]) -> bool:
+            patterns = [pattern] if isinstance(pattern, str) else pattern
+            for p in patterns:
+                if "*" in p or "?" in p:
+                    if fnmatch.fnmatch(val, p):
+                        return True
+                elif val == p:
+                    return True
+            return False
+
+        is_toolkit_itself = hasattr(tool, "get_tools") and not hasattr(tool, "execute")
+
+        if self.toolkit:
+            if is_toolkit_itself:
+                tk_name = getattr(
+                    tool, "name", getattr(tool, "__class__", type).__name__
+                )
+            else:
+                parent_tk = getattr(tool, "parent_toolkit", None)
+                tk_name = (
+                    getattr(
+                        parent_tk,
+                        "name",
+                        getattr(parent_tk, "__class__", type).__name__,
+                    )
+                    if parent_tk
+                    else None
+                )
+
+            if not tk_name:
+                return False
+
+            if not _match_pattern(tk_name, self.toolkit):
+                return False
+
+        if is_toolkit_itself and (self.name or self.tags or self.exclude_tags):
+            return True
+
         if self.name:
             tool_name = getattr(tool, "name", getattr(tool, "__class__", type).__name__)
-            if tool_name != self.name:
+            if not _match_pattern(tool_name, self.name):
                 return False
-        if self.tags:
+
+        tool_tags = []
+        if self.tags or self.exclude_tags:
             tool_config = getattr(tool, "config", None)
             if (
                 tool_config
@@ -291,7 +331,13 @@ class Query(BaseModel):
             else:
                 tool_settings = getattr(tool, "settings", None)
                 tool_tags = getattr(tool_settings, "tags", []) if tool_settings else []
+
+        if self.tags:
             if not all(tag in tool_tags for tag in self.tags):
+                return False
+
+        if self.exclude_tags:
+            if any(tag in tool_tags for tag in self.exclude_tags):
                 return False
 
         if self.metadata_filter:
@@ -315,9 +361,15 @@ class ResolvedToolPayload:
     injected_prompts: list[str] = field(default_factory=list)
     toolkits: list[Any] = field(default_factory=list)
 
+    def merge(self, other: "ResolvedToolPayload") -> "ResolvedToolPayload":
+        """将另一个解析载荷合并到当前载荷中"""
+        self.tools.extend(other.tools)
+        self.injected_prompts.extend(other.injected_prompts)
+        self.toolkits.extend(other.toolkits)
+        return self
+
 
 __all__ = [
-    "GlobalToolFilter",
     "Query",
     "ResolvedToolPayload",
     "ToolOptions",

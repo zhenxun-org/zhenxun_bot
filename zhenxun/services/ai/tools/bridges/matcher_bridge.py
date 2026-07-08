@@ -24,8 +24,9 @@ from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.tools.core.schema import build_schema_hint
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.models import EndRunResult, ToolOptions, ToolResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_validate
+from zhenxun.utils.utils import infer_plugin_namespace
 
 
 class MatcherAdapter(ABC):
@@ -370,7 +371,8 @@ class MatcherTool(BaseTool):
 
         if not bot or not event:
             return ToolResult(
-                output="上下文缺少 bot 或 event，无法执行 Matcher"
+                output="❌ 当前处于无状态的自动化后台环境，缺乏真实的用户上下文(Event),"
+                "严禁调用该原生平台指令工具！请换用其他方法解决。"
             ).as_error()
 
         try:
@@ -448,8 +450,6 @@ def bind_matcher(
     """
 
     if require_prefix:
-        from zhenxun.utils.utils import infer_plugin_namespace
-
         ns = infer_plugin_namespace(default="global")
         if ns and ns not in ("global", "unknown"):
             if not name.startswith(f"{ns}_"):

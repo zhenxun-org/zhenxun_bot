@@ -6,7 +6,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from zhenxun.services.ai.core.messages import EmbedBatch
 from zhenxun.services.ai.llm.api import embed as api_embed
 from zhenxun.services.ai.message_builder import MessageBuilder
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_rag as logger
 
 EmbedTaskType = Literal[
     "general", "query", "document", "similarity", "classification", "clustering"

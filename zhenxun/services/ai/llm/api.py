@@ -36,7 +36,7 @@ from zhenxun.services.ai.core.options import (
 )
 from zhenxun.services.ai.guardrails import GuardrailSource
 from zhenxun.services.ai.llm.engine.router import LLMOrchestrator
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 
 from .builder import IntentBuilder
 

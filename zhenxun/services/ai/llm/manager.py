@@ -15,7 +15,7 @@ from zhenxun.services.ai.core.models import ModelDetail
 from zhenxun.services.ai.core.options import GenerationConfig
 from zhenxun.services.ai.llm.system.capabilities import get_model_capabilities
 from zhenxun.services.ai.llm.system.network import health_manager
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.pydantic_compat import model_dump
 

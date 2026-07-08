@@ -4,7 +4,7 @@ import re
 
 from zhenxun.services.ai.context.rag.models import BaseRecord
 from zhenxun.services.ai.context.rag.utils import cosine_similarity
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_rag as logger
 
 
 class ChunkingStrategy(ABC):

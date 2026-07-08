@@ -5,7 +5,7 @@ from typing import Any
 
 from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.models import ToolResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_knowledge as logger
 
 from .base import BaseKnowledge
 

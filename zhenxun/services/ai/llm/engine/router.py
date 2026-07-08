@@ -16,7 +16,7 @@ from zhenxun.services.ai.llm.manager import (
 )
 from zhenxun.services.ai.llm.system.capabilities import get_model_capabilities
 from zhenxun.services.ai.llm.system.network import health_manager
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 
 
 class BaseModelRouter(ABC):
@@ -57,7 +57,7 @@ class FallbackRouter(BaseModelRouter):
             m_name = model_names[idx]
 
             if not health_manager.is_route_healthy(m_name, strict_mode=is_routed_call):
-                logger.debug(f"👉 [Orchestrator] 节点 '{m_name}' 熔断中，已跳过")
+                logger.debug(f"👉 节点 '{m_name}' 熔断中，已跳过")
                 errors.append(f"{m_name}(熔断中)")
                 continue
 
@@ -70,7 +70,7 @@ class FallbackRouter(BaseModelRouter):
             try:
                 if len(model_names) > 1:
                     if idx != start_idx:
-                        logger.debug(f"🔄 [Orchestrator] 切换至备用节点: '{m_name}'...")
+                        logger.debug(f"🔄 切换至备用节点: '{m_name}'...")
 
                 async with await get_model_instance(
                     m_name, override_config, task=task
@@ -83,25 +83,25 @@ class FallbackRouter(BaseModelRouter):
             except LLMException as e:
                 if not e.should_failover:
                     logger.warning(
-                        f"🚫 [Orchestrator] 节点 '{m_name}' "
+                        f"🚫 节点 '{m_name}' "
                         f"返回不可恢复错误 ({e.__class__.__name__})，停止故障转移。"
                     )
                     raise e
                 logger.warning(
-                    f"⚠️ [Orchestrator] 节点 '{m_name}' "
+                    f"⚠️ 节点 '{m_name}' "
                     f"错误 ({e.__class__.__name__})，触发故障转移..."
                 )
                 errors.append(f"{m_name}({e.__class__.__name__})")
             except Exception as e:
                 logger.warning(
-                    f"⚠️ [Orchestrator] 节点 '{m_name}' 发生未知异常，触发故障转移: {e}"
+                    f"⚠️ 节点 '{m_name}' 发生未知异常，触发故障转移: {e}"
                 )
                 errors.append(f"{m_name}(Error)")
 
         if all_nodes_bypassed and len(model_names) > 1:
             fallback_model = health_manager.get_best_fallback_route(model_names)
             logger.warning(
-                f"⚠️ [Orchestrator] 路由组所有节点均已宕机！"
+                f"⚠️ 路由组所有节点均已宕机！"
                 f"强制放行 '{fallback_model}' 探活..."
             )
             try:

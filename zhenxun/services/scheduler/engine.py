@@ -7,12 +7,12 @@
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
 from functools import partial
 import random
 import time
+from typing import cast
 
-import nonebot
+from apscheduler.jobstores.base import JobLookupError
 from nonebot.adapters import Bot
 from nonebot.dependencies import Dependent
 from nonebot.exception import FinishedException, PausedException, SkippedException
@@ -30,43 +30,13 @@ from zhenxun.utils.decorator.retry import Retry
 from zhenxun.utils.platform import PlatformUtils
 from zhenxun.utils.pydantic_compat import parse_as
 
+from .registry import scheduler_registry
 from .repository import ScheduleRepository
-from .types import ExecutionPolicy, ScheduleContext
+from .types import ExecutionPolicy, ScheduleContext, TargetType
 
 JOB_PREFIX = "zhenxun_schedule_"
 SCHEDULE_CONCURRENCY_KEY = "all_groups_concurrency_limit"
 _LAST_PRESSURE_SKIP = 0.0
-
-
-def _resolve_scheduler_bot(bot_id: str | None, log_target: str) -> Bot | None:
-    if bot_id:
-        try:
-            return nonebot.get_bot(bot_id)
-        except KeyError:
-            logger.warning(f"{log_target} 需要的 Bot {bot_id} 不在线，本次执行跳过。")
-            return None
-
-    bots = list(nonebot.get_bots().values())
-    if not bots:
-        logger.warning(f"{log_target} 当前没有可用 Bot，本次执行跳过。")
-        return None
-    if len(bots) == 1:
-        return bots[0]
-
-    qq_client_bots = [
-        bot for bot in bots if PlatformUtils.get_platform_scope(bot) == "qq_client"
-    ]
-    if len(qq_client_bots) == 1:
-        bot = qq_client_bots[0]
-        logger.warning(
-            f"{log_target} 未指定 Bot，多 Bot 在线，自动选择 OneBot {bot.self_id}。"
-        )
-        return bot
-
-    logger.warning(
-        f"{log_target} 未指定 Bot 且多 Bot 在线，无法安全选择，" "本次执行跳过。"
-    )
-    return None
 
 
 class APSchedulerAdapter:
@@ -97,8 +67,10 @@ class APSchedulerAdapter:
 
         try:
             scheduler.remove_job(job_id)
-        except Exception:
+        except JobLookupError:
             pass
+        except Exception as e:
+            logger.debug(f"尝试覆盖 APScheduler 任务 {job_id} 时发生异常: {e}")
 
         if not isinstance(schedule.trigger_config, dict):
             logger.error(
@@ -132,7 +104,7 @@ class APSchedulerAdapter:
             job_params["coalesce"] = False
 
         scheduler.add_job(
-            _execute_job,
+            _execute_persistent_job,
             trigger=schedule.trigger_type,
             **job_params,
             **trigger_params,
@@ -154,8 +126,10 @@ class APSchedulerAdapter:
         try:
             scheduler.remove_job(job_id)
             logger.debug(f"已从APScheduler中移除任务: {job_id}")
-        except Exception:
-            pass
+        except JobLookupError:
+            logger.debug(f"APScheduler 中未找到任务: {job_id}，无需移除。")
+        except Exception as e:
+            logger.debug(f"从 APScheduler 移除任务 {job_id} 时发生异常: {e}")
 
     @staticmethod
     def pause_job(schedule_id: int):
@@ -168,8 +142,10 @@ class APSchedulerAdapter:
         job_id = APSchedulerAdapter._get_job_id(schedule_id)
         try:
             scheduler.pause_job(job_id)
-        except Exception:
-            pass
+        except JobLookupError:
+            logger.debug(f"APScheduler 中未找到任务: {job_id}，无法暂停。")
+        except Exception as e:
+            logger.debug(f"暂停 APScheduler 任务 {job_id} 时发生异常: {e}")
 
     @staticmethod
     def resume_job(schedule_id: int):
@@ -182,8 +158,8 @@ class APSchedulerAdapter:
         job_id = APSchedulerAdapter._get_job_id(schedule_id)
         try:
             scheduler.resume_job(job_id)
-        except Exception:
-            import asyncio
+        except JobLookupError:
+            logger.debug(f"APScheduler 中未找到任务: {job_id}，尝试重新注册...")
 
             async def _re_add_job():
                 schedule = await ScheduleRepository.get_by_id(schedule_id)
@@ -191,6 +167,8 @@ class APSchedulerAdapter:
                     APSchedulerAdapter.add_or_reschedule_job(schedule)
 
             asyncio.create_task(_re_add_job())  # noqa: RUF006
+        except Exception as e:
+            logger.debug(f"恢复 APScheduler 任务 {job_id} 时发生异常: {e}")
 
     @staticmethod
     def get_job_status(schedule_id: int) -> dict:
@@ -236,38 +214,68 @@ class APSchedulerAdapter:
             return
 
         scheduler.add_job(
-            _execute_job,
+            _execute_ephemeral_job,
             trigger=trigger_type,
             id=job_id,
             misfire_grace_time=60,
-            args=[None],
-            kwargs={"context_override": context},
+            kwargs={"context": context},
             **trigger_config,
         )
         logger.debug(f"已添加新的临时APScheduler任务: {job_id}")
 
 
+async def _run_dependent_task(
+    func: Callable, injected_params: dict, bot: Bot, state: T_State
+):
+    """将普通函数包装为 NoneBot Dependent 并执行的内部辅助方法"""
+
+    async def wrapper(bot: Bot):
+        return await func(bot=bot, **injected_params)
+
+    dependent = Dependent.parse(call=wrapper, allow_types=Matcher.HANDLER_PARAM_TYPES)
+    return await dependent(bot=bot, state=state)
+
+
 async def _execute_single_job_instance(
-    schedule: ScheduledJob, bot, group_id: str | None = None
+    schedule: ScheduledJob, bot, target_id: str | None = None
 ):
     """
     负责执行一个具体目标的任务实例。
     """
-    from .manager import scheduler_manager
 
     plugin_name = schedule.plugin_name
-    if group_id is None and schedule.target_type == "GROUP":
-        group_id = schedule.target_identifier
 
-    task_meta = scheduler_manager._registered_tasks.get(plugin_name)
+    actual_group_id = None
+    actual_user_id = None
+
+    if schedule.target_type in (
+        TargetType.GROUP,
+        TargetType.TAG,
+        TargetType.ALL_GROUPS,
+    ):
+        actual_group_id = target_id or (
+            schedule.target_identifier
+            if schedule.target_type == TargetType.GROUP
+            else None
+        )
+    elif schedule.target_type == TargetType.USER:
+        actual_user_id = target_id or schedule.target_identifier
+
+    target_log = actual_group_id or actual_user_id
+
+    task_meta = scheduler_registry.tasks.get(plugin_name)
 
     if not task_meta:
         logger.error(f"无法执行任务：插件 '{plugin_name}' 在执行期间变得不可用。")
         return
 
-    is_blocked = await CommonUtils.task_is_block(bot, plugin_name, group_id)
+    is_blocked = await CommonUtils.task_is_block(bot, plugin_name, actual_group_id)
     if is_blocked:
-        target_desc = f"群 {group_id}" if group_id else "全局"
+        target_desc = (
+            f"群 {actual_group_id}"
+            if actual_group_id
+            else (f"用户 {actual_user_id}" if actual_user_id else "全局")
+        )
         logger.info(
             f"插件 '{plugin_name}' 的定时任务在目标 [{target_desc}] "
             f"因功能被禁用而跳过执行。"
@@ -279,7 +287,8 @@ async def _execute_single_job_instance(
         plugin_name=plugin_name,
         bot_id=bot.self_id,
         platform_scope=PlatformUtils.get_platform_scope(bot),
-        group_id=group_id,
+        group_id=actual_group_id,
+        user_id=actual_user_id,
         job_kwargs=schedule.job_kwargs if isinstance(schedule.job_kwargs, dict) else {},
     )
     state: T_State = {ScheduleContext: context}
@@ -300,18 +309,13 @@ async def _execute_single_job_instance(
                     injected_params["params"] = params_instance  # type: ignore
             except Exception as e:
                 logger.error(
-                    f"任务 {schedule.id} (目标: {group_id}) 参数验证失败: {e}", e=e
+                    f"任务 {schedule.id} (目标: {target_log}) 参数验证失败: {e}",
+                    e=e,
                 )
                 raise
 
-        async def wrapper(bot: Bot):
-            return await task_meta["func"](bot=bot, **injected_params)  # type: ignore
-
-        dependent = Dependent.parse(
-            call=wrapper,
-            allow_types=Matcher.HANDLER_PARAM_TYPES,
-        )
-        return await dependent(bot=bot, state=state)
+        func = cast(Callable, task_meta["func"])
+        return await _run_dependent_task(func, injected_params, bot, state)
 
     try:
         if policy.retries > 0:
@@ -332,117 +336,37 @@ async def _execute_single_job_instance(
                 exception=retry_exceptions,
                 on_success=on_success_handler,
                 on_failure=on_failure_handler,
-                log_name=f"ScheduledJob-{schedule.id}-{group_id or 'global'}",
+                log_name=f"ScheduledJob-{schedule.id}-{target_log or 'global'}",
             )
 
             decorated_executor = retry_decorator(task_execution_coro)
             await decorated_executor()
         else:
             logger.info(
-                f"插件 '{plugin_name}' 开始为目标 [{group_id or '全局'}] "
+                f"插件 '{plugin_name}' 开始为目标 [{target_log or '全局'}] "
                 f"执行定时任务 (ID: {schedule.id})。"
             )
             await task_execution_coro()
 
     except (PausedException, FinishedException, SkippedException) as e:
         logger.warning(
-            f"定时任务 {schedule.id} (目标: {group_id}) 被中断: {type(e).__name__}"
+            f"定时任务 {schedule.id} (目标: {target_log}) 被中断: {type(e).__name__}"
         )
     except Exception as e:
         logger.error(
-            f"执行定时任务 {schedule.id} (目标: {group_id}) "
+            f"执行定时任务 {schedule.id} (目标: {target_log}) "
             f"时发生未被策略处理的最终错误",
             e=e,
         )
 
 
-async def _execute_job(
-    schedule_id: int | None,
-    force: bool = False,
-    context_override: ScheduleContext | None = None,
-):
-    """
-    APScheduler 调度的入口函数，现在作为分发器。
-    """
-    from .manager import scheduler_manager
+class ExecutionDispatcher:
+    """执行管线分发器：处理并发限制、串行间隔、随机散列打散逻辑"""
 
-    schedule = None
-
-    if context_override:
-        plugin_name = context_override.plugin_name
-        task_meta = scheduler_manager._registered_tasks.get(plugin_name)
-        if not task_meta or not task_meta["func"]:
-            logger.error(f"无法执行临时任务：函数 '{plugin_name}' 未注册。")
-            return
-
-        try:
-            bot = _resolve_scheduler_bot(
-                context_override.bot_id,
-                f"临时任务 {plugin_name}",
-            )
-            if bot is None:
-                return
-            context_override.platform_scope = PlatformUtils.get_platform_scope(bot)
-            logger.info(f"开始执行临时任务: {plugin_name}")
-            injected_params = {"context": context_override}
-            state: T_State = {ScheduleContext: context_override}
-
-            async def wrapper(bot: Bot):
-                return await task_meta["func"](bot=bot, **injected_params)  # type: ignore
-
-            dependent = Dependent.parse(
-                call=wrapper,
-                allow_types=Matcher.HANDLER_PARAM_TYPES,
-            )
-            await dependent(bot=bot, state=state)
-            logger.info(f"临时任务 '{plugin_name}' 执行完成。")
-        except Exception as e:
-            logger.error(f"执行临时任务 '{plugin_name}' 时发生错误", e=e)
-        return
-
-    if schedule_id is None:
-        logger.error("执行持久化任务时 schedule_id 不能为空。")
-        return
-
-    global _LAST_PRESSURE_SKIP
-    if should_pause_tasks():
-        now = time.time()
-        if now - _LAST_PRESSURE_SKIP > 30:
-            _LAST_PRESSURE_SKIP = now
-            logger.info("scheduler paused due to message pressure")
-        return
-
-    scheduler_manager._running_tasks.add(schedule_id)
-    try:
-        schedule = await ScheduleRepository.get_by_id(schedule_id)
-        if not schedule or (not schedule.is_enabled and not force):
-            logger.warning(f"定时任务 {schedule_id} 不存在或已禁用，跳过执行。")
-            return
-
-        bot = _resolve_scheduler_bot(schedule.bot_id, f"任务 {schedule_id}")
-        if bot is None:
-            return
-
-        resolver = scheduler_manager._target_resolvers.get(schedule.target_type)
-        if not resolver:
-            logger.error(
-                f"任务 {schedule.id} 的目标类型 '{schedule.target_type}' "
-                f"没有注册解析器，执行跳过。"
-            )
-            raise ValueError(f"未知的目标类型: {schedule.target_type}")
-
-        try:
-            resolved_targets = await resolver(schedule.target_identifier, bot)
-        except Exception as e:
-            logger.error(f"为任务 {schedule.id} 解析目标失败", e=e)
-            raise
-
-        logger.info(
-            f"任务 {schedule.id} ({schedule.name or schedule.plugin_name}) 开始执行, "
-            f"目标类型: {schedule.target_type}, "
-            f"解析出 {len(resolved_targets)} 个目标"
-        )
-
+    @staticmethod
+    async def dispatch(
+        schedule: ScheduledJob, bot: Bot, resolved_targets: list[str | None]
+    ):
         concurrency_limit = Config.get_config(
             "SchedulerManager", SCHEDULE_CONCURRENCY_KEY, 5
         )
@@ -462,15 +386,10 @@ async def _execute_job(
             )
             for i, target_id in enumerate(resolved_targets):
                 if i > 0:
-                    logger.debug(
-                        f"任务 {schedule.id} 目标 [{target_id or '全局'}]: "
-                        f"等待 {interval_seconds} 秒后执行。"
-                    )
                     await asyncio.sleep(interval_seconds)
-                await _execute_single_job_instance(schedule, bot, group_id=target_id)
+                await _execute_single_job_instance(schedule, bot, target_id=target_id)
         else:
             spread_seconds = spread_config.get("spread", 1.0)
-
             logger.debug(
                 f"任务 {schedule.id}: 将在 {spread_seconds:.2f} 秒内分散执行 "
                 f"{len(resolved_targets)} 个目标。"
@@ -478,46 +397,112 @@ async def _execute_job(
 
             async def worker(target_id: str | None):
                 delay = random.uniform(0.1, spread_seconds)
-                logger.debug(
-                    f"任务 {schedule.id} 目标 [{target_id or '全局'}]: "
-                    f"随机延迟 {delay:.2f} 秒后执行。"
-                )
                 await asyncio.sleep(delay)
                 async with semaphore:
                     await _execute_single_job_instance(
-                        schedule, bot, group_id=target_id
+                        schedule, bot, target_id=target_id
                     )
 
             tasks_to_run = [worker(target_id) for target_id in resolved_targets]
             if tasks_to_run:
                 await asyncio.gather(*tasks_to_run, return_exceptions=True)
 
-        schedule.last_run_at = datetime.now()
-        schedule.last_run_status = "SUCCESS"
-        schedule.consecutive_failures = 0
-        await schedule.save(
-            update_fields=["last_run_at", "last_run_status", "consecutive_failures"]
+
+async def _execute_ephemeral_job(context: ScheduleContext):
+    """
+    执行临时的、内存态的定时任务 (Ephemeral Job)
+    """
+    plugin_name = context.plugin_name
+    task_meta = scheduler_registry.tasks.get(plugin_name)
+    if not task_meta or not task_meta["func"]:
+        logger.error(f"无法执行临时任务：函数 '{plugin_name}' 未注册。")
+        return
+
+    try:
+        bot = PlatformUtils.resolve_bot(
+            bot_id=context.bot_id,
+            log_cmd=f"临时任务 {plugin_name}",
         )
+        if bot is None:
+            return
+
+        context.platform_scope = PlatformUtils.get_platform_scope(bot)
+        logger.info(f"开始执行临时任务: {plugin_name}")
+        injected_params = {"context": context}
+        state: T_State = {ScheduleContext: context}
+
+        func = cast(Callable, task_meta["func"])
+        await _run_dependent_task(func, injected_params, bot, state)
+        logger.info(f"临时任务 '{plugin_name}' 执行完成。")
+    except Exception as e:
+        logger.error(f"执行临时任务 '{plugin_name}' 时发生错误", e=e)
+
+
+async def _execute_persistent_job(schedule_id: int, force: bool = False):
+    """
+    执行数据库中持久化的定时任务 (Persistent Job)
+    """
+    schedule = None
+
+    global _LAST_PRESSURE_SKIP
+    if should_pause_tasks():
+        now = time.time()
+        if now - _LAST_PRESSURE_SKIP > 30:
+            _LAST_PRESSURE_SKIP = now
+            logger.info("scheduler paused due to message pressure")
+        return
+
+    scheduler_registry.running_tasks.add(schedule_id)
+    try:
+        schedule = await ScheduleRepository.get_by_id(schedule_id)
+        if not schedule or (not schedule.is_enabled and not force):
+            logger.warning(f"定时任务 {schedule_id} 不存在或已禁用，跳过执行。")
+            return
+
+        bot = PlatformUtils.resolve_bot(
+            bot_id=schedule.bot_id, log_cmd=f"任务 {schedule_id}"
+        )
+        if bot is None:
+            return
+
+        resolver = scheduler_registry.target_resolvers.get(schedule.target_type)
+        if not resolver:
+            logger.error(
+                f"任务 {schedule.id} 的目标类型 '{schedule.target_type}' "
+                f"没有注册解析器，执行跳过。"
+            )
+            raise ValueError(f"未知的目标类型: {schedule.target_type}")
+
+        try:
+            resolved_targets = await resolver(schedule.target_identifier, bot)
+        except Exception as e:
+            logger.error(f"为任务 {schedule.id} 解析目标失败", e=e)
+            raise
+
+        logger.info(
+            f"任务 {schedule.id} ({schedule.name or schedule.plugin_name}) 开始执行, "
+            f"目标类型: {schedule.target_type}, "
+            f"解析出 {len(resolved_targets)} 个目标"
+        )
+
+        await ExecutionDispatcher.dispatch(schedule, bot, resolved_targets)
+
+        await ScheduleRepository.update_run_status(schedule, is_success=True)
 
         if schedule.is_one_off:
             logger.info(f"一次性任务 {schedule.id} 执行成功，将被删除。")
             await ScheduledJob.filter(id=schedule.id).delete()
             APSchedulerAdapter.remove_job(schedule.id)
             if schedule.plugin_name.startswith("runtime_one_off__"):
-                scheduler_manager._registered_tasks.pop(schedule.plugin_name, None)
+                scheduler_registry.tasks.pop(schedule.plugin_name, None)
                 logger.debug(f"已注销一次性运行时任务: {schedule.plugin_name}")
 
     except Exception as e:
         logger.error(f"执行任务 {schedule_id} 期间发生严重错误", e=e)
 
         if schedule:
-            schedule.last_run_at = datetime.now()
-            schedule.last_run_status = "FAILURE"
-            schedule.consecutive_failures = (schedule.consecutive_failures or 0) + 1
-            await schedule.save(
-                update_fields=["last_run_at", "last_run_status", "consecutive_failures"]
-            )
+            await ScheduleRepository.update_run_status(schedule, is_success=False)
 
     finally:
         if schedule_id is not None:
-            scheduler_manager._running_tasks.discard(schedule_id)
+            scheduler_registry.running_tasks.discard(schedule_id)

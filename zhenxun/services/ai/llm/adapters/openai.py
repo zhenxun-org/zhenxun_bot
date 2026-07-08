@@ -15,11 +15,12 @@ from .base import (
     RequestData,
 )
 from .handlers.openai_handlers import (
-    CompositeOpenAITextHandler,
     OpenAIAudioHandler,
     OpenAIEmbeddingHandler,
     OpenAIImageHandler,
     OpenAIRerankHandler,
+    OpenAIResponsesTextHandler,
+    OpenAITextHandler,
 )
 
 
@@ -83,12 +84,12 @@ class OpenAICompatAdapter(BaseAdapter):
 
 
 class OpenAIAdapter(OpenAICompatAdapter):
-    """OpenAI 系列适配器，统一装配文本/图像/嵌入/重排处理链。"""
+    """标准 OpenAI 系列适配器，统一装配文本/图像/嵌入/重排处理链。"""
 
     def __init__(self):
-        """初始化并挂载复合文本处理器与通用多模态处理器。"""
+        """初始化并挂载标准文本处理器与通用多模态处理器。"""
         super().__init__()
-        self.text_handler = CompositeOpenAITextHandler(api_type=self.api_type)
+        self.text_handler = OpenAITextHandler(api_type=self.api_type)
         self.image_handler = OpenAIImageHandler()
         self.embedding_handler = OpenAIEmbeddingHandler()
         self.rerank_handler = OpenAIRerankHandler()
@@ -102,21 +103,35 @@ class OpenAIAdapter(OpenAICompatAdapter):
     @property
     def supported_api_types(self) -> list[str]:
         """支持的 API 类型及别名。"""
-        return [
-            "openai",
-            "openai_responses",
-        ]
+        return ["openai"]
 
     def get_chat_endpoint(self, identity: ModelIdentity) -> str:
         """返回聊天完成端点"""
-        current_api_type = identity.api_type
-
-        if current_api_type == "openai_responses":
-            return "/v1/responses"
-        if current_api_type == "doubao":
-            return "/api/v3/chat/completions"
         return "/v1/chat/completions"
 
     def get_embedding_endpoint(self, identity: ModelIdentity) -> str:
         """返回嵌入端点。"""
         return "/v1/embeddings"
+
+
+class OpenAIResponsesAdapter(OpenAICompatAdapter):
+    """OpenAI v1/responses 协议专用适配器"""
+
+    def __init__(self):
+        super().__init__()
+        self.text_handler = OpenAIResponsesTextHandler(api_type=self.api_type)
+        self.image_handler = OpenAIImageHandler()
+        self.embedding_handler = OpenAIEmbeddingHandler()
+        self.rerank_handler = OpenAIRerankHandler()
+        self.audio_handler = OpenAIAudioHandler()
+
+    @property
+    def api_type(self) -> str:
+        return "openai_responses"
+
+    @property
+    def supported_api_types(self) -> list[str]:
+        return ["openai_responses"]
+
+    def get_chat_endpoint(self, identity: ModelIdentity) -> str:
+        return "/v1/responses"

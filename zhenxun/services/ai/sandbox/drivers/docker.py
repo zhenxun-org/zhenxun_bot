@@ -24,7 +24,7 @@ from zhenxun.services.ai.sandbox.protocols import (
     SandboxProcessStream,
 )
 from zhenxun.services.ai.sandbox.storage import RESOLVE_PATH_HELPER, coerce_posix_path
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_sandbox as logger
 
 from .base import BaseSandboxClient, BaseSandboxSession
 
@@ -388,8 +388,6 @@ class DockerSandboxSession(BaseSandboxSession):
             await self.container.put_archive(sandbox_target_path, tar_bytes)
             return True
         except Exception as e:
-            from zhenxun.services.log import logger
-
             logger.error(f"[Docker I/O] 上传目录失败: {e}")
             return False
 
@@ -552,10 +550,7 @@ class DockerSandboxClient(BaseSandboxClient):
 
                 DockerSandboxClient._containers[eff_cname] = container
                 DockerSandboxClient._jupyter_ports[eff_cname] = jupyter_port
-                logger.info(
-                    f"[DockerSandbox] 已启动物理隔离容器: {eff_cname} "
-                    f"(镜像: {eff_image})"
-                )
+                logger.info(f"已启动物理隔离容器: {eff_cname} (镜像: {eff_image})")
 
         state = SandboxSessionState(
             session_id=session_id,
@@ -575,10 +570,7 @@ class DockerSandboxClient(BaseSandboxClient):
             "test -x /global_env/python_venv/bin/pip"
         )
         if check_venv.exit_code != 0:
-            logger.info(
-                f"正在初始化/修复容器 [{eff_cname}] 的共享 Python 虚拟环境...",
-                command="SandboxManager",
-            )
+            logger.info(f"正在初始化/修复容器 [{eff_cname}] 的共享 Python 虚拟环境...")
             init_res = await session.run_process(
                 "rm -rf /global_env/python_venv && "
                 "uv venv --seed --system-site-packages /global_env/python_venv || "
@@ -586,8 +578,7 @@ class DockerSandboxClient(BaseSandboxClient):
             )
             if init_res.exit_code != 0:
                 logger.error(
-                    f"初始化虚拟环境失败: {init_res.stderr or init_res.stdout}",
-                    command="SandboxManager",
+                    f"初始化虚拟环境失败: {init_res.stderr or init_res.stdout}"
                 )
 
         return session
@@ -615,17 +606,14 @@ class DockerSandboxClient(BaseSandboxClient):
                 await self._containers[cname].delete(force=True)
                 self._containers.pop(cname, None)
                 self._jupyter_ports.pop(cname, None)
-                logger.info(
-                    f"[DockerSandbox] 物理容器 {cname} "
-                    "已长时间闲置，已触发彻底销毁释放内存。"
-                )
+                logger.info(f"物理容器 {cname} 已长时间闲置，已触发彻底销毁释放内存。")
             except Exception as e:
                 self._containers.pop(cname, None)
                 self._jupyter_ports.pop(cname, None)
                 if getattr(e, "status", None) == 404 or "No such container" in str(e):
-                    logger.debug(f"[DockerSandbox] 物理容器 {cname} 已不存在。")
+                    logger.debug(f"物理容器 {cname} 已不存在。")
                 else:
-                    logger.error(f"[DockerSandbox] 闲置销毁物理容器 {cname} 失败: {e}")
+                    logger.error(f"闲置销毁物理容器 {cname} 失败: {e}")
 
     @classmethod
     async def close_env(cls):
@@ -663,8 +651,6 @@ class DockerSandboxClient(BaseSandboxClient):
                     except Exception:
                         pass
                 if count > 0:
-                    from zhenxun.services.log import logger
-
                     logger.info(
                         f"静默清理：已成功回收 {count} 个上次异常退出遗留的沙箱容器。",
                         command="SandboxManager",

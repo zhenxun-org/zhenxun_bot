@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Callable, Sequence
 from enum import Enum
 from typing import Any
@@ -7,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from zhenxun.services.ai.core.messages import AgentMessage
 from zhenxun.services.ai.core.options import BaseOutputDefinition
-from zhenxun.services.ai.flow.base import BaseRuntimeConfig
+from zhenxun.services.ai.flow.base import BaseRunnable, BaseRuntimeConfig
+from zhenxun.services.ai.run import AgentTask
 
 
 class TeamRuntimeConfig(BaseRuntimeConfig):
@@ -45,7 +48,7 @@ class Transition(BaseModel):
     trigger_regex: str | None = None
     """(可选) 正则表达式。
     如果用户的输入匹配此正则，将触发极速硬路由，跳过大模型思考。"""
-    trigger_func: Callable[..., Any] | None = None
+    trigger_func: Callable[..., bool | str | None] | None = None
     """(可选) 自定义校验函数。返回 True 或目标名称时触发硬路由。支持依赖注入。"""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -62,9 +65,9 @@ class CallAction(TeamAction):
     调度动作：呼叫指定的 Agent 执行任务
     """
 
-    agent: str | Any
+    agent: str | BaseRunnable[Any]
     """目标 Agent 的名称（字符串）或动态生成的 Agent 实例"""
-    task: str | Any
+    task: str | AgentTask
     """派发给该 Agent 的具体任务或提示词"""
     history: Sequence[AgentMessage] | None = None
     """需要传递给该 Agent 的上下文历史记录（可选）"""

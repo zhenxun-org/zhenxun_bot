@@ -29,6 +29,11 @@ class BaseToolkit:
     config: ToolkitConfig
     _default_config: ClassVar[ToolkitConfig] = ToolkitConfig()
 
+    @property
+    def name(self) -> str:
+        """工具箱的默认名称标识（取类名），主要用于全局注册表的 Hash 与展示"""
+        return self.__class__.__name__
+
     def __init__(
         self,
         prefix: str | None = None,

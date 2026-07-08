@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from zhenxun.services.ai.flow.agent.models import AgentRunResources, AgentState
 from zhenxun.services.ai.run.models import AgentRunResult, HandoffPayload
 from zhenxun.services.ai.tools.models import ToolResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_agent as logger
 from zhenxun.utils.pydantic_compat import model_construct
 from zhenxun.utils.utils import infer_plugin_namespace
 
@@ -63,7 +63,7 @@ async def handle_submit_structured(
     parsed_obj = (
         tool_res.directive.payload.get("parsed_obj") if tool_res.directive else None
     )
-    logger.info("✅ 拦截到结构化结果提交，结束循环。")
+    logger.debug("✅ 拦截到结构化结果提交，结束循环。")
     state.is_finished = True
     state.final_result = model_construct(
         AgentRunResult,

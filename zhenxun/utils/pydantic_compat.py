@@ -48,9 +48,14 @@ else:
 
                 return type_validate_python(self.type_, obj)
 
+        from pydantic import root_validator
+
         def model_validator(*args: Any, **kwargs: Any) -> Any:
+            mode = kwargs.get("mode", "after")
+            pre = mode == "before"
+
             def decorator(func: Any) -> Any:
-                return func
+                return root_validator(pre=pre, allow_reuse=True)(func)
 
             return decorator
 

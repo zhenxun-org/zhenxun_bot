@@ -9,7 +9,7 @@ from zhenxun.services.ai.core.exceptions import (
 from zhenxun.services.ai.core.models import CancellationToken
 from zhenxun.services.ai.run.models import AgentTask
 from zhenxun.services.ai.run.session import LockContext, session_manager
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_flow as logger
 
 from .base import ConcurrencyPolicy, InterventionPolicy
 

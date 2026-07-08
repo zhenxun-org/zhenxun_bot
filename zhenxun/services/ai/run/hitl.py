@@ -8,7 +8,7 @@ from nonebot.permission import SUPERUSER
 from nonebot_plugin_waiter import waiter
 
 from zhenxun.services.ai.core.exceptions import AbortException, ToolFatalError
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_agent as logger
 
 if TYPE_CHECKING:
     from zhenxun.services.ai.run.context import RunContext
@@ -42,7 +42,9 @@ class HITLController:
 
         if not bot or not event:
             logger.warning("HITLController: 当前环境无 Bot/Event 实例，无法发起交互。")
-            return None
+            raise ToolFatalError(
+                "当前处于自动化后台调度环境，无法发起人工交互。任务已强行中止。"
+            )
 
         if prompt_msg:
             await bot.send(event, prompt_msg)

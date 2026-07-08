@@ -17,7 +17,7 @@ from zhenxun.services.ai.core.protocols.tool import (
 from zhenxun.services.ai.sandbox.models import SandboxBlueprint
 from zhenxun.services.ai.tools.models import ResolvedToolPayload
 from zhenxun.services.ai.tools.providers.mcp.toolkit import MCPToolkit
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_dump, model_validate, model_validator
 
 MCP_PATH = DATA_PATH / "ai" / "mcp.json"
@@ -30,6 +30,8 @@ class MCPServerConfig(BaseModel):
     """传输协议类型：stdio / sse / streamable-http / sandbox_proxy"""
     url: str | None = Field(default=None)
     """远端地址（用于 sse 或 streamable-http）"""
+    headers: dict[str, str] | None = Field(default=None)
+    """HTTP 请求头（用于 sse 或 streamable-http 的接口鉴权）"""
     timeout: int = Field(default=30)
     """请求超时时间(秒)"""
     command: str | None = None
@@ -50,6 +52,34 @@ class MCPServerConfig(BaseModel):
     """执行该服务器工具所需的群管等级"""
     sandbox_blueprint: SandboxBlueprint | None = Field(default=None)
     """沙箱环境装配配置（用于 sandbox_proxy 自动处理依赖）"""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_config(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+
+        if "type" in values and "transport" not in values:
+            values["transport"] = values.pop("type")
+
+        transport_val = values.get("transport")
+        if isinstance(transport_val, str) and transport_val.lower() == "streamablehttp":
+            values["transport"] = "streamable-http"
+
+        headers = values.get("headers")
+        if isinstance(headers, dict):
+            new_headers = {}
+            for k, v in headers.items():
+                if k.lower() == "authorization" and isinstance(v, str):
+                    if not any(
+                        v.startswith(prefix)
+                        for prefix in ("Bearer ", "Basic ", "Digest ")
+                    ):
+                        v = f"Bearer {v}"
+                new_headers[k] = v
+            values["headers"] = new_headers
+
+        return values
 
 
 class MCPToolsConfig(BaseModel):
@@ -193,6 +223,7 @@ class GlobalMCPProvider(ToolProvider):
             command=conf.command,
             args=conf.args,
             url=conf.url,
+            headers=conf.headers,
             env=conf.env,
             cwd=conf.cwd,
             install_command=conf.install_command,
@@ -339,6 +370,7 @@ class MCPSource(BaseModel):
                 command=self.config.command,
                 args=self.config.args,
                 url=self.config.url,
+                headers=self.config.headers,
                 env=self.config.env,
                 cwd=self.config.cwd,
                 install_command=self.config.install_command,

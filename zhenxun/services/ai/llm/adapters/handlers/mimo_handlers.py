@@ -16,10 +16,9 @@ from zhenxun.services.ai.core.messages import (
 )
 from zhenxun.services.ai.core.models import (
     ModelCapabilities,
-    ModelDetail,
     ModelIdentity,
 )
-from zhenxun.services.ai.core.options import GenerationConfig, TTSConfig
+from zhenxun.services.ai.core.options import TTSConfig
 from zhenxun.services.ai.llm.adapters.base import BaseAdapter, RequestData
 from zhenxun.services.ai.llm.adapters.handlers.base import BaseAudioHandler
 from zhenxun.services.ai.llm.adapters.handlers.openai_handlers import (
@@ -51,35 +50,6 @@ class MiMoToolSerializer(OpenAIToolSerializer):
                     }
                 )
         return res
-
-
-class MiMoConfigMapper(OpenAIConfigMapper):
-    """MiMo 配置映射器，处理深度思考参数差异"""
-
-    def map_config(
-        self,
-        config: GenerationConfig,
-        model_detail: ModelDetail | None = None,
-        capabilities: ModelCapabilities | None = None,
-    ) -> dict[str, Any]:
-        params = super().map_config(config, model_detail, capabilities)
-
-        if config.common.reasoning_effort:
-            effort = str(config.common.reasoning_effort).lower()
-            if effort == "none":
-                params["thinking"] = {"type": "disabled"}
-            else:
-                params["thinking"] = {"type": "enabled"}
-        elif (
-            hasattr(config, "deepseek_options")
-            and config.deepseek_options.thinking is not None
-        ):
-            if config.deepseek_options.thinking is True:
-                params["thinking"] = {"type": "enabled"}
-            elif config.deepseek_options.thinking is False:
-                params["thinking"] = {"type": "disabled"}
-
-        return params
 
 
 class MiMoMessageConverter(OpenAIMessageConverter):
@@ -141,7 +111,7 @@ class MiMoTextHandler(OpenAITextHandler):
         super().__init__(api_type=api_type)
         self.converter = MiMoMessageConverter(api_type=api_type)
         self.serializer = MiMoToolSerializer(api_type=api_type)
-        self.mapper = MiMoConfigMapper(api_type=api_type)
+        self.mapper = OpenAIConfigMapper(api_type=api_type)
 
 
 class MiMoAudioHandler(BaseAudioHandler):

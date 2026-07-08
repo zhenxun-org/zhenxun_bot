@@ -1,12 +1,15 @@
-"""
-Agent 相关静态声明类型定义
-"""
+from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from zhenxun.services.ai.capabilities import CapabilitySource, CombinedCapability
+from zhenxun.services.ai.context.memory.builder import MemoryBuilder
+from zhenxun.services.ai.context.memory.engine import MemoryReader, MemoryWriter
+from zhenxun.services.ai.context.memory.models import MemoryConfig
 from zhenxun.services.ai.context.memory.types import SessionMetadata
 from zhenxun.services.ai.core.messages import (
     AgentMessage,
@@ -18,8 +21,9 @@ from zhenxun.services.ai.core.messages import (
 from zhenxun.services.ai.core.options import GenerationConfig
 from zhenxun.services.ai.flow.base import BaseRuntimeConfig
 from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run.models import AgentRunResult, AgentTask, HandoffPayload
+from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.engine.registry import ToolCollection
-from zhenxun.services.ai.tools.models import GlobalToolFilter
 from zhenxun.utils.pydantic_compat import model_copy
 
 
@@ -60,15 +64,14 @@ class AgentConfig(BaseRuntimeConfig):
 
     message_history: Sequence[AgentMessage] | None = Field(default=None)
     """初始化的底层对话历史记录。"""
-    tool_filter: GlobalToolFilter | None = Field(default=None)
-    """全局工具过滤器，限制本次运行可用的工具池。"""
-    memory: Any | None = Field(default=None)
+
+    memory: MemoryConfig | MemoryBuilder | bool | None = Field(default=None)
     """单次运行级别的记忆门面覆盖 (支持 bool, MemoryConfig, MemoryBuilder)。"""
     generation_config: GenerationConfig | None = Field(default=None)
     """单次运行覆盖的大模型生成配置。"""
-    capabilities: list[Any] | None = Field(default=None)
+    capabilities: list[CapabilitySource] | None = Field(default=None)
     """仅针对本次运行动态注入的临时拦截器/能力组件列表。"""
-    skills: Sequence[Any] | None = Field(default=None)
+    skills: Sequence[str | Path | Any] | None = Field(default=None)
     """仅针对本次运行动态注入的临时技能集合。"""
     executor: Any | None = Field(default=None)
     """单次运行覆盖的核心执行引擎策略 (BaseAgentExecutor)。"""
@@ -128,11 +131,11 @@ class AgentState(BaseModel):
     """拦截到的早期终止输出结果"""
     should_terminate: bool = False
     """标记是否应提前终止循环"""
-    handoff_triggered: Any | None = None
+    handoff_triggered: HandoffPayload | None = None
     """标记是否触发了移交"""
     is_finished: bool = False
     """标记大模型循环是否彻底结束"""
-    final_result: Any | None = None
+    final_result: AgentRunResult[Any] | None = None
     """最终的运行结果 (AgentRunResult)"""
     origin_msg_len: int = 0
     """初始进入循环时的消息历史长度 (用于增量保存记忆)"""
@@ -160,15 +163,15 @@ class AgentRunResources(BaseModel):
     """保留依赖注入(DI)与黑板引用的全局运行时上下文"""
     session_meta: SessionMetadata | None = None
     """隔离会话的元信息(Session ID, 命名空间, 权限等)"""
-    memory_reader: Any | None = None
+    memory_reader: MemoryReader | None = None
     """用于读取短/中/长期上下文记忆的读取器"""
-    memory_writer: Any | None = None
+    memory_writer: MemoryWriter | None = None
     """用于将对话历史安全落盘的写入器"""
-    run_scoped_cap: Any | None = None
+    run_scoped_cap: CombinedCapability | None = None
     """聚合了 Agent/AgentTask/全局 的复合能力拦截器 (CombinedCapability)"""
-    task_obj: Any | None = None
+    task_obj: AgentTask | None = None
     """(如有) 解析后的结构化数据任务契约"""
-    toolkits: list[Any] = Field(default_factory=list)
+    toolkits: list[BaseToolkit] = Field(default_factory=list)
     """当前轮次生效的工具箱列表 (需要执行生命周期挂载)"""
     config: AgentConfig = Field(default_factory=AgentConfig)
     """Agent 全局与运行时的统一策略配置"""

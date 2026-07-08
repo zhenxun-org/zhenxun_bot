@@ -7,6 +7,7 @@ from zhenxun.services.ai.llm.adapters.handlers.openai_handlers import (
     OpenAIRerankHandler,
 )
 from zhenxun.services.ai.llm.adapters.openai import OpenAICompatAdapter
+from zhenxun.services.ai.utils.logger import log_llm as logger
 
 
 class JinaEmbeddingHandler(OpenAIEmbeddingHandler):
@@ -36,7 +37,7 @@ class JinaEmbeddingHandler(OpenAIEmbeddingHandler):
                 TextPart,
                 VideoPart,
             )
-            from zhenxun.services.log import logger
+
 
             for payload in batch.payloads:
                 jina_content = []

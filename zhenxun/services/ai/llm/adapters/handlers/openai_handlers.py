@@ -64,7 +64,7 @@ from zhenxun.services.ai.llm.adapters.handlers.base import (
     ResponseParser,
     ToolSerializer,
 )
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 
 
 class OpenAIConfigMapper(ConfigMapper):
@@ -114,7 +114,13 @@ class OpenAIConfigMapper(ConfigMapper):
             if capabilities and capabilities.reasoning_effort_map:
                 effort = capabilities.reasoning_effort_map.get(effort, effort)
 
-            if effort != "none":
+            if (
+                effort == "none"
+                and capabilities
+                and capabilities.supports_thinking_toggle
+            ):
+                params["thinking"] = {"type": "disabled"}
+            else:
                 params["reasoning_effort"] = effort
 
         if isinstance(config.output.response_format, dict):
@@ -1164,46 +1170,4 @@ class OpenAIAudioHandler(BaseAudioHandler):
             audio_format="mp3",
             usage=UsageInfo(),
             model_name=identity.model_name,
-        )
-
-
-class CompositeOpenAITextHandler(BaseTextHandler):
-    """
-    OpenAI 复合文本对话处理器 (Composite Pattern)。
-    内部包装标准协议与 responses 协议 Handler，根据模型配置在请求时动态路由
-    """
-
-    def __init__(self, api_type: str = "openai"):
-        self.api_type = api_type
-        self._standard_handler = OpenAITextHandler(api_type=api_type)
-        self._responses_handler = OpenAIResponsesTextHandler(
-            api_type="openai_responses"
-        )
-
-    def _get_active_handler(self, identity: ModelIdentity) -> BaseTextHandler:
-        current_api_type = identity.api_type
-        if current_api_type == "openai_responses":
-            return self._responses_handler
-        return self._standard_handler
-
-    async def prepare_text_request(
-        self,
-        adapter: BaseAdapter,
-        identity: ModelIdentity,
-        api_key: str,
-        request: ChatRequest,
-    ) -> RequestData:
-        handler = self._get_active_handler(identity)
-        return await handler.prepare_text_request(adapter, identity, api_key, request)
-
-    def parse_text_response(
-        self,
-        adapter: BaseAdapter,
-        identity: ModelIdentity,
-        response_json: dict[str, Any],
-        is_advanced: bool = False,
-    ) -> ResponseData:
-        handler = self._get_active_handler(identity)
-        return handler.parse_text_response(
-            adapter, identity, response_json, is_advanced
         )

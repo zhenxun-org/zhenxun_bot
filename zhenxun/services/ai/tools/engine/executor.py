@@ -6,7 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import inspect
 import json
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import json_repair
 from nonebot.adapters import Message as PlatformMessage
@@ -26,8 +26,10 @@ from zhenxun.services.ai.core.stream_events import (
     UserCustomEvent,
 )
 from zhenxun.services.ai.message_builder import MessageBuilder
-from zhenxun.services.ai.run.context import RunContext
+from zhenxun.services.ai.run.context import RunContext, set_run_context
 from zhenxun.services.ai.run.di import DependencyInjector
+from zhenxun.services.ai.tools.core.tool import BaseTool, register_tool_runner
+from zhenxun.services.ai.tools.engine.registry import ToolCollection
 from zhenxun.services.ai.tools.models import (
     StateSyncResult,
     ToolOptions,
@@ -35,11 +37,7 @@ from zhenxun.services.ai.tools.models import (
     ToolResultChunk,
     ValidatedToolCall,
 )
-from zhenxun.services.log import logger
-
-if TYPE_CHECKING:
-    from zhenxun.services.ai.tools.core.tool import BaseTool
-    from zhenxun.services.ai.tools.engine.registry import ToolCollection
+from zhenxun.services.ai.utils.logger import log_tool as logger
 
 
 class ToolExecutor:
@@ -49,6 +47,7 @@ class ToolExecutor:
     """
 
     def __init__(self):
+        """初始化工具执行器。"""
         pass
 
     def _get_combined_capability(
@@ -126,8 +125,7 @@ class ToolExecutor:
                                 arguments, parsed_successfully = parsed, True
                                 logger.debug(
                                     "⚒️ 成功修复损坏的工具参数: "
-                                    f"{args_str} -> {repaired_str}",
-                                    "ToolExecutor",
+                                    f"{args_str} -> {repaired_str}"
                                 )
                         except Exception:
                             pass
@@ -145,7 +143,7 @@ class ToolExecutor:
         tool_name: str,
         executable: Any,
         event_bus: EventBus | None,
-        available_tools: "ToolCollection | dict[str, Any] | None" = None,
+        available_tools: ToolCollection | dict[str, Any] | None = None,
     ) -> RunContext:
         """准备/克隆工具调用所使用的隔离 RunContext"""
         safe_context = (
@@ -163,7 +161,7 @@ class ToolExecutor:
     async def validate_tool_call(
         self,
         tool_call: ToolCallPart,
-        available_tools: "ToolCollection | dict[str, Any] | None",
+        available_tools: ToolCollection | dict[str, Any] | None,
         context: RunContext | None = None,
         event_bus: EventBus | None = None,
     ) -> ValidatedToolCall:
@@ -213,8 +211,6 @@ class ToolExecutor:
 
         async def inner_validate(args_inner):
             if isinstance(args_inner, dict) and hasattr(executable, "validate_args"):
-                import inspect
-
                 sig = inspect.signature(executable.validate_args)
                 if "context" in sig.parameters:
                     return await executable.validate_args(
@@ -247,7 +243,7 @@ class ToolExecutor:
     async def execute_tool_call(
         self,
         validated: ValidatedToolCall,
-        available_tools: "ToolCollection | dict[str, Any] | None",
+        available_tools: ToolCollection | dict[str, Any] | None,
         context: RunContext | None = None,
         model_name: str | None = None,
         max_retries: int = 0,
@@ -285,8 +281,6 @@ class ToolExecutor:
             available_tools,
         )
 
-        from zhenxun.services.ai.run.context import set_run_context
-
         combined_cap = self._get_combined_capability(executable, safe_context)
 
         async def inner_handler(args_inner: dict) -> Any:
@@ -322,7 +316,7 @@ class ToolExecutor:
     async def execute_batch(
         self,
         tool_calls: list[ToolCallPart],
-        available_tools: "ToolCollection | dict[str, Any] | None",
+        available_tools: ToolCollection | dict[str, Any] | None,
         context: RunContext | None = None,
         model_name: str | None = None,
         max_retries: int = 0,
@@ -415,11 +409,12 @@ class ToolExecutor:
 
 class ToolExecutionPolicy:
     """
-    工具执行策略 (Strategy Pattern)。
+    工具执行策略。
     负责解析工具私有配置与系统全局配置，决定最大重试次数、Fallback 路由目标等流转行为。
     """
 
     def __init__(self, tool: BaseTool, global_max_retries: int = 0):
+        """初始化工具执行策略。"""
         self.tool = tool
         self.settings: ToolOptions = getattr(tool, "settings", ToolOptions())
         self.metadata: dict[str, Any] = (
@@ -449,6 +444,7 @@ class ToolRunner(ABC):
     async def run(
         self, tool: BaseTool, context: RunContext, **kwargs: Any
     ) -> ToolResult:
+        """执行工具调用的抽象方法。"""
         pass
 
 
@@ -461,6 +457,7 @@ class NativeToolRunner(ToolRunner):
     async def run(
         self, tool: BaseTool, context: RunContext, **kwargs: Any
     ) -> ToolResult:
+        """运行原生 Python 函数工具并返回结果。"""
         target_func = tool.get_execute_target()
         signature_target = tool.get_signature_target()
 
@@ -498,8 +495,8 @@ class NativeToolRunner(ToolRunner):
                         if tool and hasattr(tool, "settings")
                         else False
                     )
-                    if context.run.event_bus and not is_silent:
-                        await context.run.event_bus.emit(
+                    if not is_silent:
+                        await context.run.emit(
                             ToolStreamChunkEvent(
                                 tool_name=tool.name,
                                 content=chunk_obj.content,
@@ -521,15 +518,12 @@ class NativeToolRunner(ToolRunner):
                     else res
                 )
                 parts = await MessageBuilder.unimsg_to_llm_parts(uni_msg)
-                if context and context.run.event_bus:
-                    await context.run.event_bus.emit(UserCustomEvent(display=uni_msg))
+                await context.run.emit(UserCustomEvent(display=uni_msg))
                 final_result = ToolResult(output=parts)
             else:
                 final_result = ToolResult(output=res)
 
         return final_result
 
-
-from zhenxun.services.ai.tools.core.tool import register_tool_runner
 
 register_tool_runner(NativeToolRunner)

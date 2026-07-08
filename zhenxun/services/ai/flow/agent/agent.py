@@ -5,9 +5,8 @@ from pathlib import Path
 from typing import Any, Generic, cast
 
 from zhenxun.services.ai.capabilities import (
-    AbstractCapability,
+    CapabilitySource,
     CombinedCapability,
-    DynamicCapability,
 )
 from zhenxun.services.ai.config import get_llm_config
 from zhenxun.services.ai.context.knowledge.base import BaseKnowledge
@@ -67,7 +66,7 @@ from zhenxun.services.ai.tools.providers.skills.capabilities import (
 )
 from zhenxun.services.ai.tools.providers.skills.models import Skill, SkillSource
 from zhenxun.services.ai.utils import ContextUtils
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_agent as logger
 from zhenxun.utils.pydantic_compat import (
     model_construct,
     model_copy,
@@ -93,9 +92,6 @@ ToolSource = (
     Callable | BaseTool | dict[str, Any] | str | BaseToolkit | ToolResolvable | Query
 )
 """任何可以作为工具提供给大模型的实体对象（函数、基础工具类、字典定义、工具名、工具箱、声明式查询对象）"""
-
-CapabilitySource = Callable | AbstractCapability
-"""能力/拦截器来源（函数或 AbstractCapability 实例）"""
 
 
 class AgentBuilder(Generic[AgentDepsT, OutputDataT]):
@@ -148,7 +144,7 @@ class AgentBuilder(Generic[AgentDepsT, OutputDataT]):
         return self
 
     def with_tools(
-        self, *tools: ToolSource | list[ToolSource]
+        self, *tools: ToolSource | Sequence[ToolSource]
     ) -> "AgentBuilder[AgentDepsT, OutputDataT]":
         """
         配置可供智能体调用的工具列表。
@@ -158,7 +154,7 @@ class AgentBuilder(Generic[AgentDepsT, OutputDataT]):
         """
         current_tools = self._kwargs.setdefault("tools", [])
         for t in tools:
-            if isinstance(t, list):
+            if isinstance(t, Sequence) and not isinstance(t, str):
                 current_tools.extend(t)
             else:
                 current_tools.append(t)
@@ -353,7 +349,7 @@ class Agent(
         description: str | None = None,
         persona: Persona | dict | None = None,
         model: str | Callable[[], str] | None = None,
-        tools: list[ToolSource] | None = None,
+        tools: Sequence[ToolSource] | None = None,
         skills: Sequence[str | Path | Skill | SkillSource] | None = None,
         generation_config: GenerationConfig | IntentBuilder | dict | None = None,
         response_model: BaseOutputDefinition | type[OutputDataT] | None = None,
@@ -458,14 +454,14 @@ class Agent(
 
     def _assemble_plugins(self, tools, knowledge, capabilities, skills):
         """私有方法：集中处理各类能力、知识与技能的挂载，消解冗余样板代码"""
-        self.tool_definitions = tools or []
+        self.tool_definitions = list(tools) if tools else []
 
         if knowledge:
             if not isinstance(knowledge, list):
                 knowledge = [knowledge]
             self.tool_definitions.extend(knowledge)
 
-        self.capabilities: list[AbstractCapability] = []
+        self.capabilities: list[CapabilitySource] = []
 
         if self.memory_config.long_term.enable and self.memory_config.long_term.agentic:
             self.capabilities.append(
@@ -478,11 +474,7 @@ class Agent(
             )
 
         if capabilities:
-            for cap in capabilities:
-                if isinstance(cap, AbstractCapability):
-                    self.capabilities.append(cap)
-                elif callable(cap):
-                    self.capabilities.append(DynamicCapability(cap))
+            self.capabilities.extend(capabilities)
 
         if self.config.enable_hitl:
             self.tool_definitions.append(HITLToolkit())
@@ -699,6 +691,7 @@ class Agent(
         )
 
         async def _execution_task():
+
             cancel_token = safe_context.run.cancellation_token or CancellationToken()
             safe_context.run.cancellation_token = cancel_token
 
@@ -900,7 +893,6 @@ class Agent(
             toolset_funcs=getattr(self, "toolset_funcs", []),
             system_tools=[],
             namespace=self.namespace or "unknown",
-            tool_filter=resources.config.tool_filter,
             run_context=context,
             run_scoped_cap=run_scoped_cap,
         )

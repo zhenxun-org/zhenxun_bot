@@ -8,7 +8,7 @@ from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.models import ToolResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_tool as logger
 
 
 class RestApiToolkit(BaseToolkit):
@@ -101,15 +101,15 @@ class RestApiToolkit(BaseToolkit):
             is_error = response.status_code >= 400
             result = ToolResult(output=result_dict)
 
-            if context and context.run.event_bus:
+            if context:
                 msg = (
                     f"🌐 已调用 API: {url}"
                     if not is_error
                     else f"❌ API 调用失败 (Status: {response.status_code})"
                 )
-                await context.run.event_bus.emit(
+                await context.run.emit(
                     ToolStreamChunkEvent(
-                        tool_name=context.call.tool_name if context else "make_request",
+                        tool_name=context.call.tool_name,
                         content=msg,
                     )
                 )
@@ -120,10 +120,10 @@ class RestApiToolkit(BaseToolkit):
 
         except Exception as e:
             logger.error(f"RestApiToolkit 请求失败: {e}")
-            if context and context.run.event_bus:
-                await context.run.event_bus.emit(
+            if context:
+                await context.run.emit(
                     ToolStreamChunkEvent(
-                        tool_name=context.call.tool_name if context else "make_request",
+                        tool_name=context.call.tool_name,
                         content="❌ API 网络请求发生框架级错误",
                     )
                 )

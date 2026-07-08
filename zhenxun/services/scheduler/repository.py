@@ -4,6 +4,7 @@
 封装所有对 ScheduledJob 模型的数据库操作，将数据访问逻辑与业务逻辑分离。
 """
 
+from datetime import datetime
 from typing import Any
 
 from tortoise.queryset import QuerySet
@@ -43,6 +44,23 @@ class ScheduleRepository:
         if plugin_name:
             return await ScheduledJob.filter(plugin_name=plugin_name).all()
         return await ScheduledJob.all()
+
+    @staticmethod
+    async def update_run_status(schedule: ScheduledJob, is_success: bool):
+        """
+        统一更新任务的最后运行状态
+        """
+        schedule.last_run_at = datetime.now()
+        if is_success:
+            schedule.last_run_status = "SUCCESS"
+            schedule.consecutive_failures = 0
+        else:
+            schedule.last_run_status = "FAILURE"
+            schedule.consecutive_failures = (schedule.consecutive_failures or 0) + 1
+
+        await schedule.save(
+            update_fields=["last_run_at", "last_run_status", "consecutive_failures"]
+        )
 
     @staticmethod
     async def save(schedule: ScheduledJob, update_fields: list[str] | None = None):

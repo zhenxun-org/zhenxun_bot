@@ -6,7 +6,14 @@ from zhenxun.models.level_user import LevelUser
 from zhenxun.models.scheduled_job import ScheduledJob
 from zhenxun.services import scheduler_manager
 from zhenxun.services.log import logger
+from zhenxun.services.scheduler.registry import scheduler_registry
 from zhenxun.services.scheduler.repository import ScheduleRepository
+from zhenxun.services.scheduler.types import (
+    BaseTrigger,
+    ExecutionOptions,
+    JobConfig,
+    TargetType,
+)
 from zhenxun.utils.pydantic_compat import model_dump, model_validate
 
 from . import presenters
@@ -58,7 +65,7 @@ class SchedulerAdminService:
         targets: list[str],
         creator_permission_level: int,
         plugin_name: str,
-        trigger_info: tuple[str, dict],
+        trigger: BaseTrigger,
         job_kwargs: dict,
         permission: int,
         bot_id: str,
@@ -69,7 +76,6 @@ class SchedulerAdminService:
         created_by: str,
     ) -> str:
         """创建或更新一个定时任务"""
-        trigger_type, trigger_config = trigger_info
         success_targets = []
         failed_targets = []
         permission_denied_targets = []
@@ -103,7 +109,7 @@ class SchedulerAdminService:
                 )
                 continue
 
-            if target_type in ["TAG", "ALL_GROUPS"]:
+            if target_type in [TargetType.TAG.value, TargetType.ALL_GROUPS.value]:
                 logger.debug(
                     f"检测到多目标任务 (类型: {target_type})，"
                     f"将所需权限强制提升至超级用户级别。"
@@ -111,18 +117,26 @@ class SchedulerAdminService:
                 permission = 9
 
             try:
+                exec_opts = (
+                    model_validate(ExecutionOptions, execution_options)
+                    if execution_options
+                    else model_validate(ExecutionOptions, {})
+                )
+
+                config = JobConfig(
+                    trigger=trigger,
+                    job_kwargs=job_kwargs,
+                    bot_id=bot_id,
+                    name=job_name,
+                    created_by=created_by,
+                    required_permission=permission,
+                    execution_options=exec_opts,
+                )
                 schedule = await scheduler_manager.add_schedule(
                     plugin_name=plugin_name,
                     target_type=target_type,
                     target_identifier=target_id,
-                    trigger_type=trigger_type,
-                    trigger_config=trigger_config,
-                    job_kwargs=job_kwargs,
-                    bot_id=bot_id,
-                    required_permission=permission,
-                    name=job_name,
-                    created_by=created_by,
-                    execution_options=execution_options if execution_options else None,
+                    config=config,
                 )
                 if schedule:
                     success_targets.append((target_desc, schedule.id))
@@ -150,7 +164,10 @@ class SchedulerAdminService:
             permission_denied = False
             if all_flag or global_flag:
                 permission_denied = True
-            elif targeter._filters.get("target_type") in ["TAG", "ALL_GROUPS"]:
+            elif targeter._filters.get("target_type") in [
+                TargetType.TAG.value,
+                TargetType.ALL_GROUPS.value,
+            ]:
                 permission_denied = True
 
             if permission_denied:
@@ -202,11 +219,16 @@ class SchedulerAdminService:
         )
 
     async def update_schedule(
-        self, schedule: ScheduledJob, trigger_info: tuple | None, kwargs_str: str | None
+        self,
+        schedule: ScheduledJob,
+        trigger: BaseTrigger | None,
+        kwargs_str: str | None,
     ) -> str:
         """更新一个任务的配置"""
-        trigger_type = trigger_info[0] if trigger_info else None
-        trigger_config = trigger_info[1] if trigger_info else None
+        trigger_type = trigger.trigger_type if trigger else None
+        trigger_config = (
+            model_dump(trigger, exclude={"trigger_type"}) if trigger else None
+        )
         job_kwargs = await self._parse_and_validate_kwargs_for_update(
             schedule.plugin_name, kwargs_str
         )
@@ -243,7 +265,7 @@ class SchedulerAdminService:
 
     def _generate_view_title(self, filters: dict) -> str:
         title = "定时任务"
-        if filters.get("target_type") == "ALL_GROUPS":
+        if filters.get("target_type") == TargetType.ALL_GROUPS.value:
             title = "全局定时任务"
         elif "target_identifier" in filters:
             title = f"群 {filters['target_identifier']} 的定时任务"
@@ -253,12 +275,12 @@ class SchedulerAdminService:
 
     def _resolve_target_descriptor(self, target_desc: str) -> tuple[str, str]:
         if target_desc == scheduler_manager.ALL_GROUPS:
-            return "ALL_GROUPS", scheduler_manager.ALL_GROUPS
+            return TargetType.ALL_GROUPS.value, scheduler_manager.ALL_GROUPS
         if target_desc.startswith("tag:"):
-            return "TAG", target_desc[4:]
+            return TargetType.TAG.value, target_desc[4:]
         if target_desc.isdigit():
-            return "GROUP", target_desc
-        return "USER", target_desc
+            return TargetType.GROUP.value, target_desc
+        return TargetType.USER.value, target_desc
 
     def _format_set_result_message(
         self, targets: list, success: list, failed: list, permission_denied: list
@@ -286,7 +308,7 @@ class SchedulerAdminService:
         if not kwargs_str:
             return {}
 
-        task_meta = scheduler_manager._registered_tasks.get(plugin_name)
+        task_meta = scheduler_registry.tasks.get(plugin_name)
         if not task_meta:
             raise ValueError(f"插件 '{plugin_name}' 未注册。")
 

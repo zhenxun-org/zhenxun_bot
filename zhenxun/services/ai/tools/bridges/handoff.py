@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, create_model
 
+from zhenxun.services.ai.core.messages import HandoffEvent
+from zhenxun.services.ai.core.options import BaseOutputDefinition
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.models import HandoffResult, ToolResult
@@ -18,6 +20,7 @@ class HandoffTool(BaseTool):
         target_name: str,
         target_description: str,
         input_schema: type[BaseModel] | Any | None = None,
+        max_handoffs: int = 3,
     ):
         """
         初始化移交工具，为模型赋予转移对话控制权到指定实体的能力。
@@ -26,7 +29,8 @@ class HandoffTool(BaseTool):
             target_name: 被转移的目标接收者（Agent 或负责人）的唯一标识名称。
             target_description: 目标接收者的职责或专长说明，供模型决策是否移交。
             input_schema: 自定义移交数据结构，指定转移时所需携带的结构化参数。
-        """
+            max_handoffs: 允许在同一个会话中向同一个实体发起移交的最大次数，防止无限踢皮球，默认 3。
+        """  # noqa: E501
         super().__init__(
             name=f"transfer_to_{target_name}",
             description=(
@@ -34,11 +38,10 @@ class HandoffTool(BaseTool):
             ),
         )
         self.target_name = target_name
+        self.max_handoffs = max_handoffs
 
         actual_schema = None
         if input_schema:
-            from zhenxun.services.ai.core.options import BaseOutputDefinition
-
             if isinstance(input_schema, BaseOutputDefinition):
                 actual_schema = input_schema.type_
             else:
@@ -80,18 +83,17 @@ class HandoffTool(BaseTool):
         if context:
             counts = context.session.shared_state.setdefault("__handoff_counts__", {})
             counts[self.target_name] = counts.get(self.target_name, 0) + 1
-            if counts[self.target_name] > 3:
+            if counts[self.target_name] > self.max_handoffs:
                 return ToolResult(
                     output=(
-                        f"❌ 系统拦截：检测到严重的踢皮球现象！\n"
-                        f"你所在的团队已经连续 {counts[self.target_name]} 次将任务"
-                        f"移交给 {self.target_name}，\n"
-                        "但问题仍未解决。请立刻改变策略，"
-                        "由你亲自处理或得出最终结论，严禁再次移交！"
+                        f"❌ 系统拦截：移交次数已达上限。\n"
+                        f"你所在的团队已经向 {self.target_name} 尝试移交了 "
+                        f"{counts[self.target_name]} 次，"
+                        f"超出了最大允许次数 ({self.max_handoffs})。\n"
+                        "为防止任务陷入停滞，请立即改变策略，"
+                        "由你亲自处理当前任务或得出最终结论，严禁再次移交！"
                     )
                 ).as_error()
-
-        from zhenxun.services.ai.core.messages import HandoffEvent
 
         if context:
             context.run.add_event(

@@ -67,8 +67,6 @@ class ToolProvider(Protocol):
 
     async def discover_tools(
         self,
-        allowed_servers: list[str] | None = None,
-        excluded_servers: list[str] | None = None,
     ) -> dict[str, ToolExecutable]:
         """
         异步发现此提供者提供的所有工具。

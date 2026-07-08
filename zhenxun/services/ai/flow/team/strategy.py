@@ -18,8 +18,10 @@ from zhenxun.services.ai.flow.team.models import (
 )
 from zhenxun.services.ai.flow.team.router import BaseRouter
 from zhenxun.services.ai.run import AgentTask, RunContext
+from zhenxun.services.ai.run.blackboard import BlackboardManager
 from zhenxun.services.ai.tools.bridges.delegate import DelegateTool
-from zhenxun.services.log import logger
+from zhenxun.services.ai.tools.providers.builtin.blackboard import BlackboardToolkit
+from zhenxun.services.ai.utils.logger import log_team as logger
 
 if TYPE_CHECKING:
     from zhenxun.services.ai.flow.team.team import Team
@@ -106,6 +108,7 @@ class RouteStrategy(BaseTeamStrategy):
         leader_model: str | None = None,
         leader_tools: list[ToolSource] | None = None,
         custom_prompt: str | None = None,
+        max_handoffs: int = 3,
     ):
         """
         路由策略初始化，基于挂载的 Router 进行最合适的专家分发。
@@ -117,12 +120,14 @@ class RouteStrategy(BaseTeamStrategy):
             leader_model: 路由节点 (Leader) 使用的大模型名称，若为空则默认继承全局。
             leader_tools: 挂载给路由节点 (Leader) 的专属工具列表。
             custom_prompt: 自定义系统提示词，用于覆盖默认的路由系统提示词。
+            max_handoffs: 同一会话中允许连续移交的最大次数。
         """
         super().__init__(custom_prompt=custom_prompt)
         self.selector_func = selector_func
         self.router = router
         self.leader_model = leader_model
         self.leader_tools = leader_tools or []
+        self.max_handoffs = max_handoffs
 
         if isinstance(state_flow, dict):
             from zhenxun.services.ai.flow.team.models import Transition
@@ -163,6 +168,7 @@ class RouteStrategy(BaseTeamStrategy):
                     state_flow=self.state_flow,
                     runtime_config=getattr(team, "runtime_config", None),
                     custom_prompt=self.custom_prompt,
+                    max_handoffs=self.max_handoffs,
                 )
             )
             router = ChainRouter(routers)
@@ -171,13 +177,11 @@ class RouteStrategy(BaseTeamStrategy):
         exec_config = kwargs.get("config")
         max_cycles = getattr(exec_config, "max_cycles", 15) if exec_config else 15
 
-        logger.info(f"🛣️ [RouteStrategy] '{team.name}' 正在获取初始路由决策...")
+        logger.debug(f"🛣️ '{team.name}' 正在获取初始路由决策...")
 
         decision = await router.route(context, [], prompt)
         if not decision:
-            logger.warning(
-                f"🚨 [RouteStrategy] Team '{team.name}' 的所有路由策略未能命中目标。"
-            )
+            logger.warning(f"🚨 Team '{team.name}' 的所有路由策略未能命中目标。")
             raise AbortException(
                 reason=f"Team '{team.name}' 无法找到合适的路由节点处理该任务",
                 display="🚨 团队协作失败，无法分配任务。",
@@ -191,7 +195,7 @@ class RouteStrategy(BaseTeamStrategy):
             cycle_count += 1
             if cycle_count > max_cycles:
                 logger.error(
-                    f"🚨 [RouteStrategy] Team '{team.name}' 路由陷入死循环！"
+                    f"🚨 Team '{team.name}' 路由陷入死循环！"
                     f"已达到最大限制 {max_cycles} 次。"
                 )
                 raise AbortException(
@@ -229,7 +233,7 @@ class RouteStrategy(BaseTeamStrategy):
 
             run_result = yield CallAction(
                 agent=current_target,
-                task=prompt,
+                task=prompt or "",
                 history=handoff_history_messages,
                 kwargs=kwargs,
             )
@@ -268,7 +272,7 @@ class RouteStrategy(BaseTeamStrategy):
                             pass
 
             if fast_routed:
-                logger.info(
+                logger.debug(
                     f"🛣️ **路由决策**: 委派给专员 👨💼`{current_target}`"
                     "(系统拦截：正则/函数状态流发生转移)"
                 )
@@ -291,18 +295,21 @@ class CoordinateStrategy(BaseTeamStrategy):
         leader_model: str | None = None,
         leader_tools: list[ToolSource] | None = None,
         custom_prompt: str | None = None,
+        max_delegations: int = 3,
     ):
         """
         协作策略初始化，Leader 主动拆解任务，委派给 Sub-Agents 并汇总结果。
 
         参数:
             leader_model: 协调节点 (Leader) 使用的大模型名称，若为空则默认继承全局。
-            leader_tools: 挂载给协调节点 (Leader) 的专属工具列表。
+            leader_tools: 挂载给协调节点 (Leader) 的专属工具列表.
             custom_prompt: 自定义系统提示词，用于覆盖默认的协调系统提示词。
+            max_delegations: 允许向同一个专员连续委派失败的最大重试次数。
         """
         super().__init__(custom_prompt=custom_prompt)
         self.leader_model = leader_model
         self.leader_tools = leader_tools or []
+        self.max_delegations = max_delegations
 
     async def generate_plan(
         self,
@@ -323,6 +330,7 @@ class CoordinateStrategy(BaseTeamStrategy):
                     runnable=m,
                     name=f"delegate_to_{m.name}",
                     description=f"将子任务委派给专员 [{m.name}] 处理。专长：{desc}",
+                    max_delegations=self.max_delegations,
                 )
             )
 
@@ -338,17 +346,16 @@ class CoordinateStrategy(BaseTeamStrategy):
 
         logger.debug(f"✨ **团队 [{team.name}] Leader** 正在汇总各方报告...")
 
-        if context.run.event_bus:
-            await context.run.event_bus.emit(
-                ToolStreamChunkEvent(
-                    tool_name="Team Leader",
-                    content="✨ 团队 Leader 正在汇总各方报告...",
-                )
+        await context.run.emit(
+            ToolStreamChunkEvent(
+                tool_name="Team Leader",
+                content="✨ 团队 Leader 正在汇总各方报告...",
             )
+        )
 
         logger.debug(f"👨💼 [CoordinateStrategy] '{team.name}' 正在启动协调推理循环...")
 
-        leader_res = yield CallAction(agent=leader_agent, task=prompt)
+        leader_res = yield CallAction(agent=leader_agent, task=prompt or "")
 
         yield FinishAction(result=leader_res)
 
@@ -389,24 +396,22 @@ class BroadcastStrategy(BaseTeamStrategy):
             prompt.description if isinstance(prompt, AgentTask) else (prompt or "")
         )
 
-        if context.run.event_bus:
-            await context.run.event_bus.emit(
-                ToolStreamChunkEvent(
-                    tool_name="Team Broadcaster",
-                    content=f"🚀 正在并发广播任务给 {len(team.members)} 位专家...",
-                )
+        await context.run.emit(
+            ToolStreamChunkEvent(
+                tool_name="Team Broadcaster",
+                content=f"🚀 正在并发广播任务给 {len(team.members)} 位专家...",
             )
+        )
 
         actions = [CallAction(agent=m.name, task=task_desc_str) for m in team.members]
         results = yield ConcurrentCallAction(actions=actions)
 
-        if context.run.event_bus:
-            await context.run.event_bus.emit(
-                ToolStreamChunkEvent(
-                    tool_name="Team Leader",
-                    content="✨ 所有专家汇报完毕，Leader 正在融合各方观点...",
-                )
+        await context.run.emit(
+            ToolStreamChunkEvent(
+                tool_name="Team Leader",
+                content="✨ 所有专家汇报完毕，Leader 正在融合各方观点...",
             )
+        )
 
         logger.debug(f"✨ **团队 [{team.name}] Leader** 正在汇总各方报告...")
 
@@ -451,8 +456,7 @@ class TaskStrategy(BaseTeamStrategy):
         leader_model: str | None = None,
         leader_tools: list[ToolSource] | None = None,
         max_iterations: int = 15,
-        blackboard_schema: type[BaseModel] | None = None,
-        initial_blackboard_state: BaseModel | None = None,
+        blackboard: type[BaseModel] | BaseModel | None = None,
         custom_prompt: str | None = None,
     ):
         """
@@ -463,10 +467,9 @@ class TaskStrategy(BaseTeamStrategy):
             leader_model: 规划节点 (Leader) 使用的大模型名称，若为空则默认继承全局。
             leader_tools: 挂载给规划节点 (Leader) 的专属附加工具列表。
             max_iterations: 引擎驱动的状态机最大迭代/循环次数，防止死循环。
-            blackboard_schema: 团队共享黑板的数据结构类型 (Pydantic Model 类)。
-            initial_blackboard_state: 共享黑板的初始数据状态实例。
+            blackboard: (可选) 团队共享黑板。可传入 Schema 类型类，或直接传入带有初始数据的 Schema 实例对象。
             custom_prompt: 自定义系统提示词，用于覆盖默认的规划系统提示词。
-        """
+        """  # noqa: E501
         super().__init__(custom_prompt=custom_prompt)
         self.leader_model = leader_model
         self.leader_tools = leader_tools or []
@@ -474,14 +477,21 @@ class TaskStrategy(BaseTeamStrategy):
 
         self.blackboard = None
         self.bb_toolkit = None
-        if blackboard_schema is not None:
-            from zhenxun.services.ai.run.blackboard import BlackboardManager
-            from zhenxun.services.ai.tools.providers.builtin.blackboard import (
-                BlackboardToolkit,
-            )
+        if blackboard is not None:
+            schema = None
+            initial_state = None
+            if isinstance(blackboard, type) and issubclass(blackboard, BaseModel):
+                schema = blackboard
+            elif isinstance(blackboard, BaseModel):
+                schema = type(blackboard)
+                initial_state = blackboard
+            else:
+                raise ValueError(
+                    "blackboard 参数必须是 Pydantic BaseModel 的子类(类型)或其实例"
+                )
 
             self.blackboard = BlackboardManager(
-                schema=blackboard_schema, initial_state=initial_blackboard_state
+                schema=schema, initial_state=initial_state
             )
             self.bb_toolkit = BlackboardToolkit(self.blackboard)
             self.leader_tools.append(self.bb_toolkit)
@@ -541,9 +551,7 @@ class TaskStrategy(BaseTeamStrategy):
         )
 
         if "__task_board__" not in context.session.shared_state:
-            context.session.shared_state["__task_board__"] = (
-                self.blackboard._state if self.blackboard else TaskBoardState()
-            )
+            context.session.shared_state["__task_board__"] = TaskBoardState()
         board = cast(TaskBoardState, context.session.shared_state["__task_board__"])
 
         max_iterations = self.max_iterations
@@ -576,15 +584,17 @@ class TaskStrategy(BaseTeamStrategy):
 请检查是否有 failed 的任务需要修复重新指派？或者如果所有任务均已 completed，
 请立刻调用 `mark_all_complete` 汇报总结。"""
 
-                logger.info(f"🧠 [TaskStrategy] 唤醒 Planner (Iter: {iteration})")
-                leader_res = yield CallAction(agent=leader_agent, task=planner_prompt)
+                logger.debug(f"🧠 [TaskStrategy] 唤醒 Planner (Iter: {iteration})")
+                leader_res = yield CallAction(
+                    agent=leader_agent, task=planner_prompt or ""
+                )
 
                 if board.is_goal_complete:
                     yield FinishAction(result=board.final_summary or leader_res.output)
                     return
                 continue
 
-            logger.info(
+            logger.debug(
                 f"🚀 [TaskStrategy] 引擎接管：并发执行 {len(available_tasks)} 个任务..."
             )
             actions = []

@@ -8,7 +8,7 @@ from typing import Any, TypeVar
 from nonebot.utils import is_coroutine_callable
 from pydantic import BaseModel, ConfigDict
 
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_core as logger
 
 
 class AgentStreamEvent(BaseModel):

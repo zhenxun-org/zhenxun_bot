@@ -17,10 +17,12 @@ class TeamRoutingCapability(AbstractCapability):
         team_name: str,
         members: list[Any],
         state_flow: Mapping[str, Sequence[Any]] | Callable | None = None,
+        max_handoffs: int = 3,
     ):
         self.team_name = team_name
         self.members = members
         self.state_flow = state_flow
+        self.max_handoffs = max_handoffs
 
     async def _get_allowed_transitions(self, context: RunContext) -> list[Any] | None:
         """核心FSM解析：解析静态字典或动态执行函数获取允许的 Transition 列表"""
@@ -97,6 +99,7 @@ class TeamRoutingCapability(AbstractCapability):
                         target_name=m.name,
                         target_description=desc,
                         input_schema=input_schema,
+                        max_handoffs=self.max_handoffs,
                     )
                 )
         return tools

@@ -18,8 +18,8 @@ from zhenxun.services.ai.llm.adapters.base import (
 )
 from zhenxun.services.ai.llm.adapters.handlers.base import BaseImageHandler
 from zhenxun.services.ai.llm.adapters.handlers.openai_handlers import (
-    CompositeOpenAITextHandler,
     OpenAIMessageConverter,
+    OpenAITextHandler,
 )
 from zhenxun.services.ai.llm.adapters.openai import OpenAIAdapter
 
@@ -60,12 +60,12 @@ class OpenRouterMessageConverter(OpenAIMessageConverter):
         return openai_messages
 
 
-class OpenRouterTextHandler(CompositeOpenAITextHandler):
+class OpenRouterTextHandler(OpenAITextHandler):
     """OpenRouter 专有文本处理器，挂载专有 Converter"""
 
     def __init__(self, api_type: str = "openrouter"):
         super().__init__(api_type=api_type)
-        self._standard_handler.converter = OpenRouterMessageConverter(api_type=api_type)
+        self.converter = OpenRouterMessageConverter(api_type=api_type)
 
 
 class OpenRouterImageHandler(BaseImageHandler):

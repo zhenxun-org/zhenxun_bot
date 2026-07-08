@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, Generic, cast
 from typing_extensions import TypeVar
+import uuid
 
 from nonebot.adapters import Bot, Event
 from nonebot_plugin_alconna.uniseg import UniMessage
@@ -16,8 +17,9 @@ from zhenxun.services.ai.flow.base import BaseRunnable
 from zhenxun.services.ai.run import AgentRunResult, RunContext
 from zhenxun.services.ai.run.models import AgentRunEnd, AgentRunError
 from zhenxun.services.ai.run.ui import UIController
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_agent as logger
 from zhenxun.utils.message import MessageUtils
+from zhenxun.utils.platform import PlatformUtils
 
 T_Deps = TypeVar("T_Deps", default=Any)
 T_Out = TypeVar("T_Out", default=str)
@@ -46,8 +48,6 @@ class AgentRunner(Generic[T_Out]):
         )
         if is_stateless and self.context.session_id:
             if not self.context.session_id.startswith("stateless_"):
-                import uuid
-
                 self.context.session_id = (
                     f"stateless_{self.context.session_id}_{uuid.uuid4().hex[:8]}"
                 )
@@ -126,15 +126,24 @@ class AgentRunner(Generic[T_Out]):
                 await MessageUtils.build_message(f"❌ 运行发生错误: {e}").send()
             raise e
 
-        if final_result and final_result.output and self._bot and self._event:
-            if isinstance(final_result.output, UniMessage):
-                await final_result.output.send(
-                    self._event, bot=self._bot, reply_to=reply_to
-                )
-                final_result.output = final_result.output.extract_plain_text()
+        if final_result and final_result.output and self._bot:
+            msg_to_send = (
+                final_result.output
+                if isinstance(final_result.output, UniMessage)
+                else MessageUtils.build_message(str(final_result.output))
+            )
+            if self._event:
+                await msg_to_send.send(self._event, bot=self._bot, reply_to=reply_to)
             else:
-                final_msg = str(final_result.output)
-                await MessageUtils.build_message(final_msg).send()
+                target = PlatformUtils.get_target(
+                    user_id=self.context.get_user_id(),
+                    group_id=self.context.get_group_id(),
+                )
+                if target:
+                    await msg_to_send.send(target=target, bot=self._bot)
+
+            if isinstance(final_result.output, UniMessage):
+                final_result.output = final_result.output.extract_plain_text()
 
         if final_result is None:
             raise RuntimeError("智能体运行流异常结束：未返回最终结果。")

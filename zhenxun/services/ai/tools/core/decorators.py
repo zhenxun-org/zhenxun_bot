@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import inspect
+import types
 from typing import Any
 
 from zhenxun.services.ai.capabilities import AbstractCapability
@@ -15,7 +17,15 @@ from zhenxun.services.ai.tools.core.capabilities import (
     LifecycleCapability,
     SuperuserCapability,
 )
-from zhenxun.services.ai.tools.models import ToolOptions
+from zhenxun.services.ai.tools.core.tool import FunctionTool
+from zhenxun.services.ai.tools.engine.registry import tool_provider_manager
+from zhenxun.services.ai.tools.models import (
+    EndRunResult,
+    ToolkitConfig,
+    ToolOptions,
+    ToolResult,
+)
+from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_copy
 
 
@@ -23,6 +33,8 @@ def toolkit(
     rules: list[ToolOptions] | ToolOptions | None = None,
     prefix: str = "",
     instructions: str | None = None,
+    auto_register: bool = False,
+    tags: list[str] | None = None,
 ):
     """
     类级别的工具箱装饰器，用于向内部所有 @tool 统一下发配置规则、名称前缀以及工具箱级系统提示词说明。
@@ -31,6 +43,8 @@ def toolkit(
         rules: 声明式规则集合或单个规则，应用于工具箱内所有工具。
         prefix: 工具箱内所有工具的名称前缀，通常以下划线结尾。
         instructions: 工具箱级别的系统提示词补充说明，大模型可见。
+        auto_register: 是否在加载时自动实例化该类并注册到全局工具箱列表中。
+        tags: 工具箱级别的路由标签，大模型路由系统将基于此发现整个工具箱。
 
     返回:
         Callable: 装饰器函数，接收一个类并返回该类。
@@ -44,7 +58,8 @@ def toolkit(
                 if isinstance(r, ToolOptions):
                     merged_options = merged_options.merge(r)
 
-        from zhenxun.services.ai.tools.models import ToolkitConfig
+        if tags:
+            merged_options.tags = list(set(merged_options.tags + tags))
 
         base_config = getattr(cls, "_default_config", None) or ToolkitConfig()
         new_config = model_copy(base_config, deep=True)
@@ -61,6 +76,15 @@ def toolkit(
 
         if instructions is not None:
             cls.default_instructions = instructions
+
+        if auto_register:
+            try:
+                tool_provider_manager.register_toolkit(cls())
+            except Exception as e:
+                logger.error(
+                    f"自动注册工具箱 '{cls.__name__}' 失败"
+                    f"(通常是因为自定义了必填参数的 __init__): {e}"
+                )
 
         return cls
 
@@ -107,10 +131,6 @@ class ToolkitMethodDescriptor:
     def __get__(self, instance, owner):
         if instance is None:
             return self
-        import types
-
-        from zhenxun.services.ai.tools.core.tool import FunctionTool
-
         bound_func = types.MethodType(self.func, instance)
         return FunctionTool(
             func=bound_func,
@@ -173,8 +193,6 @@ def tool(
         tool_name = name or func.__name__
         tool_desc = description
 
-        import inspect
-
         is_method = False
         if (
             hasattr(func, "__qualname__")
@@ -206,7 +224,6 @@ def tool(
 
             from zhenxun.services.ai.tools.core.tool import FunctionTool
             from zhenxun.services.ai.tools.engine.registry import tool_provider_manager
-            from zhenxun.services.log import logger
 
             func_tool = FunctionTool(
                 func=func,
@@ -216,7 +233,6 @@ def tool(
             )
             if auto_register:
                 tool_provider_manager.register_tool(func_tool)
-                logger.debug(f"已按命名空间隔离注册了工具(Callable): '{tool_name}'")
 
             setattr(func_tool, "__tool_settings__", base_settings)
             return func_tool
@@ -242,8 +258,6 @@ def direct_reply() -> ToolOptions:
     class DirectReplyCapability(AbstractCapability):
         async def wrap_tool_execute(self, context, tool_name, arguments, handler):
             result = await handler(arguments)
-            from zhenxun.services.ai.tools.models import EndRunResult, ToolResult
-
             if isinstance(result, ToolResult):
                 if getattr(result, "is_error", False):
                     return result

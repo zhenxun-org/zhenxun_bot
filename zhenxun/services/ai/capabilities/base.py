@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal, Union
 
 from zhenxun.services.ai.core.messages import ChatRequest, ChatResponse
 from zhenxun.services.ai.core.options import GenerationConfig
@@ -52,34 +52,14 @@ class CapabilityOrdering:
 class AbstractCapability:
     """
     Agent 能力组件基类协议。
-    所有业务逻辑拦截（限流、权限、动态 Prompt）请在此实现。
-    底层网络重试、并发控制等请勿在此处理。
     """
-
-    @classmethod
-    def get_serialization_name(cls) -> str | None:
-        """用于 YAML/JSON 反序列化的注册标识符"""
-        return cls.__name__
-
-    @classmethod
-    def from_spec(cls, **kwargs) -> "AbstractCapability":
-        """从 Spec 的 kwargs 中实例化对象"""
-        return cls(**kwargs)
-
-    def __init_subclass__(cls, **kwargs):
-        """自动将继承此类的所有拦截器注册到中心表"""
-        super().__init_subclass__(**kwargs)
-        CapabilityRegistry.register(cls)
 
     def get_ordering(self) -> CapabilityOrdering | None:
         """获取该拦截器的拓扑排序约束。子类可重写此方法以锁定执行顺序。"""
         return None
 
     async def for_run(self, context: RunContext) -> "AbstractCapability":
-        """获取专用于单次运行的实例。
-        默认返回自身(无状态)。
-        若需要记录单次运行的上下文状态，请返回深/浅拷贝(如 return copy.copy(self))。
-        """
+        """获取专用于单次运行的实例,默认返回自身(无状态)。"""
         return self
 
     async def get_generation_config(
@@ -89,9 +69,11 @@ class AbstractCapability:
         return None
 
     async def get_system_prompts(self, context: RunContext) -> list[str]:
+        """获取该能力提供的系统提示词列表。"""
         return []
 
     async def get_tools(self, context: RunContext) -> list[Any]:
+        """获取该能力附带的工具列表。"""
         return []
 
     async def prepare_tools(
@@ -135,19 +117,3 @@ class AbstractCapability:
     ) -> Any:
         """包裹单一工具的执行 (洋葱模型)。"""
         return await handler(arguments)
-
-
-class CapabilityRegistry:
-    """Capability 序列化注册表"""
-
-    _registry: ClassVar[dict[str, type[AbstractCapability]]] = {}
-
-    @classmethod
-    def register(cls, cap_cls: type[AbstractCapability]):
-        name = cap_cls.get_serialization_name()
-        if name:
-            cls._registry[name] = cap_cls
-
-    @classmethod
-    def get(cls, name: str) -> type[AbstractCapability] | None:
-        return cls._registry.get(name)

@@ -266,11 +266,6 @@ class DynamicCapability(AbstractCapability):
         """初始化动态能力"""
         self.capability_func = capability_func
 
-    @classmethod
-    def get_serialization_name(cls) -> str | None:
-        """获取反序列化标识"""
-        return None
-
     async def for_run(self, context: RunContext) -> "AbstractCapability":
         """在运行时基于当前上下文动态实例化并执行真正的 Capability"""
         if is_coroutine_callable(self.capability_func):
@@ -291,11 +286,6 @@ class WrapperCapability(AbstractCapability):
     def __init__(self, wrapped: AbstractCapability):
         """初始化代理包装器"""
         self.wrapped = wrapped
-
-    @classmethod
-    def get_serialization_name(cls) -> str | None:
-        """获取反序列化标识"""
-        return None
 
     async def for_run(self, context: RunContext) -> "AbstractCapability":
         """对内部包裹的实例执行运行时解析并深度克隆"""

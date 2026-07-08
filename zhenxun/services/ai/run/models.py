@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 """
 运行时（Run）相关核心类型定义
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 import json
 from typing import Any, Generic, cast
 from typing_extensions import TypeVar
@@ -10,12 +12,16 @@ from typing_extensions import TypeVar
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from zhenxun.services.ai.core.messages import AgentMessage, LLMMessage, UsageInfo
+from zhenxun.services.ai.core.options import BaseOutputDefinition
+from zhenxun.services.ai.core.protocols.tool import ToolResolvable
 from zhenxun.services.ai.core.stream_events import (
     AgentStreamEvent,
     EventBus,
     ToolCallStartEvent,
     ToolStreamChunkEvent,
 )
+from zhenxun.services.ai.guardrails import BaseGuardrail, GuardrailSource
+from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.utils.pydantic_compat import model_dump, model_validator
 
 
@@ -37,7 +43,7 @@ class ToolSummary(BaseModel):
     """工具执行失败次数"""
     total_latency_ms: float = 0.0
     """工具执行总耗时（毫秒）"""
-    by_name: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    by_name: dict[str, dict[str, float | int]] = Field(default_factory=dict)
     """按工具名称细分的执行状态统计"""
 
 
@@ -126,7 +132,7 @@ class StreamedRunResult(Generic[OutputDataT]):
         self.is_complete: bool = False
         self._result: AgentRunResult[OutputDataT] | None = None
 
-    async def stream_events(self) -> AsyncIterator[Any]:
+    async def stream_events(self) -> "AsyncIterator[AgentStreamEvent]":
         """获取底层的所有原始事件（包含工具调用过程等）"""
         from zhenxun.services.ai.run.models import AgentRunEnd, AgentRunError
 
@@ -214,24 +220,6 @@ class StreamedRunResult(Generic[OutputDataT]):
         return await self.get_run_result()
 
 
-class TaskResult(BaseModel):
-    """单个数据契约任务的执行结果"""
-
-    task_id: str
-    """关联的任务唯一 ID"""
-
-    output: Any
-    """任务的实际产出（如果是结构化任务，则为解析后的 Pydantic 实例；否则为纯文本）"""
-
-    raw_response: str | None = None
-    """大模型返回的原始纯文本内容"""
-
-    usage: UsageInfo = Field(default_factory=UsageInfo)
-    """该任务执行期间的 Token 消耗统计"""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-
 class AgentTask(BaseModel):
     """标准化数据契约（意图载体 Payload），定义大模型需要做什么及产出什么格式"""
 
@@ -247,23 +235,25 @@ class AgentTask(BaseModel):
     expected_output: str
     """预期输出的自然语言描述（指导大模型如何组织最终答案）"""
 
-    response_model: Any | None = None
+    response_model: type[BaseModel] | BaseOutputDefinition | None = None
     """强制要求返回的强类型结构 (Pydantic Model) 或
     OutputDefinition，为空则返回普通文本"""
 
-    tools: list[str | Any] | None = None
+    tools: list[str | Callable | dict[str, Any] | BaseTool | ToolResolvable] | None = (
+        None
+    )
     """针对此特定任务动态追加或覆盖的工具列表"""
 
-    guardrails: list[Any] | None = None
+    guardrails: list[GuardrailSource] | None = None
     """护栏验证列表。支持传入函数、BaseGuardrail 实例，
     或直接传入自然语言字符串规则（自动转为 LLM 裁判）"""
 
-    _parsed_guardrails: list[Any] = PrivateAttr(default_factory=list)
+    _parsed_guardrails: list[BaseGuardrail] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @model_validator(mode="after")
-    def _parse_and_set_guardrails(self) -> "AgentTask":
+    def _parse_and_set_guardrails(self) -> AgentTask:
         from zhenxun.services.ai.guardrails import parse_guardrails
 
         self._parsed_guardrails = parse_guardrails(self.guardrails)
@@ -275,5 +265,4 @@ __all__ = [
     "AgentTask",
     "OutputDataT",
     "StreamedRunResult",
-    "TaskResult",
 ]

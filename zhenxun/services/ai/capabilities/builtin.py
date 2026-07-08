@@ -5,11 +5,6 @@ import json
 from typing import Any, cast
 
 from zhenxun.models.user_console import UserConsole
-from zhenxun.services.ai.capabilities import (
-    AbstractCapability,
-    WrapModelRequestHandler,
-    WrapToolExecuteHandler,
-)
 from zhenxun.services.ai.config import get_llm_config
 from zhenxun.services.ai.core.exceptions import (
     AbortException,
@@ -33,9 +28,16 @@ from zhenxun.services.ai.core.messages import (
 from zhenxun.services.ai.core.models import LLMContext
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.utils import PermissionUtils
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_capability as logger
 from zhenxun.utils.enum import GoldHandle
 from zhenxun.utils.exception import InsufficientGold
+
+from .base import (
+    AbstractCapability,
+    WrapModelRequestHandler,
+    WrapToolExecuteHandler,
+)
+from .manager import capability
 
 
 def _get_tool_meta(tool: Any, key: str, default: Any = None) -> Any:
@@ -47,6 +49,7 @@ def _get_tool_meta(tool: Any, key: str, default: Any = None) -> Any:
     return meta.get(key, default)
 
 
+@capability(namespace="global", auto_apply=True)
 class StuckDetectionCapability(AbstractCapability):
     """死循环检测：使用前置请求拦截防止 LLM 陷入无限重试"""
 
@@ -56,6 +59,7 @@ class StuckDetectionCapability(AbstractCapability):
         llm_context: LLMContext[ChatRequest, ChatResponse],
         handler: WrapModelRequestHandler,
     ) -> ChatResponse:
+
         max_repeated_errors = 3
         action_hashes = []
         messages = list(llm_context.request.messages)
@@ -120,6 +124,7 @@ class StuckDetectionCapability(AbstractCapability):
         return await handler(llm_context)
 
 
+@capability(namespace="global", auto_apply=True)
 class GlobalCycleLimitCapability(AbstractCapability):
     """全局防死循环检测中间件：跨 Agent 追踪大模型调用总次数"""
 
@@ -152,6 +157,7 @@ class GlobalCycleLimitCapability(AbstractCapability):
         return await handler(llm_context)
 
 
+@capability(namespace="global", auto_apply=True)
 class PermissionCapability(AbstractCapability):
     """权限校验中间件：在执行前根据确定参数进行动态鉴权"""
 
@@ -182,6 +188,7 @@ class PermissionCapability(AbstractCapability):
         return await handler(arguments)
 
 
+@capability(namespace="global", auto_apply=True)
 class BillingCapability(AbstractCapability):
     """经济系统中间件：执行前扣除金币"""
 
@@ -221,6 +228,7 @@ class BillingCapability(AbstractCapability):
         return await handler(arguments)
 
 
+@capability(namespace="global", auto_apply=True)
 class ToolRetryAndReflectionCapability(AbstractCapability):
     """
     重试与自愈反思中间件。
@@ -267,6 +275,7 @@ class ToolRetryAndReflectionCapability(AbstractCapability):
             return ToolResult(output=f"执行发生异常: {e}").as_error()
 
 
+@capability(namespace="global", auto_apply=True)
 class ReflexionCapability(AbstractCapability):
     """自愈反思与验证引擎 (Reflexion Engine)。
     统一处理结构化解析失败和语义护栏拦截。"""

@@ -7,6 +7,7 @@ from typing_extensions import Self
 
 from pydantic import BaseModel, Field
 
+from zhenxun.services.ai.utils.logger import log_core as logger
 from zhenxun.utils.pydantic_compat import model_validator
 
 
@@ -309,7 +310,6 @@ class EmbedBatch(BaseModel):
 
     def to_text_only(self, context_name: str) -> list[str]:
         """降级工具：将多模态的批量向量安全剔除图片等内容，回退为纯文本数组"""
-        from zhenxun.services.log import logger
 
         texts = []
         for payload in self.payloads:

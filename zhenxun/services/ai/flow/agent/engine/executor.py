@@ -45,7 +45,7 @@ from zhenxun.services.ai.run import AgentRunResult, RunContext
 from zhenxun.services.ai.run.session import session_manager
 from zhenxun.services.ai.tools.engine.executor import ToolExecutor
 from zhenxun.services.ai.tools.models import ToolResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_agent as logger
 from zhenxun.utils.pydantic_compat import dump_json_safely, model_construct
 
 
@@ -219,13 +219,12 @@ class StandardAgentExecutor(BaseAgentExecutor):
             messages, run_context
         )
 
-        if run_context.run.event_bus:
-            await run_context.run.event_bus.emit(
-                LLMStartEvent(
-                    model_name=resources.model_name or "unknown",
-                    messages=flattened_messages,
-                )
+        await run_context.run.emit(
+            LLMStartEvent(
+                model_name=resources.model_name or "unknown",
+                messages=flattened_messages,
             )
+        )
 
         response = await self._execute_model_request(
             model_name=resources.model_name,
@@ -238,8 +237,7 @@ class StandardAgentExecutor(BaseAgentExecutor):
             cancellation_token=cancellation_token,
         )
 
-        if run_context.run.event_bus:
-            await run_context.run.event_bus.emit(LLMEndEvent(response=response))
+        await run_context.run.emit(LLMEndEvent(response=response))
 
         assistant_content = (
             response.content_parts if response.content_parts else response.text
@@ -376,7 +374,7 @@ class StandardAgentExecutor(BaseAgentExecutor):
                 state.messages, resources.model_name or "", base_overhead=0
             )
             logger.debug(
-                f"[TokenTracker] (Iter {state.current_cycle + 1}) "
+                f"(Iter {state.current_cycle + 1}) "
                 f"预估将消耗 {est_tokens} Token "
                 f"(Model: {resources.model_name or 'Unknown'})"
             )
@@ -444,7 +442,7 @@ class StandardAgentExecutor(BaseAgentExecutor):
             return
 
         if not response.tool_calls:
-            logger.debug("✅ AgentExecutor：模型未请求工具调用，推理循环结束。")
+            logger.debug("✅ 模型未请求工具调用，推理循环结束。")
             state.is_finished = True
             state.final_result = model_construct(
                 AgentRunResult,
@@ -476,8 +474,7 @@ class StandardAgentExecutor(BaseAgentExecutor):
 
             if is_server_side:
                 logger.debug(
-                    "☁️ [AgentExecutor] 检测到云端工具调用: "
-                    f"{call.tool_name}，已跳过本地执行。"
+                    f"☁️ 检测到云端工具调用: {call.tool_name}，已跳过本地执行。"
                 )
                 async with self.tool_executor._tool_stream_scope(
                     event_bus,
@@ -500,7 +497,7 @@ class StandardAgentExecutor(BaseAgentExecutor):
                 client_tool_calls.append(call)
 
         if not client_tool_calls:
-            logger.info("✅ AgentExecutor：无本地客户端工具需执行，推理循环平滑结束。")
+            logger.info("✅ 无本地客户端工具需执行，推理循环平滑结束。")
 
             state.is_finished = True
             state.final_result = model_construct(
@@ -638,7 +635,6 @@ class StandardAgentExecutor(BaseAgentExecutor):
         self, state: AgentState, resources: AgentRunResources
     ) -> AgentRunResult[Any]:
         run_context = resources.run_context
-        event_bus = run_context.run.event_bus
 
         if not resources.config.enable_fallback_summary:
             raise UpstreamServerException(
@@ -646,17 +642,15 @@ class StandardAgentExecutor(BaseAgentExecutor):
             )
 
         logger.warning(
-            f"AgentExecutor 达到最大循环次数 ({resources.config.max_cycles})，"
-            "触发兜底总结机制。"
+            f"达到最大循环次数 ({resources.config.max_cycles})，触发兜底总结机制。"
         )
 
-        if event_bus:
-            await event_bus.emit(
-                ToolStreamChunkEvent(
-                    tool_name="System",
-                    content="⏳ 思考过程过于复杂，正在强制生成最终总结...",
-                )
+        await run_context.run.emit(
+            ToolStreamChunkEvent(
+                tool_name="System",
+                content="⏳ 思考过程过于复杂，正在强制生成最终总结...",
             )
+        )
 
         fallback_msg = LLMMessage.user(
             "### 🚨 [系统强制指令]\n"

@@ -5,10 +5,13 @@ from .base import (
     WrapToolExecuteHandler,
     WrapToolValidateHandler,
 )
+from .manager import CapabilityQuery, CapabilitySource, capability
 from .wrappers import CombinedCapability, DynamicCapability, WrapperCapability
 
 __all__ = [
     "AbstractCapability",
+    "CapabilityQuery",
+    "CapabilitySource",
     "CombinedCapability",
     "DynamicCapability",
     "WrapModelRequestHandler",
@@ -16,4 +19,5 @@ __all__ = [
     "WrapToolExecuteHandler",
     "WrapToolValidateHandler",
     "WrapperCapability",
+    "capability",
 ]

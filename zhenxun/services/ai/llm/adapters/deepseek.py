@@ -84,21 +84,6 @@ class DeepSeekConfigMapper(OpenAIConfigMapper):
             if isinstance(rf, dict) and rf.get("type") == "json_schema":
                 params["response_format"] = {"type": "json_object"}
 
-        if config.common.reasoning_effort:
-            effort = str(config.common.reasoning_effort).lower()
-            if effort == "none":
-                params["thinking"] = {"type": "disabled"}
-            else:
-                params["thinking"] = {"type": "enabled"}
-        elif (
-            hasattr(config, "deepseek_options")
-            and config.deepseek_options.thinking is not None
-        ):
-            if config.deepseek_options.thinking is True:
-                params["thinking"] = {"type": "enabled"}
-            elif config.deepseek_options.thinking is False:
-                params["thinking"] = {"type": "disabled"}
-
         return params
 
 

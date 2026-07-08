@@ -3,6 +3,8 @@ from typing import Any
 from zhenxun import ui
 from zhenxun.models.scheduled_job import ScheduledJob
 from zhenxun.services import scheduler_manager
+from zhenxun.services.scheduler.registry import scheduler_registry
+from zhenxun.services.scheduler.types import TargetType
 from zhenxun.ui.models import StatusBadgeCell, TextCell
 from zhenxun.utils.pydantic_compat import model_json_schema
 
@@ -173,15 +175,15 @@ async def format_schedule_list_as_image(
 
 def format_target_info(target_type: str, target_identifier: str) -> str:
     """格式化目标信息以供显示"""
-    if target_type == "GLOBAL":
+    if target_type == TargetType.GLOBAL.value:
         return "全局"
-    elif target_type == "ALL_GROUPS":
+    elif target_type == TargetType.ALL_GROUPS.value:
         return "所有群组"
-    elif target_type == "TAG":
+    elif target_type == TargetType.TAG.value:
         return f"标签: {target_identifier}"
-    elif target_type == "GROUP":
+    elif target_type == TargetType.GROUP.value:
         return f"群: {target_identifier}"
-    elif target_type == "USER":
+    elif target_type == TargetType.USER.value:
         return f"用户: {target_identifier}"
     else:
         return f"{target_type}: {target_identifier}"
@@ -215,7 +217,7 @@ async def format_plugins_list() -> str:
 
     message_parts = ["📋 已注册的定时任务插件:"]
     for i, plugin_name in enumerate(registered_plugins, 1):
-        task_meta = scheduler_manager._registered_tasks[plugin_name]
+        task_meta = scheduler_registry.tasks[plugin_name]
         params_model = task_meta.get("model")
 
         param_info_str = "无参数"

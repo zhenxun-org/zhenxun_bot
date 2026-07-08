@@ -22,6 +22,8 @@ from zhenxun.configs.config import Config
 from zhenxun.models.level_user import LevelUser
 from zhenxun.models.scheduled_job import ScheduledJob
 from zhenxun.services import scheduler_manager
+from zhenxun.services.scheduler.registry import scheduler_registry
+from zhenxun.services.scheduler.types import BaseTrigger, TargetType, Trigger
 from zhenxun.utils.time_utils import TimeUtils
 
 
@@ -103,7 +105,7 @@ def parse_daily_time(time_str: str) -> dict:
         raise ValueError("时间格式错误，请使用 'HH:MM' 或 'HH:MM:SS' 格式。")
 
 
-def _parse_trigger_from_arparma(arp: Arparma) -> tuple[str, dict] | None:
+def _parse_trigger_from_arparma(arp: Arparma) -> BaseTrigger | None:
     """从 Arparma 中解析时间触发器配置"""
     subcommand_name = next(iter(arp.subcommands.keys()), None)
     if not subcommand_name:
@@ -111,19 +113,22 @@ def _parse_trigger_from_arparma(arp: Arparma) -> tuple[str, dict] | None:
 
     try:
         if cron_expr := arp.query[str](f"{subcommand_name}.cron.cron_expr", None):
-            return "cron", dict(
-                zip(
-                    ["minute", "hour", "day", "month", "day_of_week"], cron_expr.split()
+            return Trigger.cron(
+                **dict(
+                    zip(
+                        ["minute", "hour", "day", "month", "day_of_week"],
+                        cron_expr.split(),
+                    )
                 )
             )
         if interval_expr := arp.query[str](
             f"{subcommand_name}.interval.interval_expr", None
         ):
-            return "interval", TimeUtils.parse_interval_to_dict(interval_expr)
+            return Trigger.interval(**TimeUtils.parse_interval_to_dict(interval_expr))
         if date_expr := arp.query[str](f"{subcommand_name}.date.date_expr", None):
-            return "date", {"run_date": datetime.fromisoformat(date_expr)}
+            return Trigger.date(run_date=datetime.fromisoformat(date_expr))
         if daily_expr := arp.query[str](f"{subcommand_name}.daily.daily_expr", None):
-            return "cron", parse_daily_time(daily_expr)
+            return Trigger.cron(**parse_daily_time(daily_expr))
     except ValueError as e:
         raise ValueError(f"时间参数解析错误: {e}") from e
     return None
@@ -132,12 +137,12 @@ def _parse_trigger_from_arparma(arp: Arparma) -> tuple[str, dict] | None:
 async def GetTriggerInfo(
     matcher: AlconnaMatcher,
     arp: Arparma = AlconnaMatches(),
-) -> tuple[str, dict]:
+) -> BaseTrigger:
     """依赖注入函数：解析并验证时间触发器"""
     try:
-        trigger_info = _parse_trigger_from_arparma(arp)
-        if trigger_info:
-            return trigger_info
+        trigger = _parse_trigger_from_arparma(arp)
+        if trigger:
+            return trigger
     except ValueError as e:
         await matcher.finish(f"时间参数解析错误: {e}")
 
@@ -199,24 +204,24 @@ async def GetTargeter(
         filters["plugin_name"] = plugin_name.result
 
     if global_flag:
-        filters["target_type"] = "ALL_GROUPS"
+        filters["target_type"] = TargetType.ALL_GROUPS.value
         filters["target_identifier"] = scheduler_manager.ALL_GROUPS
     elif user_id.available:
-        filters["target_type"] = "USER"
+        filters["target_type"] = TargetType.USER.value
         filters["target_identifier"] = user_id.result
     elif all_enabled:
         pass
     elif tag_name.available:
-        filters["target_type"] = "TAG"
+        filters["target_type"] = TargetType.TAG.value
         filters["target_identifier"] = tag_name.result
     elif group_ids.available:
         gids = [str(gid) for gid in group_ids.result]
-        filters["target_type"] = "GROUP"
+        filters["target_type"] = TargetType.GROUP.value
         filters["target_identifier__in"] = gids
     else:
         current_group_id = getattr(event, "group_id", None)
         if current_group_id:
-            filters["target_type"] = "GROUP"
+            filters["target_type"] = TargetType.GROUP.value
             filters["target_identifier"] = str(current_group_id)
 
     return scheduler_manager.target(**filters)
@@ -230,7 +235,7 @@ async def GetValidatedJobKwargs(
 ) -> dict:
     """依赖注入函数：解析、合并和验证任务的关键字参数"""
     p_name = plugin_name.result
-    task_meta = scheduler_manager._registered_tasks.get(p_name)
+    task_meta = scheduler_registry.tasks.get(p_name)
     if not task_meta:
         await matcher.finish(f"插件 '{p_name}' 未注册可定时执行的任务。")
 
@@ -311,7 +316,7 @@ async def GetFinalPermission(
 
     else:
         base_permission = effective_user_level
-        task_meta = scheduler_manager._registered_tasks.get(plugin_name.result)
+        task_meta = scheduler_registry.tasks.get(plugin_name.result)
         if task_meta and "default_permission" in task_meta:
             default_perm = task_meta.get("default_permission")
             if isinstance(default_perm, int):

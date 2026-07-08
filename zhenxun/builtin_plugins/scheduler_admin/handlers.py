@@ -16,6 +16,8 @@ from nonebot_plugin_uninfo import Uninfo
 from zhenxun.configs.config import Config
 from zhenxun.models.scheduled_job import ScheduledJob
 from zhenxun.services import scheduler_manager
+from zhenxun.services.scheduler.registry import scheduler_registry
+from zhenxun.services.scheduler.types import BaseTrigger
 from zhenxun.utils.message import MessageUtils
 
 from .commands import schedule_cmd
@@ -66,7 +68,7 @@ async def handle_set(
     interval: Match[int] = AlconnaMatch("interval_seconds"),
     job_name: Match[str] = AlconnaMatch("job_name"),
     bot_id_to_operate: str = Depends(GetBotId),
-    trigger_info: tuple[str, dict] = Depends(GetTriggerInfo),
+    trigger: BaseTrigger = Depends(GetTriggerInfo),
     job_kwargs: dict = Depends(GetValidatedJobKwargs),
     creator_permission_level: int = Depends(GetCreatorPermissionLevel),
     final_permission: int = Depends(GetFinalPermission),
@@ -86,7 +88,7 @@ async def handle_set(
     )
 
     if is_multi_target:
-        task_meta = scheduler_manager._registered_tasks.get(p_name)
+        task_meta = scheduler_registry.tasks.get(p_name)
         if jitter_val is None:
             if task_meta and task_meta.get("default_jitter") is not None:
                 jitter_val = cast(int | None, task_meta["default_jitter"])
@@ -114,7 +116,7 @@ async def handle_set(
         targets=target_groups,
         creator_permission_level=creator_permission_level,
         plugin_name=p_name,
-        trigger_info=trigger_info,
+        trigger=trigger,
         job_kwargs=job_kwargs,
         permission=final_permission,
         bot_id=bot_id_to_operate,
@@ -210,14 +212,14 @@ async def handle_update(
     kwargs_str: Match[str] = AlconnaMatch("kwargs_str"),
 ):
     """处理 '更新' 子命令"""
-    trigger_info = _parse_trigger_from_arparma(arp)
-    if not trigger_info and not kwargs_str.available:
+    trigger = _parse_trigger_from_arparma(arp)
+    if not trigger and not kwargs_str.available:
         await schedule_cmd.finish(
             "请提供需要更新的时间 (--cron/--interval/--date/--daily) 或参数 (--kwargs)"
         )
 
     result_message = await scheduler_admin_service.update_schedule(
-        schedule, trigger_info, kwargs_str.result if kwargs_str.available else None
+        schedule, trigger, kwargs_str.result if kwargs_str.available else None
     )
     await schedule_cmd.finish(result_message)
 

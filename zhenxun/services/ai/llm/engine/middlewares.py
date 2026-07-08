@@ -51,7 +51,7 @@ from zhenxun.services.ai.llm.system.network import (
     HealthManager,
     LLMHttpClient,
 )
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.http_utils import AsyncHttpx
 from zhenxun.utils.log_sanitizer import sanitize_for_logging
 from zhenxun.utils.pydantic_compat import (
@@ -136,7 +136,7 @@ class LLMCacheMiddleware:
 
         if cached_data is not None:
             logger.debug(
-                f"⚡ [LLMCache] 命中本地极速缓存 - "
+                f"命中本地极速缓存 - "
                 f"model: {self.model_name}, type: {type(context.request).__name__}"
             )
 

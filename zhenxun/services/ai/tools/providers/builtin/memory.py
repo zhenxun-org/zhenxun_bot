@@ -10,7 +10,7 @@ from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.models import ToolOptions, ToolResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_tool as logger
 
 
 class MemoryManagementToolkit(BaseToolkit):

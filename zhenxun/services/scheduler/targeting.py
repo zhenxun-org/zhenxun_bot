@@ -11,6 +11,9 @@ from nonebot.adapters import Bot
 
 from zhenxun.services.tags import tag_manager
 
+from .engine import APSchedulerAdapter
+from .repository import ScheduleRepository
+
 __all__ = [
     "ScheduleTargeter",
     "_resolve_all_groups",
@@ -22,24 +25,29 @@ __all__ = [
 
 
 async def _resolve_group(target_identifier: str, bot: Bot) -> list[str | None]:
+    """解析 GROUP 类型的执行目标。"""
     return [target_identifier]
 
 
 async def _resolve_tag(target_identifier: str, bot: Bot) -> list[str | None]:
+    """解析 TAG 类型的标签执行目标。"""
     result = await tag_manager.resolve_tag_to_group_ids(target_identifier)
     return result  # type: ignore
 
 
 async def _resolve_user(target_identifier: str, bot: Bot) -> list[str | None]:
+    """解析 USER 类型的执行目标。"""
     return [target_identifier]
 
 
 async def _resolve_all_groups(target_identifier: str, bot: Bot) -> list[str | None]:
+    """解析 ALL_GROUPS 类型的全群执行目标。"""
     result = await tag_manager.resolve_tag_to_group_ids("@all", bot=bot)
     return result
 
 
 async def _resolve_global_or_user(target_identifier: str, bot: Bot) -> list[str | None]:
+    """解析 GLOBAL 类型的全局执行目标。"""
     return [None]
 
 
@@ -66,8 +74,6 @@ class ScheduleTargeter:
         返回:
             list[ScheduledJob]: 符合过滤条件的任务列表。
         """
-        from .repository import ScheduleRepository
-
         query = ScheduleRepository.filter(**self._filters)
         return await query.all()
 
@@ -147,9 +153,6 @@ class ScheduleTargeter:
         返回:
             tuple[int, str]: (成功移除的任务数量, 操作结果消息)。
         """
-        from .engine import APSchedulerAdapter
-        from .repository import ScheduleRepository
-
         schedules = await self._get_schedules()
         if not schedules:
             target_desc = self._generate_target_description()

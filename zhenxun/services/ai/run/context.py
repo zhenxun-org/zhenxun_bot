@@ -4,16 +4,29 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 import dataclasses
 import inspect
-from typing import Any, Generic, cast, get_origin
+from typing import TYPE_CHECKING, Any, Generic, cast, get_origin
 from typing_extensions import TypeVar
+import uuid
 
 from nonebot.adapters import Bot, Event
-from nonebot.matcher import Matcher
+from nonebot.matcher import Matcher, current_bot, current_event, current_matcher
 from pydantic import BaseModel, ConfigDict, Field
 
+from zhenxun.services.ai.capabilities.base import AbstractCapability
+from zhenxun.services.ai.core.engine.append_only import AppendOnlyContextManager
 from zhenxun.services.ai.core.messages import AgentEvent, AgentMessage
+from zhenxun.services.ai.core.models import CancellationToken
+from zhenxun.services.ai.core.protocols.tool import ToolExecutable
+from zhenxun.services.ai.core.stream_events import AgentStreamEvent, EventBus
+from zhenxun.services.ai.run.blackboard import BlackboardManager
 from zhenxun.services.ai.utils import ContextUtils
+from zhenxun.services.ai.utils.scope import ScopeSelector
+from zhenxun.services.scheduler.types import ScheduleContext
+from zhenxun.utils.platform import PlatformUtils
 from zhenxun.utils.utils import infer_plugin_namespace
+
+if TYPE_CHECKING:
+    from zhenxun.services.ai.context.memory.facades import AgentSessionFacade
 
 AgentDepsT = TypeVar("AgentDepsT", default=Any)
 """泛型类型变量：外部环境依赖对象 (Agent Dependencies)。"""
@@ -40,17 +53,45 @@ class NoneBotDeps(BaseModel):
     @classmethod
     def get_current(cls) -> "NoneBotDeps | None":
         """利用 NoneBot 原生魔法，基于 ContextVars 隐式提取当前执行上下文"""
-        try:
-            from nonebot.matcher import current_bot, current_event, current_matcher
+        bot = current_bot.get(None)
+        event = current_event.get(None)
+        matcher = current_matcher.get(None)
 
-            bot = current_bot.get(None)
-            event = current_event.get(None)
-            matcher = current_matcher.get(None)
-            if bot or event:
-                return cls(bot=bot, event=event, matcher=matcher)
-        except Exception:
-            pass
+        if bot or event:
+            return cls(bot=bot, event=event, matcher=matcher)
+
         return None
+
+
+class ScheduledDeps(BaseModel):
+    """后台/定时任务环境下的标准依赖容器。"""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    bot: Bot | None = Field(default=None)
+    """机器人实例"""
+    group_id: str | None = Field(default=None)
+    """群组/频道 ID"""
+    user_id: str | None = Field(default=None)
+    """用户 ID"""
+    schedule_id: int | str | None = Field(default=None)
+    """定时任务/调度任务 ID"""
+    platform: str | None = Field(default=None)
+    """适配器平台标识"""
+
+    @classmethod
+    def from_schedule_context(
+        cls, bot: Bot, context: ScheduleContext
+    ) -> "ScheduledDeps":
+        """从调度器上下文中快速构造并提取依赖"""
+        return cls(
+            bot=bot,
+            group_id=getattr(context, "group_id", None),
+            user_id=getattr(context, "user_id", None),
+            schedule_id=getattr(context, "schedule_id", None),
+            platform=getattr(context, "platform_scope", None)
+            or PlatformUtils.get_platform_scope(bot),
+        )
 
 
 @dataclasses.dataclass
@@ -66,9 +107,7 @@ class SessionContext(Generic[AgentDepsT]):
     """强类型的外部依赖注入对象（如 Bot, Event），供跨工具共享。"""
     shared_state: dict[str, Any] = dataclasses.field(default_factory=dict)
     """共享状态字典：全局引用穿透，用于主智能体与嵌套子智能体之间的数据通信。"""
-    auth_tokens: dict[str, str] = dataclasses.field(default_factory=dict)
-    """授权凭证字典：保存用户针对各 Provider 的 OAuth 或 API Token。"""
-    blackboard: Any | None = None
+    blackboard: BlackboardManager | None = None
     """结构化黑板管理器，作为共享状态的高级替代方案，提供并发锁和强类型校验。"""
     namespace: str = "global"
     """触发事件的插件命名空间"""
@@ -76,7 +115,7 @@ class SessionContext(Generic[AgentDepsT]):
     """用于大模型前缀缓存命中优化的追加写入管理器。"""
 
     @property
-    def memory(self) -> Any:
+    def memory(self) -> "AgentSessionFacade":
         """
         获取当前会话的持久化记忆访问门面 (AgentSessionFacade)。
         提供极简的 history 和 slots 操作 API。
@@ -84,7 +123,6 @@ class SessionContext(Generic[AgentDepsT]):
         from zhenxun.services.ai.context.memory.facades import AgentSessionFacade
         from zhenxun.services.ai.context.memory.manager import memory_manager
         from zhenxun.services.ai.context.memory.types import SessionMetadata
-        from zhenxun.services.ai.utils.scope import ScopeSelector
 
         user_id = ContextUtils.extract_user_id(self.deps)
         group_id = ContextUtils.extract_group_id(self.deps)
@@ -127,9 +165,9 @@ class AgentRunContext(Generic[AgentDepsT]):
     """子智能体委派深度标记，用于防范无限递归嵌套。"""
     tool_retries: dict[str, int] = dataclasses.field(default_factory=dict)
     """记录当前轮次内各个工具的累积失败重试次数，用于系统熔断。"""
-    cancellation_token: Any | None = None
+    cancellation_token: CancellationToken | None = None
     """全局级联取消令牌，用于跨 Agent 的协程挂起中断。"""
-    event_bus: Any | None = None
+    event_bus: EventBus | None = None
     """底层的事件流发射器 (EventBus)，由执行引擎在运行时挂载。"""
 
     dynamic_prompts: dict[str, str] = dataclasses.field(default_factory=dict)
@@ -145,6 +183,11 @@ class AgentRunContext(Generic[AgentDepsT]):
     def add_event(self, event: AgentEvent) -> None:
         """向当前运行上下文中安全追加业务事件"""
         self.messages.append(event)
+
+    async def emit(self, event: AgentStreamEvent) -> None:
+        """安全地向事件总线发射流式事件（内置判空逻辑，消解业务层的样板代码）"""
+        if self.event_bus:
+            await self.event_bus.emit(event)
 
 
 @dataclasses.dataclass
@@ -162,7 +205,7 @@ class ToolCallContext(Generic[AgentDepsT]):
     """本次调用的工具名称。"""
     retry_count: int = 0
     """当前工具调用的重试序号 (第几次重试)。"""
-    current_tool: Any | None = None
+    current_tool: ToolExecutable | None = None
     """当前工具的可执行实例 (ToolExecutable)。"""
 
 
@@ -188,7 +231,7 @@ class RunContext(Generic[AgentDepsT]):
     upstream_results: dict[str, Any] = dataclasses.field(default_factory=dict)
     """前置节点产出字典：标准化的数据流载荷契约，键为 Agent Name，值为输出内容"""
 
-    capabilities: list[Any] = dataclasses.field(default_factory=list)
+    capabilities: list[AbstractCapability] = dataclasses.field(default_factory=list)
     """当前上下文绑定的拦截器 (Capabilities) 链，用于生命周期拦截"""
 
     deps: AgentDepsT = dataclasses.field(default=cast(AgentDepsT, None))
@@ -210,6 +253,14 @@ class RunContext(Generic[AgentDepsT]):
         default=False, init=False, repr=False, compare=False
     )
     """标记 session_id 是否为框架隐式生成的。"""
+
+    @classmethod
+    def from_schedule(
+        cls, bot: Bot, context: ScheduleContext, **kwargs
+    ) -> "RunContext[ScheduledDeps]":
+        """极简构造语法糖：从定时调度任务上下文中直接生成 RunContext"""
+        deps = ScheduledDeps.from_schedule_context(bot, context)
+        return cast("RunContext[ScheduledDeps]", cls(deps=cast(Any, deps), **kwargs))
 
     def get_bot(self) -> Bot | None:
         """强类型安全地提取 Bot 实例"""
@@ -256,21 +307,15 @@ class RunContext(Generic[AgentDepsT]):
             bot = self.get_bot()
             event = self.get_event()
 
-            if bot and event:
+            if bot:
                 meta = ContextUtils.generate_session_meta(
-                    bot, event, scope_builder=Isolation.AGENT_USER()
+                    bot=bot,
+                    event=event,
+                    deps=self.deps,
+                    scope_builder=Isolation.AGENT_USER(),
                 )
                 self.session_id = meta.session_id
                 self._is_auto_session_id = True
-            else:
-                uid = self.get_user_id()
-                gid = self.get_group_id()
-                if uid and gid:
-                    self.session_id = f"auto_{gid}_{uid}"
-                    self._is_auto_session_id = True
-                elif uid:
-                    self.session_id = f"auto_private_{uid}"
-                    self._is_auto_session_id = True
 
         ns = "global"
         if self.deps:
@@ -285,9 +330,6 @@ class RunContext(Generic[AgentDepsT]):
             deps=self.deps,
             shared_state=self.shared_state,
             namespace=ns,
-        )
-        from zhenxun.services.ai.core.engine.append_only import (
-            AppendOnlyContextManager,
         )
 
         self.session.append_only_manager = AppendOnlyContextManager()
@@ -351,8 +393,6 @@ class RunContext(Generic[AgentDepsT]):
         new_ctx.run.messages = []
         new_ctx.capabilities = []
 
-        import uuid
-
         base_sid = self.session_id or "default"
         new_ctx.session_id = f"{base_sid}/sub_{member_name}_{uuid.uuid4().hex[:6]}"
         new_ctx.session.session_id = new_ctx.session_id
@@ -403,6 +443,7 @@ __all__ = [
     "AgentRunContext",
     "NoneBotDeps",
     "RunContext",
+    "ScheduledDeps",
     "SessionContext",
     "ToolCallContext",
     "ToolsPrepareFunc",

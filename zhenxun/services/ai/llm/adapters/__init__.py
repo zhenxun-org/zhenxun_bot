@@ -13,7 +13,7 @@ from .glm import GLMAdapter
 from .jina import JinaAdapter
 from .mimo import MiMoAdapter
 from .minimax import MiniMaxAdapter
-from .openai import OpenAIAdapter, OpenAICompatAdapter
+from .openai import OpenAIAdapter, OpenAICompatAdapter, OpenAIResponsesAdapter
 from .openrouter import OpenRouterAdapter
 
 LLMAdapterFactory.initialize()
@@ -30,6 +30,7 @@ __all__ = [
     "MiniMaxAdapter",
     "OpenAIAdapter",
     "OpenAICompatAdapter",
+    "OpenAIResponsesAdapter",
     "OpenRouterAdapter",
     "RequestData",
     "ResponseData",

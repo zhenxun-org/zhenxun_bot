@@ -10,8 +10,9 @@ from zhenxun.utils.pydantic_compat import model_dump
 
 from .engine import APSchedulerAdapter
 from .manager import scheduler_manager
+from .registry import scheduler_registry
 from .repository import ScheduleRepository
-from .types import ScheduleContext
+from .types import JobConfig, ScheduleContext
 
 
 @PriorityLifecycle.on_startup(priority=90)
@@ -21,7 +22,7 @@ async def _load_schedules_from_db():
     schedules = await ScheduleRepository.get_all_enabled()
     count = 0
     for schedule in schedules:
-        if schedule.plugin_name in scheduler_manager._registered_tasks:
+        if schedule.plugin_name in scheduler_registry.tasks:
             APSchedulerAdapter.add_or_reschedule_job(schedule)
             count += 1
         else:
@@ -30,7 +31,7 @@ async def _load_schedules_from_db():
 
     logger.info("正在检查并注册声明式默认任务...")
     declared_count = 0
-    for task_info in scheduler_manager._declared_tasks:
+    for task_info in scheduler_registry.persistent_declarations:
         plugin_name = task_info.plugin_name
         group_id = task_info.group_id
         bot_id = task_info.bot_id
@@ -45,21 +46,21 @@ async def _load_schedules_from_db():
         if not exists:
             logger.info(f"为插件 '{plugin_name}' 注册新的默认定时任务...")
 
-            trigger_config_dict = model_dump(
-                task_info.trigger, exclude={"trigger_type"}
-            )
-
             target_type = "GROUP" if group_id else "GLOBAL"
             target_identifier = group_id or ""
+
+            config = JobConfig(
+                trigger=task_info.trigger,
+                job_kwargs=task_info.job_kwargs,
+                bot_id=bot_id,
+                source="PLUGIN_DEFAULT",
+            )
 
             schedule = await scheduler_manager.add_schedule(
                 plugin_name=plugin_name,
                 target_type=target_type,
                 target_identifier=target_identifier,
-                trigger_type=task_info.trigger.trigger_type,
-                trigger_config=trigger_config_dict,
-                job_kwargs=task_info.job_kwargs,
-                bot_id=bot_id,
+                config=config,
             )
             if schedule:
                 declared_count += 1
@@ -74,7 +75,7 @@ async def _load_schedules_from_db():
 
     logger.info("正在调度声明式临时任务...")
     ephemeral_count = 0
-    for declaration in scheduler_manager._ephemeral_declared_tasks:
+    for declaration in scheduler_registry.ephemeral_declarations:
         try:
             job_id = f"runtime::{declaration.plugin_name}::{declaration.func.__name__}"
 

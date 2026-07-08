@@ -17,7 +17,7 @@ from zhenxun.services.ai.flow.team.models import (
 from zhenxun.services.ai.flow.team.strategy import BaseTeamStrategy
 from zhenxun.services.ai.run import AgentRunResult, RunContext
 from zhenxun.services.ai.run.models import AgentRunEnd
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_team as logger
 from zhenxun.utils.pydantic_compat import model_construct
 
 
@@ -47,7 +47,7 @@ class TeamRunner:
                 (m for m in self.team.members if m.name == action.agent), None
             )
             if not target_agent:
-                logger.error(f"❌ [TeamRunner] 找不到团队成员: {action.agent}")
+                logger.error(f"❌ 找不到团队成员: {action.agent}")
                 await queue.put(
                     (
                         "result",
@@ -74,6 +74,7 @@ class TeamRunner:
                 team_name=self.team.name,
                 members=self.team.members,
                 state_flow=getattr(self.strategy, "state_flow", None),
+                max_handoffs=getattr(self.strategy, "max_handoffs", 3),
             )
             sub_context.capabilities.append(routing_cap)
 

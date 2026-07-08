@@ -10,7 +10,7 @@ from zhenxun.services.ai.llm.builder import validate_override_params
 from zhenxun.services.ai.llm.engine.service import LLMModel
 from zhenxun.services.ai.llm.system.capabilities import get_model_capabilities
 from zhenxun.services.ai.llm.system.network import health_manager, http_client_manager
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.pydantic_compat import dump_json_safely, model_copy, model_dump
 
 _model_cache: dict[str, tuple[LLMModel, float]] = {}
@@ -111,6 +111,22 @@ async def get_or_create_model(
     capabilities = get_model_capabilities(model_detail_found.model_name)
     capabilities = model_copy(capabilities, deep=True)
 
+    if model_detail_found.max_input_tokens is not None:
+        capabilities.max_input_tokens = model_detail_found.max_input_tokens
+
+    base_gen_config = GenerationConfig()
+    if provider_config_found.temperature is not None:
+        base_gen_config.common.temperature = provider_config_found.temperature
+    if provider_config_found.max_output_tokens is not None:
+        base_gen_config.common.max_tokens = provider_config_found.max_output_tokens
+
+    if model_detail_found.temperature is not None:
+        base_gen_config.common.temperature = model_detail_found.temperature
+    if model_detail_found.max_output_tokens is not None:
+        base_gen_config.common.max_tokens = model_detail_found.max_output_tokens
+    if model_detail_found.reasoning_effort is not None:
+        base_gen_config.common.reasoning_effort = model_detail_found.reasoning_effort
+
     if model_detail_found.task_type == "image_generation":
         capabilities.output_modalities.add(ModelModality.IMAGE)
         capabilities.supports_tool_calling = False
@@ -130,9 +146,8 @@ async def get_or_create_model(
         timeout=default_timeout,
         api_base=provider_config_found.api_base,
         api_type=provider_config_found.api_type,
-        openai_compat=provider_config_found.openai_compat,
         temperature=provider_config_found.temperature,
-        generation_max_tokens=provider_config_found.generation_max_tokens,
+        max_output_tokens=provider_config_found.max_output_tokens,
     )
 
     shared_http_client = await http_client_manager.get_client(config_for_http_client)
@@ -144,16 +159,21 @@ async def get_or_create_model(
             health_manager=health_manager,
             http_client=shared_http_client,
             capabilities=capabilities,
+            config_override=base_gen_config,
         )
 
         if override_config:
             validated_override_params = validate_override_params(override_config)
-            model_instance._generation_config = validated_override_params
-            model_instance.identity.generation_config = validated_override_params
+            final_config = base_gen_config.merge_with(validated_override_params)
+            model_instance._generation_config = final_config
+            model_instance.identity.generation_config = final_config
             logger.debug(
                 f"为新模型 {prov_name_str}/{mod_name_str} 应用配置覆盖: "
                 f"{_get_clean_log_config(validated_override_params)}"
             )
+        else:
+            model_instance._generation_config = base_gen_config
+            model_instance.identity.generation_config = base_gen_config
 
         _cache_model(cache_key, model_instance)
         logger.debug(

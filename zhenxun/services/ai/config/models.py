@@ -107,11 +107,9 @@ class ProviderConfig(BaseModel):
     """API 基础 URL 路径"""
     api_type: str = "openai"
     """API 协议类型 (openai/gemini/zhipu/etc.)"""
-    openai_compat: bool = False
-    """是否强制使用 OpenAI 兼容模式"""
-    temperature: float | None = 0.7
+    temperature: float | None = None
     """该提供商下模型的默认温度"""
-    generation_max_tokens: int | None = None
+    max_output_tokens: int | None = None
     """该提供商下模型的默认最大输出限制"""
     models: list[ModelDetail]
     """该提供商提供的具体模型列表"""

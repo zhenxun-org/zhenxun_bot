@@ -1,23 +1,31 @@
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+import inspect
 from io import BytesIO
 import mimetypes
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar, cast
 
+import anyio
 from nonebot.adapters import Bot, Event
 from nonebot.adapters import Message as PlatformMessage
+from nonebot.matcher import current_bot, current_event, current_matcher
+from nonebot_plugin_alconna import UniMessage
 from nonebot_plugin_alconna.uniseg import (
+    At,
+    AtAll,
     Audio,
     Image,
+    Reply,
     Segment,
     Text,
-    UniMessage,
     Video,
     Voice,
 )
+from nonebot_plugin_alconna.uniseg.tools import image_fetch, reply_fetch
 from PIL.Image import Image as PILImageType
 
+from zhenxun.services.ai.core.engine.context_renderer import ContextConverter
 from zhenxun.services.ai.core.messages import (
     AgentEvent,
     AudioPart,
@@ -35,7 +43,9 @@ from zhenxun.services.ai.core.messages import (
     VideoPart,
 )
 from zhenxun.services.ai.core.options import LLMEmbeddingConfig
-from zhenxun.services.log import logger
+from zhenxun.services.ai.run import get_current_run_context
+from zhenxun.services.ai.utils.logger import log_core as logger
+from zhenxun.utils.http_utils import AsyncHttpx
 from zhenxun.utils.pydantic_compat import TypeAdapter, model_copy, model_dump
 from zhenxun.utils.utils import infer_plugin_namespace
 
@@ -96,16 +106,12 @@ class MessageBuilder:
     ) -> LLMContentPart | None:
         """将本地路径读取为多态消息部件"""
         try:
-            import anyio
-
             aio_path = anyio.Path(path_like)
             if not await aio_path.exists() or not await aio_path.is_file():
                 logger.warning(f"文件不存在或不是一个文件: {path_like}")
                 return None
 
-            from pathlib import Path as StdPath
-
-            std_path = StdPath(path_like)
+            std_path = Path(path_like)
             resolved_aio_path = await aio_path.absolute()
             _ = resolved_aio_path
 
@@ -233,11 +239,6 @@ class MessageBuilder:
         """获取并解析引用消息的内容片段"""
         namespace = namespace or infer_plugin_namespace(default="global")
         try:
-            from nonebot.adapters import Message as PlatformMessage
-            from nonebot_plugin_alconna import UniMessage
-            from nonebot_plugin_alconna.uniseg import Reply
-            from nonebot_plugin_alconna.uniseg.tools import reply_fetch
-
             orig_msg = await reply_fetch(event, bot)
             if not orig_msg or not orig_msg.msg:
                 return None
@@ -283,17 +284,11 @@ class MessageBuilder:
 
         reply_parts = []
         try:
-            from nonebot.matcher import current_bot, current_event
-            from nonebot_plugin_alconna import UniMessage
-            from nonebot_plugin_alconna.uniseg import Reply
-
             bot_inst = bot or current_bot.get(None)
             event_inst = event or current_event.get(None)
 
             if not bot_inst or not event_inst:
                 try:
-                    from zhenxun.services.ai.run import get_current_run_context
-
                     ctx = get_current_run_context()
                     if ctx:
                         bot_inst = bot_inst or ctx.get_bot()
@@ -319,7 +314,6 @@ class MessageBuilder:
 
         converted_msgs: list[LLMMessage] = []
         converted = False
-        import inspect
 
         for msg_type, converter_dict in cls._MESSAGE_CONVERTERS.items():
             if isinstance(message, msg_type):
@@ -348,10 +342,6 @@ class MessageBuilder:
             elif isinstance(message, str):
                 converted_msgs = [LLMMessage.user(message)]
             elif isinstance(message, AgentEvent):
-                from zhenxun.services.ai.core.engine.context_renderer import (
-                    ContextConverter,
-                )
-
                 converted_msgs = ContextConverter.flatten_to_llm_messages([message])
             elif isinstance(message, list):
                 parts = []
@@ -402,14 +392,6 @@ class MessageBuilder:
             elif config.multimodal is False:
                 allowed_modalities = {"text"}
 
-        from zhenxun.services.ai.core.messages import (
-            AudioPart,
-            FilePart,
-            ImagePart,
-            TextPart,
-            VideoPart,
-        )
-
         messages = await cls.normalize_to_llm_messages(
             item,
             bot=bot,
@@ -437,9 +419,6 @@ class MessageBuilder:
     ) -> "EmbedBatch":
         """将任意输入标准化为嵌入向量批处理对象"""
         namespace = namespace or infer_plugin_namespace(default="global")
-        from nonebot_plugin_alconna import UniMessage
-
-        from zhenxun.services.ai.core.messages import BaseContentPart, TextPart
 
         if isinstance(inputs, list) and not isinstance(inputs, UniMessage):
             if not inputs:
@@ -510,9 +489,6 @@ def _extract_media_kwargs(seg: Segment, default_mime: str) -> dict | None:
 async def _handle_image(seg: Image) -> ImagePart | None:
     if not seg.raw and not getattr(seg, "path", None):
         try:
-            from nonebot.matcher import current_bot, current_event, current_matcher
-            from nonebot_plugin_alconna.uniseg.tools import image_fetch
-
             bot = current_bot.get(None)
             event = current_event.get(None)
             matcher = current_matcher.get(None)
@@ -526,8 +502,6 @@ async def _handle_image(seg: Image) -> ImagePart | None:
             logger.debug(f"底层静默水合下载图片失败: {e}")
 
         if not seg.raw and seg.url:
-            from zhenxun.utils.http_utils import AsyncHttpx
-
             try:
                 logger.debug(f"正在从临时 URL 物理固化图片: {seg.url[:50]}...")
                 raw_bytes = await AsyncHttpx.get_content(seg.url)
@@ -543,8 +517,6 @@ async def _handle_image(seg: Image) -> ImagePart | None:
 
 async def _process_audio_seg(seg: Audio | Voice) -> AudioPart | None:
     if not seg.raw and not getattr(seg, "path", None) and seg.url:
-        from zhenxun.utils.http_utils import AsyncHttpx
-
         try:
             raw_bytes = await AsyncHttpx.get_content(seg.url)
             if raw_bytes:
@@ -569,8 +541,6 @@ async def _handle_voice(seg: Voice) -> AudioPart | None:
 @MessageBuilder.register_segment_handler(Video, scope="global")
 async def _handle_video(seg: Video) -> VideoPart | None:
     if not seg.raw and not getattr(seg, "path", None) and seg.url:
-        from zhenxun.utils.http_utils import AsyncHttpx
-
         try:
             raw_bytes = await AsyncHttpx.get_content(seg.url)
             if raw_bytes:
@@ -582,20 +552,13 @@ async def _handle_video(seg: Video) -> VideoPart | None:
     return VideoPart(**kwargs) if kwargs else None
 
 
-from nonebot_plugin_alconna.uniseg import At, AtAll, Reply
-
-
 @MessageBuilder.register_segment_handler(Reply, scope="global")
 async def _handle_reply(seg: Reply) -> list[LLMContentPart] | LLMContentPart | None:
     try:
-        from nonebot.matcher import current_bot, current_event
-
         bot = current_bot.get(None)
         event = current_event.get(None)
         if not bot or not event:
             return None
-
-        from zhenxun.services.ai.run import get_current_run_context
 
         ctx = get_current_run_context()
         ns = getattr(ctx.session, "namespace", "global") if ctx else "global"
@@ -618,8 +581,6 @@ async def _handle_at(seg: At) -> TextPart:
 
     target_id = seg.target
     try:
-        from nonebot.matcher import current_bot, current_event
-
         bot = current_bot.get(None)
         event = current_event.get(None)
 

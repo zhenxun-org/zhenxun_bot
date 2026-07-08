@@ -23,7 +23,7 @@ from zhenxun.services.ai.sandbox.models import SandboxBlueprint
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.models import ToolkitConfig, ToolResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.lifespan import LifespanManager
 from zhenxun.utils.pydantic_compat import model_dump
 
@@ -270,10 +270,10 @@ class MCPToolkit(BaseToolkit):
         command: str | None = None,
         args: list[str] | None = None,
         url: str | None = None,
+        headers: dict[str, str] | None = None,
         env: dict | None = None,
         cwd: str | None = None,
         install_command: str | None = None,
-        isolation: Literal["shared", "per_session"] = "shared",
         timeout: int = 30,
         admin_level: int = 0,
         header_provider: Callable[[RunContext], dict[str, str]] | None = None,
@@ -292,10 +292,10 @@ class MCPToolkit(BaseToolkit):
             command: 用于 stdio 或 sandbox_proxy 模式启动服务器的可执行命令。
             args: 启动服务器时附加的命令行参数。
             url: 用于 sse 或 streamable-http 模式的服务器连接 URL。
+            headers: 静态配置的 HTTP 请求头。
             env: 启动服务器时的进程环境变量。
             cwd: 启动服务器时的进程工作目录。
             install_command: 首次启动前执行的环境热装配/依赖安装命令。
-            isolation: 环境隔离模式，可选 "shared" (共享模式) 或 "per_session" (每个会话独立)。
             timeout: 初始化和请求网络接口时的超时秒数，默认 30。
             admin_level: 调用工具所需的管理权限等级，默认 0 (无限制)。
             header_provider: 动态生成 HTTP 头部信息的工厂函数。
@@ -312,6 +312,7 @@ class MCPToolkit(BaseToolkit):
         self.command = command
         self.args = args or []
         self.url = url
+        self.headers = headers or {}
         self.env = env or {}
         self.cwd = cwd
         self.install_command = install_command
@@ -587,8 +588,13 @@ class MCPToolkit(BaseToolkit):
         self._ready_event.clear()
         self._init_exception = None
 
-        dynamic_headers = {}
+        dynamic_headers = self.headers.copy()
+        if self.header_provider and context:
+            dynamic_headers.update(self.header_provider(context))
+
         dynamic_env = self.env.copy()
+        if self.env_provider and context:
+            dynamic_env.update(self.env_provider(context))
 
         self._shared_task = asyncio.create_task(
             self._spawn_session_task(dynamic_headers, dynamic_env)

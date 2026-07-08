@@ -105,6 +105,10 @@ class Inject:
         """
         return _UpstreamResultMarker(step_name)
 
+    CurrentBlackboardState = Annotated[Any, Hidden(), _InjectMarker("blackboard_state")]
+    BlackboardState = CurrentBlackboardState
+    """自动注入：当前挂载的强类型黑板底层 Pydantic 实例（需配合 Annotated 使用）"""
+
     UserId = CurrentUserId
     """自动注入：触发当前任务的用户 ID"""
 
@@ -364,6 +368,19 @@ def _resolve_blackboard(ctx: RunContext):
 
 
 Inject.register_provider("blackboard", _resolve_blackboard, scope="global")
+
+
+def _resolve_blackboard_state(ctx: RunContext):
+    bb = ctx.session.blackboard
+    if bb is None:
+        raise ValueError(
+            "Inject.BlackboardState 注入失败："
+            "当前会话上下文中未挂载 BlackboardManager 实例。"
+        )
+    return bb._state
+
+
+Inject.register_provider("blackboard_state", _resolve_blackboard_state, scope="global")
 
 
 def _resolve_session(ctx):

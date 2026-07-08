@@ -24,6 +24,7 @@ def get_default_providers() -> list[dict[str, Any]]:
             "models": [
                 {
                     "model_name": "deepseek-v4-pro",
+                    "reasoning_effort": "high",
                 },
                 {
                     "model_name": "deepseek-v4-flash",

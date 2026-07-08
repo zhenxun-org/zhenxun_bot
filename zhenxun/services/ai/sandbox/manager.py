@@ -5,7 +5,7 @@ import nonebot
 
 from zhenxun.services.ai.config import get_llm_config
 from zhenxun.services.ai.sandbox.models import SandboxBlueprint
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_sandbox as logger
 from zhenxun.utils.lifespan import LifespanManager
 
 from .drivers.base import BaseSandboxClient, BaseSandboxSession
@@ -84,10 +84,7 @@ class SandboxManager:
                 session = self._active_sessions[session_id]
                 is_alive = await session.is_alive()
                 if not is_alive:
-                    logger.warning(
-                        f"⚠️ Session '{session_id}' 容器已死亡，重建中。",
-                        command="SandboxManager",
-                    )
+                    logger.warning(f"⚠️ Session '{session_id}' 容器已死亡，重建中。")
                     await self.release_resource(session_id)
                 else:
                     session.touch()
@@ -98,9 +95,7 @@ class SandboxManager:
                         await session.mount_extension(p)
                     return session
 
-            logger.info(
-                f"为 Session '{session_id}' 创建沙箱环境...", command="SandboxManager"
-            )
+            logger.info(f"为 Session '{session_id}' 创建沙箱环境...")
             client = self._get_client(blueprint)
             try:
                 session = await client.create(session_id, blueprint)
@@ -121,10 +116,7 @@ class SandboxManager:
                 from zhenxun.services.ai.core.exceptions import SandboxFatalError
 
                 err_msg = str(e) or type(e).__name__
-                logger.error(
-                    f"创建 Session 失败: {err_msg}\n{traceback.format_exc()}",
-                    command="SandboxManager",
-                )
+                logger.error(f"创建 Session 失败: {err_msg}\n{traceback.format_exc()}")
                 if not isinstance(e, SandboxFatalError):
                     raise SandboxFatalError(f"沙箱初始化异常: {err_msg}") from e
                 raise e
@@ -134,10 +126,7 @@ class SandboxManager:
     ) -> bool:
         """统一扫描指定工作区，通过 Provisioner 体系完成环境装配"""
         if session_id not in self._active_sessions:
-            logger.warning(
-                f"找不到活跃的 Session '{session_id}'，无法配置环境。",
-                command="SandboxManager",
-            )
+            logger.warning(f"找不到活跃的 Session '{session_id}'，无法配置环境。")
             return False
 
         session = self._active_sessions[session_id]
@@ -157,10 +146,7 @@ class SandboxManager:
                 client = client_cls()
                 await client.delete(cast(Any, session))
             except Exception as e:
-                logger.error(
-                    f"销毁沙箱环境失败 (Session: {resource_id}): {e}",
-                    command="SandboxManager",
-                )
+                logger.error(f"销毁沙箱环境失败 (Session: {resource_id}): {e}")
 
     async def close_session(self, session_id: str) -> None:
         """从生存期管理器中注销并销毁指定会话的沙箱环境"""

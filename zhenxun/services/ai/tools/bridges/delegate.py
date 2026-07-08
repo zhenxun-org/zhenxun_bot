@@ -3,12 +3,12 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from zhenxun.services.ai.core.exceptions import ControlFlowExit
+from zhenxun.services.ai.core.exceptions import AbortException, ControlFlowExit
 from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent
 from zhenxun.services.ai.run import RunContext
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.models import ToolResult
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_dump
 
 if TYPE_CHECKING:
@@ -30,24 +30,22 @@ class DelegateArgs(BaseModel):
 
 
 class DelegateTool(BaseTool):
-    """
-    将任意实现了 run() 方法的实体 (Agent/Team/Workflow 等) 包装为大模型可调用的工具。
-    (SubRoutine 委派模式)
-    """
+    """将可运行实体 (Agent/Team/Workflow) 包装为子例程委派工具。"""
 
     def __init__(
         self,
         runnable: "BaseRunnable[Any]",
         name: str | None = None,
         description: str | None = None,
+        max_delegations: int = 3,
     ):
-        """
-        初始化委派工具，将可运行实体包装为子例程工具。
+        """初始化委派工具。
 
         参数:
-            runnable: 被包装的可运行实体，可以是 Agent、Team 或 Workflow 等。
-            name: 自定义工具名称，若为 None 则默认推导为 runnable 实体名。
-            description: 工具描述信息，用于指导大模型何时代用此工具。
+            runnable: 被包装的可运行实体。
+            name: 自定义工具名称。
+            description: 工具描述信息。
+            max_delegations: 允许向同一个实体连续委派且未获成功的最大次数限制。
         """
         resolved_name = name or getattr(runnable, "name", "SubRunnable")
         resolved_desc = description or getattr(
@@ -61,6 +59,7 @@ class DelegateTool(BaseTool):
         super().__init__(name=final_name, description=resolved_desc)
         self.runnable = runnable
         self.args_schema = DelegateArgs
+        self.max_delegations = max_delegations
 
     async def execute(
         self, context: RunContext | None = None, **kwargs: Any
@@ -70,12 +69,13 @@ class DelegateTool(BaseTool):
 
         counts = context.session.shared_state.setdefault("__delegate_counts__", {})
         counts[self.name] = counts.get(self.name, 0) + 1
-        if counts[self.name] > 3:
+        if counts[self.name] > self.max_delegations:
             return ToolResult(
                 output=(
-                    f"❌ 系统拦截：检测到无限委派死循环！\n"
+                    f"❌ 系统拦截：委派重试次数已达上限。\n"
                     f"你已经连续 {counts[self.name]} 次将子任务委派给下级实体 "
-                    f"{self.name} 且未获最终成功。\n"
+                    f"{self.name} 且未获最终成功"
+                    f"（超出最大允许次数 {self.max_delegations}）。\n"
                     "请立即停止委派，"
                     "改变你的思考方向或直接向用户汇报失败结论！"
                 )
@@ -86,8 +86,6 @@ class DelegateTool(BaseTool):
             logger.warning(
                 f"⚠️ [DelegateTool] 委派深度超限 ({depth})，强制阻断: {self.name}"
             )
-            from zhenxun.services.ai.core.exceptions import AbortException
-
             raise AbortException(
                 reason="嵌套层级过深，系统已强制拒绝执行委派",
                 display=f"⚠️ {self.name} 嵌套层级过深",
@@ -132,8 +130,6 @@ class DelegateTool(BaseTool):
                 "DepthLimitExceeded" in final_output or "嵌套层级过深" in final_output
             )
             if is_fatal:
-                from zhenxun.services.ai.core.exceptions import AbortException
-
                 raise AbortException(
                     reason="下级实体遇到深度限制异常",
                     display=f"⚠️ 实体 {self.name} 委派失败",
@@ -141,8 +137,8 @@ class DelegateTool(BaseTool):
 
             usage = getattr(response, "usage", None)
 
-            if context and context.run.event_bus:
-                await context.run.event_bus.emit(
+            if context:
+                await context.run.emit(
                     ToolStreamChunkEvent(
                         tool_name=self.name, content=f"🧠 实体 {self.name} 执行完毕"
                     )
@@ -156,8 +152,6 @@ class DelegateTool(BaseTool):
             raise e
         except Exception as e:
             logger.error(f"委派实体 {self.name} 执行失败: {e}", e=e)
-            from zhenxun.services.ai.core.exceptions import AbortException
-
             raise AbortException(
                 reason=f"Delegate Execution Error: {e}",
                 display=f"❌ 实体 {self.name} 执行异常",

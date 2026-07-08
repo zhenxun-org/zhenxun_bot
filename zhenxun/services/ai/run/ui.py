@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING, Any
 from nonebot_plugin_alconna import UniMessage
 
 from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent, UserCustomEvent
+from zhenxun.utils.message import MessageUtils
+from zhenxun.utils.platform import PlatformUtils
 
 if TYPE_CHECKING:
     from zhenxun.services.ai.run.context import RunContext
@@ -19,34 +21,27 @@ class UIController:
         """从上下文中动态获取当前调用的工具名"""
         return getattr(self.context.call, "tool_name", "UnknownTool")
 
-    @property
-    def _event_bus(self) -> Any | None:
-        """从运行时上下文中获取底层的事件发射器"""
-        return getattr(self.context.run, "event_bus", None)
-
     async def send_text(self, text: str, status: str = "running") -> None:
         """向前端流式反馈执行进度文本"""
-        if self._event_bus:
-            await self._event_bus.emit(
-                ToolStreamChunkEvent(
-                    tool_name=self.tool_name, content=text, metadata={"status": status}
-                )
+        await self.context.run.emit(
+            ToolStreamChunkEvent(
+                tool_name=self.tool_name, content=text, metadata={"status": status}
             )
+        )
 
     async def send_image(self, image: bytes | str) -> None:
         """向前端发送富文本图片气泡（字节流或 URL）"""
-        if self._event_bus:
-            display_msg = UniMessage()
-            if isinstance(image, bytes):
-                display_msg = display_msg.image(raw=image)
-            else:
-                display_msg = display_msg.image(url=image)
-            await self._event_bus.emit(UserCustomEvent(display=display_msg))
+        display_msg = UniMessage()
+        if isinstance(image, bytes):
+            display_msg = display_msg.image(raw=image)
+        else:
+            display_msg = display_msg.image(url=image)
+        await self.context.run.emit(UserCustomEvent(display=display_msg))
 
     async def send_display(self, display: Any) -> None:
         """向前端发送任意展示载体"""
-        if self._event_bus and display is not None:
-            await self._event_bus.emit(UserCustomEvent(display=display))
+        if display is not None:
+            await self.context.run.emit(UserCustomEvent(display=display))
 
     @staticmethod
     async def handle_control_flow_exit_display(
@@ -63,19 +58,24 @@ class UIController:
             return
 
         try:
-            from nonebot_plugin_alconna import UniMessage
-
             bot = context.get_bot() if context else None
             event = context.get_event() if context else None
 
-            if bot and event:
-                if isinstance(display_msg, UniMessage):
-                    await display_msg.send(event, bot=bot, reply_to=reply_to)
-                else:
-                    await bot.send(event, str(display_msg))
+            if bot:
+                msg_to_send = (
+                    display_msg
+                    if isinstance(display_msg, UniMessage)
+                    else MessageUtils.build_message(str(display_msg))
+                )
+                if event:
+                    await msg_to_send.send(event, bot=bot, reply_to=reply_to)
+                elif context:
+                    target = PlatformUtils.get_target(
+                        user_id=context.get_user_id(), group_id=context.get_group_id()
+                    )
+                    if target:
+                        await msg_to_send.send(target=target, bot=bot)
             else:
-                from zhenxun.utils.message import MessageUtils
-
                 await MessageUtils.build_message(str(display_msg)).send(
                     reply_to=reply_to
                 )

@@ -3,7 +3,7 @@ import csv
 from pathlib import Path
 
 from zhenxun.services.ai.context.rag.models import BaseRecord
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_knowledge as logger
 
 
 class BaseReader:

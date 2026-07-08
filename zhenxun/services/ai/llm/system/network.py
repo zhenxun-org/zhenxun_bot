@@ -25,7 +25,7 @@ from zhenxun.services.ai.core.exceptions import (
     QuotaExceededException,
     RateLimitException,
 )
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.pydantic_compat import model_dump, parse_as
 from zhenxun.utils.user_agent import get_user_agent
 

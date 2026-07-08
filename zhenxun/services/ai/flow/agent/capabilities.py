@@ -12,7 +12,7 @@ from zhenxun.services.ai.core.messages import TaskLifecycleEvent
 from zhenxun.services.ai.core.options import BaseOutputDefinition, ToolOutput
 from zhenxun.services.ai.guardrails import parse_guardrails
 from zhenxun.services.ai.run import AgentRunResult, AgentTask, RunContext
-from zhenxun.services.log import logger
+from zhenxun.services.ai.utils.logger import log_agent as logger
 
 
 class OutputValidationCapability(AbstractCapability):
