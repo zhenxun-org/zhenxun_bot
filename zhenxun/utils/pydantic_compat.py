@@ -197,4 +197,3 @@ def model_rebuild(model_class: type[BaseModel], **kwargs: Any) -> None:
         model_class.model_rebuild(**kwargs)
     else:
         model_class.update_forward_refs(**kwargs)
-

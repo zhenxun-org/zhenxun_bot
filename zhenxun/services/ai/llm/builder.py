@@ -43,7 +43,6 @@ class OpenAIIntentNamespace:
         return self._builder
 
 
-
 class IntentBuilder:
     """
     基于能力意图声明的构建器 (Intent-Driven Builder)。
@@ -60,7 +59,6 @@ class IntentBuilder:
     @property
     def openai(self) -> OpenAIIntentNamespace:
         return OpenAIIntentNamespace(self)
-
 
     def with_reasoning(self, level: str | None = None) -> Self:
         """

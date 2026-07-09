@@ -4,9 +4,6 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
-from .storage.interfaces import (
-    BaseMemoryReducer,
-)
 from zhenxun.services.ai.core.engine.token_counter import token_counter
 from zhenxun.services.ai.core.messages import (
     AudioPart,
@@ -20,6 +17,10 @@ from zhenxun.services.ai.core.messages import (
 from zhenxun.services.ai.llm.manager import get_default_model
 from zhenxun.services.ai.utils.logger import log_memory as logger
 from zhenxun.utils.pydantic_compat import model_copy
+
+from .storage.interfaces import (
+    BaseMemoryReducer,
+)
 
 
 class MultimodalPlaceholderReducer(BaseMemoryReducer):
@@ -198,9 +199,7 @@ class ToolPrunerReducer(BaseMemoryReducer):
         if is_turn_exceeded:
             reasons.append(f"工具调用轮数超限 ({tool_turns} > {self.max_turns})")
 
-        logger.info(
-            f"✂️ 触发工具结果修剪策略 | 原因: {' 且 '.join(reasons)}"
-        )
+        logger.info(f"✂️ 触发工具结果修剪策略 | 原因: {' 且 '.join(reasons)}")
 
         from zhenxun.services.ai.core.messages import ToolReturnPart
 

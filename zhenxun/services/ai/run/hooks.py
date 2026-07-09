@@ -529,6 +529,7 @@ class Hooks(AbstractCapability):
         handler: WrapModelRequestHandler,
     ) -> ChatResponse:
         """接管并包裹 LLM 大模型请求的网络交互过程。"""
+
         async def do_before(e):
             nonlocal llm_context
             res = await _call_entry(e, "before_model_request", context, llm_context)
@@ -567,6 +568,7 @@ class Hooks(AbstractCapability):
         handler: WrapToolValidateHandler,
     ) -> dict[str, Any]:
         """接管并包裹工具参数的校验过程。"""
+
         async def do_before(e):
             nonlocal args
             res = await _call_entry(
@@ -608,6 +610,7 @@ class Hooks(AbstractCapability):
         handler: WrapToolExecuteHandler,
     ) -> Any:
         """接管并包裹特定工具的物理执行逻辑。"""
+
         async def do_before(e):
             nonlocal arguments
             res = await _call_entry(
