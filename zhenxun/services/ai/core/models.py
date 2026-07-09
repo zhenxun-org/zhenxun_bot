@@ -9,7 +9,7 @@ from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zhenxun.services.ai.core.options import GenerationConfig
+from .options import GenerationConfig
 
 ModelName = str | None
 

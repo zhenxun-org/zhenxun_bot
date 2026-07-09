@@ -9,9 +9,9 @@ from nonebot.utils import is_coroutine_callable
 from nonebot_plugin_session import EventSession, extract_session
 
 from zhenxun.services.ai.context.memory.facades import AgentSessionFacade
-from zhenxun.services.ai.run.blackboard import BlackboardManager
 from zhenxun.utils.utils import infer_plugin_namespace
 
+from .blackboard import BlackboardManager
 from .context import ProviderFunc, RunContext, _is_run_context_type
 from .hitl import HITLController
 from .ui import UIController

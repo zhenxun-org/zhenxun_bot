@@ -11,7 +11,11 @@ import aiofiles
 import yaml
 
 from zhenxun.configs.path_config import DATA_PATH
-from zhenxun.services.ai.tools.providers.skills.models import (
+from zhenxun.services.ai.utils.logger import log_tool as logger
+from zhenxun.utils.pydantic_compat import model_dump, model_validate
+from zhenxun.utils.utils import infer_plugin_namespace
+
+from .models import (
     INSTRUCTIONS,
     METADATA,
     RESOURCES,
@@ -20,9 +24,6 @@ from zhenxun.services.ai.tools.providers.skills.models import (
     SkillEnvConfig,
     SkillFrontmatter,
 )
-from zhenxun.services.ai.utils.logger import log_tool as logger
-from zhenxun.utils.pydantic_compat import model_dump, model_validate
-from zhenxun.utils.utils import infer_plugin_namespace
 
 
 class SkillConfigManager:

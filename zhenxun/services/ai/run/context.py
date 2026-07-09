@@ -18,12 +18,13 @@ from zhenxun.services.ai.core.messages import AgentEvent, AgentMessage
 from zhenxun.services.ai.core.models import CancellationToken
 from zhenxun.services.ai.core.protocols.tool import ToolExecutable
 from zhenxun.services.ai.core.stream_events import AgentStreamEvent, EventBus
-from zhenxun.services.ai.run.blackboard import BlackboardManager
 from zhenxun.services.ai.utils import ContextUtils
 from zhenxun.services.ai.utils.scope import ScopeSelector
 from zhenxun.services.scheduler.types import ScheduleContext
 from zhenxun.utils.platform import PlatformUtils
 from zhenxun.utils.utils import infer_plugin_namespace
+
+from .blackboard import BlackboardManager
 
 if TYPE_CHECKING:
     from zhenxun.services.ai.context.memory.facades import AgentSessionFacade

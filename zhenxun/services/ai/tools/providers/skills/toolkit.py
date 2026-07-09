@@ -10,14 +10,15 @@ from zhenxun.services.ai.sandbox.protocols import (
 from zhenxun.services.ai.tools.core.decorators import Rules, tool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.models import ResolvedToolPayload, ToolResult
-from zhenxun.services.ai.tools.providers.skills.manager import (
-    skill_env_manager,
-    skill_manager,
-)
-from zhenxun.services.ai.tools.providers.skills.models import Skill
 from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_copy
 from zhenxun.utils.utils import infer_plugin_namespace
+
+from .manager import (
+    skill_env_manager,
+    skill_manager,
+)
+from .models import Skill
 
 
 class SkillSandboxExecutionMixin:
@@ -57,19 +58,16 @@ class SkillSandboxExecutionMixin:
         ]
         if missing_keys:
             logger.warning(f"技能 {skill.id} 因缺少环境变量 {missing_keys} 被拦截。")
-            return (
-                ToolResult(
-                    output=(
-                        f"❌ 技能执行被系统拦截：缺少必需的全局环境变量 "
-                        f"{missing_keys}。\n"
-                        "💡 [智能体自愈引导]：当前技能的底层配置缺失，无法正常运行。"
-                        "请你立即停止尝试，并向用户抱歉，提示用户（或 Bot 管理员）"
-                        "在机器人后端的 `data/ai/skill_envs.json` 文件中为该技能配置"
-                        "相应的环境变量（API Key 等），配置完成后方可使用。"
-                    ),
-                )
-                .as_error()
-            )
+            return ToolResult(
+                output=(
+                    f"❌ 技能执行被系统拦截：缺少必需的全局环境变量 "
+                    f"{missing_keys}。\n"
+                    "💡 [智能体自愈引导]：当前技能的底层配置缺失，无法正常运行。"
+                    "请你立即停止尝试，并向用户抱歉，提示用户（或 Bot 管理员）"
+                    "在机器人后端的 `data/ai/skill_envs.json` 文件中为该技能配置"
+                    "相应的环境变量（API Key 等），配置完成后方可使用。"
+                ),
+            ).as_error()
 
         env_vars = {}
         for k, v in configured_envs.items():
@@ -215,7 +213,7 @@ class SkillMetaToolkit(BaseToolkit, SkillSandboxExecutionMixin):
     @tool(
         name="read_skill_instructions",
         description="加载指定技能的完整使用说明与可用资源清单。返回值为 XML 结构。",
-        rules=[Rules.silent()]
+        rules=[Rules.silent()],
     )
     async def read_skill_instructions(self, skill_name: str) -> ToolResult:
         skill = await self._get_skill(skill_name)
@@ -265,7 +263,7 @@ class SkillMetaToolkit(BaseToolkit, SkillSandboxExecutionMixin):
             "安全读取指定技能目录下的附加文件"
             "（如 references/ 里的参考文档或 scripts/ 里的代码）。"
         ),
-        rules=[Rules.silent()]
+        rules=[Rules.silent()],
     )
     async def read_skill_file(
         self,

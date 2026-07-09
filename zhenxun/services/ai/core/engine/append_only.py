@@ -171,7 +171,7 @@ class AppendOnlyContextManager:
 
     def _compute_digest(self, messages: list[Any]) -> int:
         """核心：计算消息列表 of 指纹，用于识别内容篡改。包含 role 与 content。"""
-        from zhenxun.services.ai.core.engine.context_renderer import ContextConverter
+        from .context_renderer import ContextConverter
 
         payloads = []
         flattened = ContextConverter.flatten_to_llm_messages(messages)

@@ -16,9 +16,10 @@ from zhenxun.services.ai.core.protocols.tool import (
 )
 from zhenxun.services.ai.sandbox.models import SandboxBlueprint
 from zhenxun.services.ai.tools.models import ResolvedToolPayload
-from zhenxun.services.ai.tools.providers.mcp.toolkit import MCPToolkit
 from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_dump, model_validate, model_validator
+
+from .toolkit import MCPToolkit
 
 MCP_PATH = DATA_PATH / "ai" / "mcp.json"
 

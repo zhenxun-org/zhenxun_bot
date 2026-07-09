@@ -16,7 +16,6 @@ from zhenxun.services.ai.core.exceptions import (
 )
 from zhenxun.services.ai.core.models import ToolDefinition
 from zhenxun.services.ai.run.context import RunContext
-from zhenxun.services.ai.tools.core.capabilities import InteractiveCapability
 from zhenxun.services.ai.tools.models import (
     ResolvedToolPayload,
     ToolOptions,
@@ -26,6 +25,7 @@ from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.services.ai.utils.utils import wrap_to_async
 from zhenxun.utils.pydantic_compat import model_dump, model_json_schema, model_validate
 
+from .capabilities import InteractiveCapability
 from .schema import (
     _parse_docstring,
     build_schema_hint,

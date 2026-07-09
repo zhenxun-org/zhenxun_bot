@@ -29,7 +29,6 @@ from zhenxun.services.ai.message_builder import MessageBuilder
 from zhenxun.services.ai.run.context import RunContext, set_run_context
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.tools.core.tool import BaseTool, register_tool_runner
-from zhenxun.services.ai.tools.engine.registry import ToolCollection
 from zhenxun.services.ai.tools.models import (
     StateSyncResult,
     ToolOptions,
@@ -38,6 +37,8 @@ from zhenxun.services.ai.tools.models import (
     ValidatedToolCall,
 )
 from zhenxun.services.ai.utils.logger import log_tool as logger
+
+from .registry import ToolCollection
 
 
 class ToolExecutor:

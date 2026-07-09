@@ -134,7 +134,6 @@ class StreamedRunResult(Generic[OutputDataT]):
 
     async def stream_events(self) -> "AsyncIterator[AgentStreamEvent]":
         """获取底层的所有原始事件（包含工具调用过程等）"""
-        from zhenxun.services.ai.run.models import AgentRunEnd, AgentRunError
 
         async for event in self._event_bus:
             if isinstance(event, AgentRunEnd):

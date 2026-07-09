@@ -4,10 +4,11 @@ from typing import Any
 
 from zhenxun.services.ai.capabilities import AbstractCapability
 from zhenxun.services.ai.run.context import RunContext
-from zhenxun.services.ai.tools.providers.skills.manager import skill_manager
-from zhenxun.services.ai.tools.providers.skills.models import Skill, SkillSource
-from zhenxun.services.ai.tools.providers.skills.toolkit import SkillMetaToolkit
 from zhenxun.utils.utils import infer_plugin_namespace
+
+from .manager import skill_manager
+from .models import Skill, SkillSource
+from .toolkit import SkillMetaToolkit
 
 
 class SkillCapability(AbstractCapability):

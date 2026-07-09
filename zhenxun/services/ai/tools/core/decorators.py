@@ -7,17 +7,6 @@ from typing import Any
 
 from zhenxun.services.ai.capabilities import AbstractCapability
 from zhenxun.services.ai.run.context import RunContext
-from zhenxun.services.ai.tools.core.capabilities import (
-    AdminLevelCapability,
-    ApprovalCapability,
-    CacheCapability,
-    FallbackCapability,
-    GroupOnlyCapability,
-    InteractiveCapability,
-    LifecycleCapability,
-    SuperuserCapability,
-)
-from zhenxun.services.ai.tools.core.tool import FunctionTool
 from zhenxun.services.ai.tools.engine.registry import tool_provider_manager
 from zhenxun.services.ai.tools.models import (
     EndRunResult,
@@ -27,6 +16,18 @@ from zhenxun.services.ai.tools.models import (
 )
 from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_copy
+
+from .capabilities import (
+    AdminLevelCapability,
+    ApprovalCapability,
+    CacheCapability,
+    FallbackCapability,
+    GroupOnlyCapability,
+    InteractiveCapability,
+    LifecycleCapability,
+    SuperuserCapability,
+)
+from .tool import FunctionTool
 
 
 def toolkit(
@@ -222,8 +223,9 @@ def tool(
                     if not tool_name.startswith(f"{ns}_"):
                         tool_name = f"{ns}_{tool_name}"
 
-            from zhenxun.services.ai.tools.core.tool import FunctionTool
             from zhenxun.services.ai.tools.engine.registry import tool_provider_manager
+
+            from .tool import FunctionTool
 
             func_tool = FunctionTool(
                 func=func,

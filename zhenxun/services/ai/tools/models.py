@@ -212,7 +212,6 @@ class ToolOverride(BaseModel):
 
     async def resolve(self, context: RunContext | None = None) -> "ResolvedToolPayload":
         from zhenxun.services.ai.tools.engine.registry import tool_provider_manager
-        from zhenxun.services.ai.tools.models import ResolvedToolPayload
 
         payload = await tool_provider_manager.resolve_tools(
             [self.name], context=context
