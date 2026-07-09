@@ -1,20 +1,21 @@
 from typing import Any
 
-from zhenxun.services.ai.context.rag.backends import (
+from zhenxun.services.ai.utils.scope import normalize_scope_path
+
+from .backends import (
     StorageBackend,
 )
-from zhenxun.services.ai.context.rag.configs import RAGConfig
-from zhenxun.services.ai.context.rag.ingestion import (
+from .configs import RAGConfig
+from .ingestion import (
     IndexPipeline,
 )
-from zhenxun.services.ai.context.rag.models import (
+from .models import (
     BaseRecord,
     SearchResult,
 )
-from zhenxun.services.ai.context.rag.retrieval import (
+from .retrieval import (
     BaseRetriever,
 )
-from zhenxun.services.ai.utils.scope import normalize_scope_path
 
 
 class ScopedRAGClient:

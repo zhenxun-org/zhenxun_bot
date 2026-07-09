@@ -7,11 +7,12 @@ from anyio import create_memory_object_stream, create_task_group
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
-from zhenxun.services.ai.sandbox.addons.base import BaseMcpProxyExtension
 from zhenxun.services.ai.sandbox.protocols import SupportsStreamExecution
 from zhenxun.services.ai.sandbox.registry import SandboxRegistry
 from zhenxun.services.ai.utils.logger import log_sandbox as logger
 from zhenxun.utils.pydantic_compat import model_dump_json, model_validate
+
+from .base import BaseMcpProxyExtension
 
 
 class UniversalMcpExtension(BaseMcpProxyExtension):

@@ -10,21 +10,26 @@ from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent
 from zhenxun.services.ai.core.templates import PromptTemplate
 from zhenxun.services.ai.flow.agent.agent import Agent, ToolSource
 from zhenxun.services.ai.flow.agent.models import AgentConfig
-from zhenxun.services.ai.flow.team.models import (
-    CallAction,
-    ConcurrentCallAction,
-    FinishAction,
-    TeamAction,
-)
-from zhenxun.services.ai.flow.team.router import BaseRouter
 from zhenxun.services.ai.run import AgentTask, RunContext
 from zhenxun.services.ai.run.blackboard import BlackboardManager
 from zhenxun.services.ai.tools.bridges.delegate import DelegateTool
 from zhenxun.services.ai.tools.providers.builtin.blackboard import BlackboardToolkit
 from zhenxun.services.ai.utils.logger import log_team as logger
 
+from .models import (
+    CallAction,
+    ConcurrentCallAction,
+    FinishAction,
+    TaskBoardState,
+    TaskNodeStatus,
+    TeamAction,
+    Transition,
+)
+from .router import BaseRouter
+from .task_tools import TaskPlanningToolkit
+
 if TYPE_CHECKING:
-    from zhenxun.services.ai.flow.team.team import Team
+    from .team import Team
 
 
 class BaseTeamStrategy(ABC):
@@ -130,8 +135,6 @@ class RouteStrategy(BaseTeamStrategy):
         self.max_handoffs = max_handoffs
 
         if isinstance(state_flow, dict):
-            from zhenxun.services.ai.flow.team.models import Transition
-
             normalized_flow = {}
             for k, targets in state_flow.items():
                 normalized_targets = []
@@ -503,9 +506,6 @@ class TaskStrategy(BaseTeamStrategy):
         context: RunContext,
         **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
-        from zhenxun.services.ai.flow.team.models import TaskBoardState, TaskNodeStatus
-        from zhenxun.services.ai.flow.team.task_tools import TaskPlanningToolkit
-
         if self.blackboard is not None:
             context.session.blackboard = self.blackboard
 

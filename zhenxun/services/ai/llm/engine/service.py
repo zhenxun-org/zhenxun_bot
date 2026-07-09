@@ -43,9 +43,22 @@ from zhenxun.services.ai.core.protocols.llm import (
     SupportsTextEmbedding,
 )
 from zhenxun.services.ai.core.protocols.middleware import LLMMiddleware
+from zhenxun.services.ai.llm.adapters.factory import get_adapter_for_api_type
 from zhenxun.services.ai.llm.system.models import RetryConfig
 from zhenxun.services.ai.llm.system.network import HealthManager, LLMHttpClient
 from zhenxun.services.ai.utils.logger import log_llm as logger
+
+from .middlewares import (
+    ConfigMergeMiddleware,
+    FailoverAndRetryMiddleware,
+    HttpExecutionMiddleware,
+    LLMCacheMiddleware,
+    LoggingMiddleware,
+    MiddlewarePipeline,
+    ModalityFilterMiddleware,
+    OutputValidationMiddleware,
+    ResponseRescueMiddleware,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -100,8 +113,6 @@ class LLMModel(
             generation_config=self._generation_config,
         )
 
-        from zhenxun.services.ai.llm.engine.middlewares import MiddlewarePipeline
-
         self.pipeline = MiddlewarePipeline()
         self._setup_default_pipeline()
 
@@ -110,17 +121,6 @@ class LLMModel(
         self.pipeline.add_middleware(middleware)
 
     def _setup_default_pipeline(self) -> None:
-        from zhenxun.services.ai.llm.adapters.factory import get_adapter_for_api_type
-        from zhenxun.services.ai.llm.engine.middlewares import (
-            ConfigMergeMiddleware,
-            FailoverAndRetryMiddleware,
-            LLMCacheMiddleware,
-            LoggingMiddleware,
-            ModalityFilterMiddleware,
-            OutputValidationMiddleware,
-            ResponseRescueMiddleware,
-        )
-
         client_settings = get_llm_config().client_settings
         retry_config = RetryConfig(
             max_retries=client_settings.max_retries,
@@ -216,10 +216,6 @@ class LLMModel(
             request=request,
             cancellation_token=cancellation_token,
         )
-
-        from zhenxun.services.ai.llm.adapters.factory import get_adapter_for_api_type
-        from zhenxun.services.ai.llm.engine.middlewares import HttpExecutionMiddleware
-
         adapter = get_adapter_for_api_type(self.api_type)
         execution_middleware = HttpExecutionMiddleware(
             http_client=self.http_client,

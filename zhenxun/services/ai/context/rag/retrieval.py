@@ -3,11 +3,12 @@ import asyncio
 import time
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
-from zhenxun.services.ai.context.rag.models import QueryRequest, SearchResult
 from zhenxun.services.ai.utils.logger import log_rag as logger
 
+from .models import QueryRequest, SearchResult
+
 if TYPE_CHECKING:
-    from zhenxun.services.ai.context.rag.backends.storages import StorageBackend
+    from .backends.storages import StorageBackend
 
 
 def normalize_query_text(query: Any) -> str:

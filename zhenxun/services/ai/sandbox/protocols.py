@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from zhenxun.services.ai.sandbox.models import SandboxExecutionResult
+from .models import SandboxExecutionResult
 
 
 class InteractiveTerminalSession(Protocol):

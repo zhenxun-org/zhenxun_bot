@@ -1,19 +1,20 @@
 from collections.abc import Callable
 from typing import Any, cast
 
-from zhenxun.services.ai.context.memory.models import MemoryConfig
-from zhenxun.services.ai.context.memory.storage.backends import (
-    InMemoryChatContext,
-    MemoryScope,
-)
-from zhenxun.services.ai.context.memory.storage.interfaces import (
-    BaseChatContext,
-    BaseSlotContext,
-)
 from zhenxun.services.ai.context.rag.backends import Embedder, StorageBackend
 from zhenxun.services.ai.utils.logger import log_memory as logger
 from zhenxun.services.ai.utils.scope import BaseScopeBuilder
 from zhenxun.utils.utils import infer_plugin_namespace
+
+from .models import MemoryConfig
+from .storage.backends import (
+    InMemoryChatContext,
+    MemoryScope,
+)
+from .storage.interfaces import (
+    BaseChatContext,
+    BaseSlotContext,
+)
 
 
 class MemoryCleaner(BaseScopeBuilder["MemoryCleaner"]):
@@ -187,7 +188,7 @@ class GlobalMemoryManager:
         if embedder:
             builder.with_embedder(embedder)
 
-        from zhenxun.services.ai.context.memory.models import MemoryScoringConfig
+        from .models import MemoryScoringConfig
 
         scoring_cfg = MemoryScoringConfig()
 

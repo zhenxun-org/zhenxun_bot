@@ -53,7 +53,9 @@ from zhenxun.services.ai.llm.adapters.base import (
     ResponseData,
     process_image_data,
 )
-from zhenxun.services.ai.llm.adapters.handlers.base import (
+from zhenxun.services.ai.utils.logger import log_llm as logger
+
+from .base import (
     BaseAudioHandler,
     BaseEmbeddingHandler,
     BaseImageHandler,
@@ -64,7 +66,6 @@ from zhenxun.services.ai.llm.adapters.handlers.base import (
     ResponseParser,
     ToolSerializer,
 )
-from zhenxun.services.ai.utils.logger import log_llm as logger
 
 
 class OpenAIConfigMapper(ConfigMapper):

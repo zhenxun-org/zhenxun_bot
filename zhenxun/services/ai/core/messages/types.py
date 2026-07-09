@@ -12,32 +12,11 @@ from .parts import (
     ImagePart,
     LLMContentPart,
     TextPart,
-    ThoughtPart,
-    ToolCallPart,
-    ToolReturnPart,
     VideoPart,
 )
 
-SystemContentUnion = TextPart
-"""系统消息允许的内容片段联合类型"""
-
 UserContentUnion = TextPart | ImagePart | AudioPart | VideoPart | FilePart
 """用户消息允许的多模态内容片段联合类型"""
-
-AssistantContentUnion = (
-    TextPart
-    | ThoughtPart
-    | ToolCallPart
-    | ToolReturnPart
-    | ImagePart
-    | AudioPart
-    | VideoPart
-    | FilePart
-)
-"""助手回复允许的内容片段联合类型"""
-
-ToolContentUnion = ToolReturnPart | ImagePart | AudioPart | VideoPart | FilePart
-"""工具消息允许的内容片段联合类型"""
 
 
 RoleT = TypeVar("RoleT", default=str, covariant=True)
@@ -72,12 +51,9 @@ AgentMessage = LLMMessage | AgentEvent
 __all__ = [
     "AgentMessage",
     "AnyLLMMessage",
-    "AssistantContentUnion",
     "ContentT",
     "LLMContentPart",
     "PromptInput",
     "RoleT",
-    "SystemContentUnion",
-    "ToolContentUnion",
     "UserContentUnion",
 ]

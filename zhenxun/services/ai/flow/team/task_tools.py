@@ -6,7 +6,7 @@ from zhenxun.services.ai.flow.base import BaseRunnable
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
-from zhenxun.services.ai.tools.models import ToolResult
+from zhenxun.services.ai.tools.models import EndRunResult, ToolResult
 from zhenxun.services.ai.utils.logger import log_team as logger
 
 from .models import TaskBoardState, TaskNodeStatus
@@ -188,7 +188,6 @@ class TaskPlanningToolkit(BaseToolkit):
         ],
         context: RunContext,
     ) -> ToolResult:
-        from zhenxun.services.ai.tools.models import EndRunResult
         board = self._get_board(context)
         board.is_goal_complete = True
         board.final_summary = summary

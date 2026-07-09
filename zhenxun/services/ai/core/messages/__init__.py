@@ -2,7 +2,7 @@
 消息与响应域类型定义 - 统一导出门面
 """
 
-from nonebot.compat import PYDANTIC_V2
+from zhenxun.utils.pydantic_compat import model_rebuild
 
 from .context_events import (
     AgentEvent,
@@ -59,30 +59,26 @@ from .shared import (
 from .types import (
     AgentMessage,
     AnyLLMMessage,
-    AssistantContentUnion,
     ContentT,
     PromptInput,
     RoleT,
-    SystemContentUnion,
-    ToolContentUnion,
     UserContentUnion,
 )
 
-if PYDANTIC_V2:
-    ChatResponse.model_rebuild()
-    LLMMessage.model_rebuild()
-    SystemMessage.model_rebuild()
-    UserMessage.model_rebuild()
-    AssistantMessage.model_rebuild()
-    ToolMessage.model_rebuild()
-    RerankResponse.model_rebuild()
+model_rebuild(ChatResponse)
+model_rebuild(LLMMessage)
+model_rebuild(SystemMessage)
+model_rebuild(UserMessage)
+model_rebuild(AssistantMessage)
+model_rebuild(ToolMessage)
+model_rebuild(RerankResponse)
+
 
 
 __all__ = [
     "AgentEvent",
     "AgentMessage",
     "AnyLLMMessage",
-    "AssistantContentUnion",
     "AssistantMessage",
     "AudioPart",
     "AudioResponse",
@@ -112,7 +108,6 @@ __all__ = [
     "RerankResult",
     "RoleT",
     "SpeechRequest",
-    "SystemContentUnion",
     "SystemMessage",
     "TaskLifecycleEvent",
     "TextDeltaPart",
@@ -121,7 +116,6 @@ __all__ = [
     "ThoughtPart",
     "ToolCallDeltaPart",
     "ToolCallPart",
-    "ToolContentUnion",
     "ToolMessage",
     "ToolReturnPart",
     "UsageInfo",

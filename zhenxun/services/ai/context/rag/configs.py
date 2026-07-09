@@ -2,9 +2,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zhenxun.services.ai.context.rag.backends import Embedder, StorageBackend
-from zhenxun.services.ai.context.rag.ingestion import ChunkingStrategy
-from zhenxun.services.ai.context.rag.retrieval import (
+from .backends import Embedder, StorageBackend
+from .ingestion import ChunkingStrategy
+from .retrieval import (
     BaseRetriever,
     PostProcessor,
     PreProcessor,

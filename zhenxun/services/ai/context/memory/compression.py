@@ -4,7 +4,7 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
-from zhenxun.services.ai.context.memory.storage.interfaces import (
+from .storage.interfaces import (
     BaseMemoryReducer,
 )
 from zhenxun.services.ai.core.engine.token_counter import token_counter

@@ -5,17 +5,18 @@ from typing import Any, cast
 
 from zhenxun.services.ai.core.messages import PromptInput
 from zhenxun.services.ai.flow.base import BaseRunnable
-from zhenxun.services.ai.flow.workflow.base import BaseNode
-from zhenxun.services.ai.flow.workflow.policies import BaseFailurePolicy
-from zhenxun.services.ai.flow.workflow.types import (
-    StepInput,
-    StepOutput,
-    StepType,
-)
 from zhenxun.services.ai.run import AgentTask, RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.run.models import AgentRunEnd
 from zhenxun.services.ai.utils.logger import log_flow as logger
+
+from .base import BaseNode
+from .policies import BaseFailurePolicy
+from .types import (
+    StepInput,
+    StepOutput,
+    StepType,
+)
 
 NodeSource = BaseNode | BaseRunnable | Callable
 """工作流节点来源，可以是图元、可执行引擎或原生函数"""

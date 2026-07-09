@@ -7,13 +7,14 @@ import uuid
 
 import aiohttp
 
-from zhenxun.services.ai.sandbox.drivers.base import BaseSandboxSession
-from zhenxun.services.ai.sandbox.models import (
+from zhenxun.services.ai.utils.logger import log_sandbox as logger
+from zhenxun.utils.utils import infer_plugin_namespace
+
+from .drivers.base import BaseSandboxSession
+from .models import (
     LanguageProfile,
     SandboxExecutionResult,
 )
-from zhenxun.services.ai.utils.logger import log_sandbox as logger
-from zhenxun.utils.utils import infer_plugin_namespace
 
 
 def parse_shebang(script_path: str | Path) -> str | None:

@@ -6,7 +6,10 @@ from nonebot.utils import is_coroutine_callable
 
 from zhenxun.services.ai.capabilities import AbstractCapability
 from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.tools.bridges.handoff import HandoffTool
+
+from .models import Transition
 
 
 class TeamRoutingCapability(AbstractCapability):
@@ -36,15 +39,12 @@ class TeamRoutingCapability(AbstractCapability):
                 current_speaker,
                 [m.name for m in self.members if m.name != current_speaker],
             )
-            from zhenxun.services.ai.flow.team.models import Transition
 
             return [
                 Transition(target=t) if isinstance(t, str) else t for t in raw_targets
             ]
 
         if callable(self.state_flow):
-            from zhenxun.services.ai.run.di import DependencyInjector
-
             sig = inspect.signature(self.state_flow)
             kwargs = await DependencyInjector.resolve_all(
                 sig, call_kwargs={}, context=context
@@ -57,7 +57,6 @@ class TeamRoutingCapability(AbstractCapability):
 
             if result is None:
                 return None
-            from zhenxun.services.ai.flow.team.models import Transition
 
             return [Transition(target=t) if isinstance(t, str) else t for t in result]
 

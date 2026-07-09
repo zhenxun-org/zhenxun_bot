@@ -6,21 +6,22 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zhenxun.services.ai.context.memory.storage.interfaces import (
+from zhenxun.services.ai.context.rag.backends import Embedder, StorageBackend
+from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
+from zhenxun.services.ai.utils.scope import ScopeBuilder
+
+from .storage.interfaces import (
     BaseChatContext,
     BaseMemoryIngestionMiddleware,
     BaseMemoryReducer,
     BaseSlotContext,
 )
-from zhenxun.services.ai.context.memory.types import (
+from .types import (
     AutoRecallPolicy,
     Isolation,
     MemorySlot,
     SessionMetadata,
 )
-from zhenxun.services.ai.context.rag.backends import Embedder, StorageBackend
-from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
-from zhenxun.services.ai.utils.scope import ScopeBuilder
 
 
 class SlotMemoryConfig(BaseModel):

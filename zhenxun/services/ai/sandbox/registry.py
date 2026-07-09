@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING, ClassVar
 from zhenxun.services.ai.utils.logger import log_sandbox as logger
 
 if TYPE_CHECKING:
-    from zhenxun.services.ai.sandbox.addons.base import BaseSandboxExtension
-    from zhenxun.services.ai.sandbox.drivers.base import BaseSandboxClient
+    from .addons.base import BaseSandboxExtension
+    from .drivers.base import BaseSandboxClient
 
 
 class SandboxRegistry:

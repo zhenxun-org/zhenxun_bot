@@ -2,9 +2,10 @@ from abc import ABC, abstractmethod
 import asyncio
 import re
 
-from zhenxun.services.ai.context.rag.models import BaseRecord
-from zhenxun.services.ai.context.rag.utils import cosine_similarity
 from zhenxun.services.ai.utils.logger import log_rag as logger
+
+from .models import BaseRecord
+from .utils import cosine_similarity
 
 
 class ChunkingStrategy(ABC):

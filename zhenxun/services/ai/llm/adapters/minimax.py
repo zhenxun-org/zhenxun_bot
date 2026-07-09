@@ -19,9 +19,9 @@ from zhenxun.services.ai.core.models import (
     ModelIdentity,
 )
 from zhenxun.services.ai.core.options import GenerationConfig, TTSConfig
-from zhenxun.services.ai.llm.adapters.base import BaseAdapter, RequestData
-from zhenxun.services.ai.llm.adapters.handlers.base import BaseAudioHandler
 
+from .base import BaseAdapter, RequestData
+from .handlers.base import BaseAudioHandler
 from .handlers.openai_handlers import (
     OpenAIConfigMapper,
     OpenAIMessageConverter,

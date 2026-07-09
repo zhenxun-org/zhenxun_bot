@@ -8,18 +8,12 @@ from nonebot.params import Depends
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from zhenxun.services.ai.flow.workflow.nodes import NodeSource
+    from .nodes import NodeSource
 
 from zhenxun.services.ai.core.exceptions import ControlFlowExit, ToolRetryError
 from zhenxun.services.ai.core.messages import PromptInput, UsageInfo
 from zhenxun.services.ai.core.stream_events import EventBus
 from zhenxun.services.ai.flow.base import BaseRunnable, BaseRuntimeConfig
-from zhenxun.services.ai.flow.workflow.nodes import Steps
-from zhenxun.services.ai.flow.workflow.types import (
-    StepInput,
-    StepOutput,
-    WorkflowRunResult,
-)
 from zhenxun.services.ai.run.blackboard import BlackboardManager
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.run.models import (
@@ -31,6 +25,13 @@ from zhenxun.services.ai.run.models import (
 from zhenxun.services.ai.tools.core.tool import FunctionTool
 from zhenxun.services.ai.utils.logger import log_flow as logger
 from zhenxun.utils.message import MessageUtils
+
+from .nodes import Steps
+from .types import (
+    StepInput,
+    StepOutput,
+    WorkflowRunResult,
+)
 
 
 class Workflow(BaseRunnable[WorkflowRunResult]):

@@ -1,26 +1,22 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 from collections.abc import Callable
 import datetime
 from pathlib import Path
 import time
-from typing import TYPE_CHECKING, Any, cast
-
-if TYPE_CHECKING:
-    from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
+from typing import Any, cast
 
 from nonebot.utils import is_coroutine_callable
 from tortoise import fields
 from tortoise.timezone import now
 
-from zhenxun.services.ai.context.memory.storage.interfaces import (
-    BaseChatContext,
-    BaseSlotContext,
-)
 from zhenxun.services.ai.context.memory.types import (
     MemorySlot,
     SessionMetadata,
 )
+from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
 from zhenxun.services.ai.context.rag.models import BaseRecord, SearchResult
 from zhenxun.services.ai.core.messages import (
     AssistantMessage,
@@ -34,6 +30,11 @@ from zhenxun.services.ai.core.messages import (
 from zhenxun.services.ai.utils.scope import ScopeSelector
 from zhenxun.services.db_context import Model
 from zhenxun.utils.pydantic_compat import TypeAdapter, model_dump
+
+from .interfaces import (
+    BaseChatContext,
+    BaseSlotContext,
+)
 
 
 class AbstractMemoryRecord(Model):
@@ -129,7 +130,7 @@ class MemoryScope:
 
     def __init__(
         self,
-        rag_client: "ScopedRAGClient",
+        rag_client: ScopedRAGClient,
     ):
         """初始化长期记忆作用域与 RAG 客户端"""
         self.rag_client = rag_client

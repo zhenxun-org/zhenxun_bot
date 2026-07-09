@@ -51,7 +51,7 @@ from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.log_sanitizer import sanitize_for_logging
 
 if TYPE_CHECKING:
-    from zhenxun.services.ai.llm.adapters.handlers.base import (
+    from .handlers.base import (
         BaseAudioHandler,
         BaseEmbeddingHandler,
         BaseImageHandler,

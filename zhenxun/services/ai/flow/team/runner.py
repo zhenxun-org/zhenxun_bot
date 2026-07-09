@@ -8,17 +8,19 @@ from zhenxun.services.ai.core.exceptions import (
     LLMException,
 )
 from zhenxun.services.ai.core.messages import UsageInfo
-from zhenxun.services.ai.flow.team.capabilities import TeamRoutingCapability
-from zhenxun.services.ai.flow.team.models import (
-    CallAction,
-    ConcurrentCallAction,
-    FinishAction,
-)
-from zhenxun.services.ai.flow.team.strategy import BaseTeamStrategy
+from zhenxun.services.ai.flow.agent.models import AgentConfig
 from zhenxun.services.ai.run import AgentRunResult, RunContext
 from zhenxun.services.ai.run.models import AgentRunEnd
 from zhenxun.services.ai.utils.logger import log_team as logger
 from zhenxun.utils.pydantic_compat import model_construct
+
+from .capabilities import TeamRoutingCapability
+from .models import (
+    CallAction,
+    ConcurrentCallAction,
+    FinishAction,
+)
+from .strategy import BaseTeamStrategy, RouteStrategy
 
 
 class TeamRunner:
@@ -67,8 +69,6 @@ class TeamRunner:
         sub_context = context.clone_for_member(target_agent.name)
         sub_context.capabilities = list(sub_context.capabilities)
 
-        from zhenxun.services.ai.flow.team.strategy import RouteStrategy
-
         if isinstance(self.strategy, RouteStrategy):
             routing_cap = TeamRoutingCapability(
                 team_name=self.team.name,
@@ -83,8 +83,6 @@ class TeamRunner:
         agent_res = None
 
         try:
-            from zhenxun.services.ai.flow.agent.models import AgentConfig
-
             async with target_agent.run_stream(
                 prompt=action.task,
                 context=sub_context,

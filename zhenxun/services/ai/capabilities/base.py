@@ -5,17 +5,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Union
 
 from zhenxun.services.ai.core.messages import ChatRequest, ChatResponse
+from zhenxun.services.ai.core.models import LLMContext
 from zhenxun.services.ai.core.options import GenerationConfig
 
 if TYPE_CHECKING:
-    from zhenxun.services.ai.core.models import LLMContext
     from zhenxun.services.ai.run import AgentRunResult, RunContext
 
 WrapRunHandler = Callable[[], Awaitable["AgentRunResult[Any]"]]
 """整个 Agent 运行过程包裹的处理函数类型"""
 
 WrapModelRequestHandler = Callable[
-    ["LLMContext[ChatRequest, ChatResponse]"], Awaitable[ChatResponse]
+    [LLMContext[ChatRequest, ChatResponse]], Awaitable[ChatResponse]
 ]
 """单次大模型 API 请求包裹的处理函数类型"""
 

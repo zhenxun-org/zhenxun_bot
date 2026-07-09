@@ -8,10 +8,11 @@ from zhenxun.services.ai.core.models import ModelDetail, ModelModality
 from zhenxun.services.ai.core.options import GenerationConfig
 from zhenxun.services.ai.llm.builder import validate_override_params
 from zhenxun.services.ai.llm.engine.service import LLMModel
-from zhenxun.services.ai.llm.system.capabilities import get_model_capabilities
-from zhenxun.services.ai.llm.system.network import health_manager, http_client_manager
 from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.pydantic_compat import dump_json_safely, model_copy, model_dump
+
+from .capabilities import get_model_capabilities
+from .network import health_manager, http_client_manager
 
 _model_cache: dict[str, tuple[LLMModel, float]] = {}
 _cache_ttl = 3600

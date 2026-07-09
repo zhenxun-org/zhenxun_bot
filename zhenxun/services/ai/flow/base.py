@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 import asyncio
 from collections.abc import AsyncIterator
@@ -9,12 +11,12 @@ from pydantic import BaseModel, Field
 
 from zhenxun.services.ai.core.exceptions import ControlFlowExit
 from zhenxun.services.ai.run.context import RunContext
+from zhenxun.services.ai.run.models import StreamedRunResult
 from zhenxun.services.ai.run.ui import UIController
 from zhenxun.services.ai.utils.logger import log_flow as logger
 
 if TYPE_CHECKING:
-    from zhenxun.services.ai.flow.agent.models import Persona
-    from zhenxun.services.ai.run.models import StreamedRunResult
+    from .agent.models import Persona
 
 from zhenxun.services.ai.core.messages import PromptInput
 
@@ -94,7 +96,7 @@ class BaseRunnable(ABC, Generic[T_RunResult]):
         """DI 注入语法糖：返回 Depends，自动绑定当前上下文"""
         from nonebot.params import Depends
 
-        from zhenxun.services.ai.flow.agent.bridge import AgentRunner
+        from .agent.bridge import AgentRunner
 
         async def _dependency() -> AgentRunner[Any]:
             return AgentRunner[Any](self, **kwargs)
@@ -110,7 +112,7 @@ class BaseRunnable(ABC, Generic[T_RunResult]):
         **kwargs: Any,
     ) -> T_RunResult:
         """交互执行语法糖，自动渲染流式进度并最终将结果回复给终端用户"""
-        from zhenxun.services.ai.flow.agent.bridge import AgentRunner
+        from .agent.bridge import AgentRunner
 
         runner = AgentRunner(self, context=context, **kwargs)
         return cast(T_RunResult, await runner.reply(prompt=prompt, reply_to=reply_to))
@@ -123,7 +125,6 @@ class BaseRunnable(ABC, Generic[T_RunResult]):
         **kwargs: Any,
     ) -> T_RunResult:
         """阻塞式核心运行入口，安全捕获内部抛出的静默退出信号"""
-
 
         try:
             async with self.run_stream(
@@ -145,6 +146,6 @@ class BaseRunnable(ABC, Generic[T_RunResult]):
         *,
         context: RunContext | None = None,
         **kwargs: Any,
-    ) -> "AsyncIterator[StreamedRunResult[Any]]":
+    ) -> AsyncIterator[StreamedRunResult[Any]]:
         """流式运行入口，返回上下文管理器，用于消费底层执行流事件 (StreamedRunResult)"""
         yield cast(Any, None)

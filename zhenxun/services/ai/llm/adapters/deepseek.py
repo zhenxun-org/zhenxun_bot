@@ -6,12 +6,13 @@ from zhenxun.services.ai.core.models import (
     ModelIdentity,
 )
 from zhenxun.services.ai.core.options import GenerationConfig
-from zhenxun.services.ai.llm.adapters.handlers.openai_handlers import (
+
+from .handlers.openai_handlers import (
     OpenAIConfigMapper,
     OpenAITextHandler,
     OpenAIToolSerializer,
 )
-from zhenxun.services.ai.llm.adapters.openai import OpenAICompatAdapter
+from .openai import OpenAICompatAdapter
 
 
 class DeepSeekToolSerializer(OpenAIToolSerializer):

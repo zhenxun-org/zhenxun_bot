@@ -77,7 +77,9 @@ from zhenxun.utils.utils import infer_plugin_namespace
 
 from .engine.builders import (
     AgentProfileResolver,
+    CapabilityBuilder,
     ContextBuilder,
+    SessionBuilder,
     ToolBuilder,
 )
 from .engine.executor import BaseAgentExecutor, StandardAgentExecutor
@@ -782,11 +784,6 @@ class Agent(
         **kwargs: Any,
     ) -> tuple[AgentState, AgentRunResources]:
         """解析任务意图，初始化隔离域与基础状态载体"""
-        from zhenxun.services.ai.flow.agent.engine.builders import (
-            AgentProfileResolver,
-            CapabilityBuilder,
-            SessionBuilder,
-        )
 
         if context is None:
             raise ValueError("RunContext 不能为空")

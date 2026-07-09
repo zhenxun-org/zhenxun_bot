@@ -13,11 +13,12 @@ from zhenxun.services.ai.config import (
 from zhenxun.services.ai.core.exceptions import ConfigurationException
 from zhenxun.services.ai.core.models import ModelDetail
 from zhenxun.services.ai.core.options import GenerationConfig
-from zhenxun.services.ai.llm.system.capabilities import get_model_capabilities
-from zhenxun.services.ai.llm.system.network import health_manager
 from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.pydantic_compat import model_dump
+
+from .system.capabilities import get_model_capabilities
+from .system.network import health_manager
 
 _RESOLVED_GROUP_CACHE: dict[str, list[str]] = {}
 """路由组解析缓存，避免每次调用重复打印剔除警告并提升性能"""
@@ -276,7 +277,7 @@ async def get_model_instance(
 
     provider_config_found, model_detail_found = config_tuple_found
 
-    from zhenxun.services.ai.llm.system.cache import get_or_create_model
+    from .system.cache import get_or_create_model
 
     return await get_or_create_model(
         provider_config_found, model_detail_found, override_config
@@ -287,7 +288,7 @@ def clear_all_cache() -> None:
     """
     清空模型实例缓存与路由组解析缓存。
     """
-    from zhenxun.services.ai.llm.system.cache import clear_model_cache
+    from .system.cache import clear_model_cache
 
     clear_model_cache()
     clear_resolved_group_cache()
@@ -300,8 +301,9 @@ async def _init_llm_config_on_startup():
     logger.info("正在初始化 LLM 配置并加载遥测状态...")
     try:
         from zhenxun.services.ai.config import get_llm_config
-        from zhenxun.services.ai.llm.system.network import health_manager
         from zhenxun.services.ai.tools.engine.registry import tool_provider_manager
+
+        from .system.network import health_manager
 
         get_llm_config()
         await health_manager.initialize()

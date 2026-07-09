@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, Any
+from __future__ import annotations
+
+from typing import Any
 
 from nonebot_plugin_alconna import UniMessage
 
@@ -6,14 +8,13 @@ from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent, UserCus
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.platform import PlatformUtils
 
-if TYPE_CHECKING:
-    from zhenxun.services.ai.run.context import RunContext
+from .context import RunContext
 
 
 class UIController:
     """前端 UI 富交互流式控制器 (按需生成模式)"""
 
-    def __init__(self, context: "RunContext"):
+    def __init__(self, context: RunContext):
         self.context = context
 
     @property
@@ -45,7 +46,7 @@ class UIController:
 
     @staticmethod
     async def handle_control_flow_exit_display(
-        e: BaseException, context: "RunContext | None", reply_to: bool = False
+        e: BaseException, context: RunContext | None, reply_to: bool = False
     ) -> None:
         """统一处理 ControlFlowExit 异常带来的 UI 反馈逻辑"""
         from zhenxun.services.ai.core.exceptions import ControlFlowExit

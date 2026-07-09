@@ -1,13 +1,14 @@
 from zhenxun.services.ai.core.messages import RerankRequest
 from zhenxun.services.ai.core.models import ModelIdentity
-from zhenxun.services.ai.llm.adapters.base import BaseAdapter, RequestData
-from zhenxun.services.ai.llm.adapters.handlers.openai_handlers import (
+
+from .base import BaseAdapter, RequestData
+from .handlers.openai_handlers import (
     OpenAIConfigMapper,
     OpenAIEmbeddingHandler,
     OpenAIRerankHandler,
     OpenAITextHandler,
 )
-from zhenxun.services.ai.llm.adapters.openai import OpenAICompatAdapter
+from .openai import OpenAICompatAdapter
 
 
 class GLMRerankHandler(OpenAIRerankHandler):

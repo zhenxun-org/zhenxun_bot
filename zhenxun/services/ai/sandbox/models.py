@@ -16,7 +16,7 @@ from zhenxun.services.ai.utils.logger import log_sandbox as logger
 from zhenxun.utils.pydantic_compat import model_dump
 
 if TYPE_CHECKING:
-    from zhenxun.services.ai.sandbox.drivers.base import BaseSandboxSession
+    from .drivers.base import BaseSandboxSession
 
 
 class LanguageProfile(BaseModel):

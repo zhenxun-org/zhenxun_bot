@@ -4,11 +4,11 @@ from typing import Any, cast
 import nonebot
 
 from zhenxun.services.ai.config import get_llm_config
-from zhenxun.services.ai.sandbox.models import SandboxBlueprint
 from zhenxun.services.ai.utils.logger import log_sandbox as logger
 from zhenxun.utils.lifespan import LifespanManager
 
 from .drivers.base import BaseSandboxClient, BaseSandboxSession
+from .models import SandboxBlueprint
 from .registry import SandboxRegistry
 
 _startup_tasks = set()
@@ -131,7 +131,7 @@ class SandboxManager:
 
         session = self._active_sessions[session_id]
 
-        from zhenxun.services.ai.sandbox.environments import ProvisionerRegistry
+        from .environments import ProvisionerRegistry
 
         for prov in ProvisionerRegistry.get_all().values():
             await prov.scan_and_setup_workspace(cast(Any, session), workspace_dir)

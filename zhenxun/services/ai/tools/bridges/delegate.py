@@ -1,18 +1,18 @@
+from __future__ import annotations
+
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from zhenxun.services.ai.core.exceptions import AbortException, ControlFlowExit
 from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent
+from zhenxun.services.ai.flow.base import BaseRunnable
 from zhenxun.services.ai.run import RunContext
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.models import ToolResult
 from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_dump
-
-if TYPE_CHECKING:
-    from zhenxun.services.ai.flow.base import BaseRunnable
 
 STRUCTURED_INPUT_PREAMBLE = (
     "\n\n### 🛠️ [嵌套调用前置语境]\n"
@@ -34,7 +34,7 @@ class DelegateTool(BaseTool):
 
     def __init__(
         self,
-        runnable: "BaseRunnable[Any]",
+        runnable: BaseRunnable[Any],
         name: str | None = None,
         description: str | None = None,
         max_delegations: int = 3,

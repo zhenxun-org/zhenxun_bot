@@ -1,9 +1,11 @@
 from typing import Any
 
-from zhenxun.services.ai.context.rag.backends import StorageBackend
-from zhenxun.services.ai.context.rag.configs import RAGConfig
-from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
-from zhenxun.services.ai.context.rag.ingestion import (
+from zhenxun.services.ai.utils.logger import log_rag as logger
+
+from .backends import StorageBackend
+from .configs import RAGConfig
+from .engine import ScopedRAGClient
+from .ingestion import (
     ChunkingStrategy,
     DedupNode,
     DocumentChunking,
@@ -12,7 +14,7 @@ from zhenxun.services.ai.context.rag.ingestion import (
     IndexPipeline,
     StorageCommitNode,
 )
-from zhenxun.services.ai.context.rag.retrieval import (
+from .retrieval import (
     BaseRetriever,
     DatabaseSparseRetriever,
     HybridRetriever,
@@ -23,7 +25,6 @@ from zhenxun.services.ai.context.rag.retrieval import (
     RerankRetriever,
     VectorDBRetriever,
 )
-from zhenxun.services.ai.utils.logger import log_rag as logger
 
 
 class RAGBuilder:
@@ -201,8 +202,9 @@ class RAGBuilder:
 
         embedder = cfg.embedder
         if not embedder:
-            from zhenxun.services.ai.context.rag.backends import DefaultEmbedder
             from zhenxun.services.ai.llm.manager import get_default_model
+
+            from .backends import DefaultEmbedder
 
             embedder = DefaultEmbedder(model_name=get_default_model("embedding"))
             logger.debug("RAGBuilder: 未指定 Embedder，已使用系统默认 Embedder。")

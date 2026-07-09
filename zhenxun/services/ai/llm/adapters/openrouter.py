@@ -10,18 +10,19 @@ from zhenxun.services.ai.core.messages import (
     ThoughtPart,
 )
 from zhenxun.services.ai.core.models import ModelIdentity
-from zhenxun.services.ai.llm.adapters.base import (
+
+from .base import (
     BaseAdapter,
     RequestData,
     ResponseData,
     process_image_data,
 )
-from zhenxun.services.ai.llm.adapters.handlers.base import BaseImageHandler
-from zhenxun.services.ai.llm.adapters.handlers.openai_handlers import (
+from .handlers.base import BaseImageHandler
+from .handlers.openai_handlers import (
     OpenAIMessageConverter,
     OpenAITextHandler,
 )
-from zhenxun.services.ai.llm.adapters.openai import OpenAIAdapter
+from .openai import OpenAIAdapter
 
 
 class OpenRouterMessageConverter(OpenAIMessageConverter):

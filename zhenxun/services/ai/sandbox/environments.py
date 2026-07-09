@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from zhenxun.services.ai.utils.logger import log_sandbox as logger
 
 if TYPE_CHECKING:
-    from zhenxun.services.ai.sandbox.drivers.base import BaseSandboxSession
-    from zhenxun.services.ai.sandbox.models import SandboxBlueprint
+    from .drivers.base import BaseSandboxSession
+    from .models import SandboxBlueprint
 
 
 class BaseProvisioner(ABC):

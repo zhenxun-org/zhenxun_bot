@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import asyncio
 import json
-from typing import Any, cast
+from typing import Any
 
 from zhenxun.services.ai.capabilities import CombinedCapability
 from zhenxun.services.ai.core.engine.context_renderer import ContextConverter
@@ -15,7 +15,6 @@ from zhenxun.services.ai.core.exceptions import (
 )
 from zhenxun.services.ai.core.messages import (
     AgentMessage,
-    AssistantContentUnion,
     AssistantMessage,
     AudioPart,
     ChatRequest,
@@ -35,10 +34,6 @@ from zhenxun.services.ai.core.stream_events import (
     LLMStartEvent,
     ToolStreamChunkEvent,
 )
-from zhenxun.services.ai.flow.agent.engine.directive import (
-    DirectiveHandlerFunc,
-    directive_manager,
-)
 from zhenxun.services.ai.flow.agent.models import AgentRunResources, AgentState
 from zhenxun.services.ai.llm.engine.router import LLMOrchestrator
 from zhenxun.services.ai.run import AgentRunResult, RunContext
@@ -47,6 +42,11 @@ from zhenxun.services.ai.tools.engine.executor import ToolExecutor
 from zhenxun.services.ai.tools.models import ToolResult
 from zhenxun.services.ai.utils.logger import log_agent as logger
 from zhenxun.utils.pydantic_compat import dump_json_safely, model_construct
+
+from .directive import (
+    DirectiveHandlerFunc,
+    directive_manager,
+)
 
 
 class BaseAgentExecutor(ABC):
@@ -250,9 +250,7 @@ class StandardAgentExecutor(BaseAgentExecutor):
                     part.metadata["thought_signature"] = response.thought_signature
                     break
 
-        assistant_message = AssistantMessage(
-            content=cast(list[AssistantContentUnion], response.content_parts)
-        )
+        assistant_message = AssistantMessage(content=response.content_parts)
 
         if hasattr(response, "parsed_obj") and response.parsed_obj is not None:
             if not isinstance(response.parsed_obj, str):

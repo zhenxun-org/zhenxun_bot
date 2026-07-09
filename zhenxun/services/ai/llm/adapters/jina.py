@@ -1,13 +1,14 @@
 from zhenxun.services.ai.core.messages import EmbeddingRequest
 from zhenxun.services.ai.core.models import ModelIdentity
 from zhenxun.services.ai.core.options import LLMEmbeddingConfig
-from zhenxun.services.ai.llm.adapters.base import BaseAdapter, RequestData
-from zhenxun.services.ai.llm.adapters.handlers.openai_handlers import (
+from zhenxun.services.ai.utils.logger import log_llm as logger
+
+from .base import BaseAdapter, RequestData
+from .handlers.openai_handlers import (
     OpenAIEmbeddingHandler,
     OpenAIRerankHandler,
 )
-from zhenxun.services.ai.llm.adapters.openai import OpenAICompatAdapter
-from zhenxun.services.ai.utils.logger import log_llm as logger
+from .openai import OpenAICompatAdapter
 
 
 class JinaEmbeddingHandler(OpenAIEmbeddingHandler):

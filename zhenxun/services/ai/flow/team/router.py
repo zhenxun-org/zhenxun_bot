@@ -8,10 +8,11 @@ from nonebot.utils import is_coroutine_callable
 
 from zhenxun.services.ai.core.messages import AgentMessage
 from zhenxun.services.ai.core.templates import PromptTemplate
-from zhenxun.services.ai.flow.team.models import RouteDecision, Transition
 from zhenxun.services.ai.run import AgentTask, RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.utils.logger import log_team as logger
+
+from .models import RouteDecision, Transition
 
 
 class BaseRouter(ABC):
@@ -182,7 +183,8 @@ class LLMRouter(BaseRouter):
     ) -> RouteDecision | None:
         from zhenxun.services.ai.flow.agent.agent import Agent
         from zhenxun.services.ai.flow.agent.models import AgentConfig
-        from zhenxun.services.ai.flow.team.capabilities import TeamRoutingCapability
+
+        from .capabilities import TeamRoutingCapability
 
         default_system_prompt = """## 角色与目标
 你是一个高级任务路由器 (所在团队: {{ team_name }})。

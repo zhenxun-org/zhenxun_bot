@@ -35,10 +35,10 @@ from zhenxun.services.ai.core.options import (
     TTSConfig,
 )
 from zhenxun.services.ai.guardrails import GuardrailSource
-from zhenxun.services.ai.llm.engine.router import LLMOrchestrator
 from zhenxun.services.ai.utils.logger import log_llm as logger
 
 from .builder import IntentBuilder
+from .engine.router import LLMOrchestrator
 
 T = TypeVar("T", bound=BaseModel)
 

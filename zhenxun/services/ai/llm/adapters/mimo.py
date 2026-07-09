@@ -1,12 +1,13 @@
 from zhenxun.services.ai.core.models import ModelIdentity
-from zhenxun.services.ai.llm.adapters.handlers.mimo_handlers import (
+
+from .handlers.mimo_handlers import (
     MiMoAudioHandler,
     MiMoTextHandler,
 )
-from zhenxun.services.ai.llm.adapters.handlers.openai_handlers import (
+from .handlers.openai_handlers import (
     OpenAIImageHandler,
 )
-from zhenxun.services.ai.llm.adapters.openai import OpenAICompatAdapter
+from .openai import OpenAICompatAdapter
 
 
 class MiMoAdapter(OpenAICompatAdapter):

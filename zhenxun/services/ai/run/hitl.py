@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Callable
 import time
-from typing import TYPE_CHECKING
 
 from nonebot.adapters import Event
 from nonebot.permission import SUPERUSER
@@ -10,8 +11,7 @@ from nonebot_plugin_waiter import waiter
 from zhenxun.services.ai.core.exceptions import AbortException, ToolFatalError
 from zhenxun.services.ai.utils.logger import log_agent as logger
 
-if TYPE_CHECKING:
-    from zhenxun.services.ai.run.context import RunContext
+from .context import RunContext
 
 CANCEL_WORDS = {"取消", "cancel", "0", "退出", "quit"}
 CONFIRM_WORDS = {"y", "yes", "是", "1", "ok", "确认"}
@@ -24,7 +24,7 @@ class HITLController:
     封装底层的物理环境隔离等待逻辑，供上层工具和中间件发起提问或审批。
     """
 
-    def __init__(self, context: "RunContext"):
+    def __init__(self, context: RunContext):
         self.context = context
 
     async def wait_event(

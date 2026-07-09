@@ -1,20 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from typing_extensions import Self
 
 from pydantic import BaseModel
-
-if TYPE_CHECKING:
-    from zhenxun.services.ai.context.memory.models import MemorySlot
-    from zhenxun.services.ai.context.memory.storage.interfaces import (
-        BaseChatContext,
-        BaseMemoryIngestionMiddleware,
-        BaseSlotContext,
-    )
-    from zhenxun.services.ai.context.rag.backends import Embedder, StorageBackend
-    from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
 
 from zhenxun.services.ai.context.memory.compression import MemoryPolicy
 from zhenxun.services.ai.context.memory.models import (
@@ -22,12 +12,20 @@ from zhenxun.services.ai.context.memory.models import (
     IngestionConfig,
     LongTermConfig,
     MemoryConfig,
+    MemorySlot,
     ShortTermConfig,
     SlotMemoryConfig,
+)
+from zhenxun.services.ai.context.memory.storage.interfaces import (
+    BaseChatContext,
+    BaseMemoryIngestionMiddleware,
+    BaseSlotContext,
 )
 from zhenxun.services.ai.context.memory.types import (
     AutoRecallPolicy,
 )
+from zhenxun.services.ai.context.rag.backends import Embedder, StorageBackend
+from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
 from zhenxun.services.ai.utils.scope import ScopeBuilder
 
 
@@ -51,7 +49,7 @@ class MemoryBuilder:
         )
 
     @classmethod
-    def auto(cls) -> "MemoryBuilder":
+    def auto(cls) -> MemoryBuilder:
         """
         创建一个开箱即用的默认记忆配置构建器。
 
@@ -61,7 +59,7 @@ class MemoryBuilder:
 
     @classmethod
     def resolve(
-        cls, memory: bool | MemoryConfig | "MemoryBuilder" | None
+        cls, memory: bool | MemoryConfig | MemoryBuilder | None
     ) -> MemoryConfig:
         if isinstance(memory, MemoryConfig):
             return memory
@@ -85,7 +83,7 @@ class MemoryBuilder:
         self,
         enable: bool = True,
         isolation: ScopeBuilder | None = None,
-        backend: "str | BaseChatContext | None" = None,
+        backend: str | BaseChatContext | None = None,
     ) -> Self:
         """
         配置短期对话历史记忆。
@@ -107,8 +105,8 @@ class MemoryBuilder:
         self,
         enable: bool = True,
         scopes: dict[str, ScopeBuilder] | None = None,
-        default_slots: list["MemorySlot"] | None = None,
-        backend: "str | BaseSlotContext | None" = None,
+        default_slots: list[MemorySlot] | None = None,
+        backend: str | BaseSlotContext | None = None,
         instructions: str | None = None,
     ) -> Self:
         """
@@ -136,9 +134,9 @@ class MemoryBuilder:
         self,
         enable: bool = True,
         scopes: dict[str, ScopeBuilder] | None = None,
-        engine: "ScopedRAGClient | None" = None,
-        backend: "str | StorageBackend | None" = None,
-        embedder: "Embedder | str | None" = None,
+        engine: ScopedRAGClient | None = None,
+        backend: str | StorageBackend | None = None,
+        embedder: Embedder | str | None = None,
         agentic: bool = True,
         auto_recall: AutoRecallPolicy = False,
         instructions: str | None = None,
@@ -250,7 +248,7 @@ class MemoryBuilder:
         return self
 
     def with_ingestion_middlewares(
-        self, *middlewares: "BaseMemoryIngestionMiddleware"
+        self, *middlewares: BaseMemoryIngestionMiddleware
     ) -> Self:
         """
         配置记忆入库管线中间件。

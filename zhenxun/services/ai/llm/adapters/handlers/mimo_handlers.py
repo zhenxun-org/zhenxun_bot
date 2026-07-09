@@ -20,8 +20,9 @@ from zhenxun.services.ai.core.models import (
 )
 from zhenxun.services.ai.core.options import TTSConfig
 from zhenxun.services.ai.llm.adapters.base import BaseAdapter, RequestData
-from zhenxun.services.ai.llm.adapters.handlers.base import BaseAudioHandler
-from zhenxun.services.ai.llm.adapters.handlers.openai_handlers import (
+
+from .base import BaseAudioHandler
+from .openai_handlers import (
     OpenAIConfigMapper,
     OpenAIMessageConverter,
     OpenAITextHandler,

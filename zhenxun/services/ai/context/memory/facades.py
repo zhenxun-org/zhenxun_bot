@@ -1,29 +1,30 @@
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Literal
+from __future__ import annotations
 
-from zhenxun.services.ai.context.memory.types import (
+from collections.abc import Sequence
+from typing import Literal
+
+from zhenxun.services.ai.core.messages import AgentMessage, LLMMessage
+
+from .manager import GlobalMemoryManager
+from .storage.interfaces import (
+    BaseChatContext,
+    BaseSlotContext,
+)
+from .types import (
     MemorySlot,
     SessionMetadata,
 )
-from zhenxun.services.ai.core.messages import AgentMessage, LLMMessage
-
-if TYPE_CHECKING:
-    from zhenxun.services.ai.context.memory.manager import GlobalMemoryManager
-    from zhenxun.services.ai.context.memory.storage.interfaces import (
-        BaseChatContext,
-        BaseSlotContext,
-    )
 
 
 class ChatHistoryFacade:
     """短期对话历史门面"""
 
-    def __init__(self, manager: "GlobalMemoryManager", session_meta: SessionMetadata):
+    def __init__(self, manager: GlobalMemoryManager, session_meta: SessionMetadata):
         self.manager = manager
         self.session_meta = session_meta
 
     @property
-    def _backend(self) -> "BaseChatContext | None":
+    def _backend(self) -> BaseChatContext | None:
         return self.manager.get_chat_context(
             None, self.session_meta.namespace or "global"
         )
@@ -40,6 +41,7 @@ class ChatHistoryFacade:
         if not self._backend:
             return
         from zhenxun.services.ai.core.engine.context_renderer import ContextConverter
+
         msgs = messages if isinstance(messages, Sequence) else [messages]
         flattened = ContextConverter.flatten_to_llm_messages(msgs)
         if flattened:
@@ -55,12 +57,12 @@ class ChatHistoryFacade:
 class SlotFacade:
     """中期记忆槽门面"""
 
-    def __init__(self, manager: "GlobalMemoryManager", session_meta: SessionMetadata):
+    def __init__(self, manager: GlobalMemoryManager, session_meta: SessionMetadata):
         self.manager = manager
         self.session_meta = session_meta
 
     @property
-    def _backend(self) -> "BaseSlotContext | None":
+    def _backend(self) -> BaseSlotContext | None:
         """获取底层槽位存储后端"""
         return self.manager.get_slot_context(
             None, self.session_meta.namespace or "global"
@@ -114,7 +116,7 @@ class AgentSessionFacade:
     提供给第三方开发者的会话记忆访问聚合门面 (Facade)。
     """
 
-    def __init__(self, manager: "GlobalMemoryManager", session_meta: SessionMetadata):
+    def __init__(self, manager: GlobalMemoryManager, session_meta: SessionMetadata):
         self.manager = manager
         self.session_meta = session_meta
         self.history = ChatHistoryFacade(manager, session_meta)
