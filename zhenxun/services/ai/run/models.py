@@ -253,7 +253,7 @@ class AgentTask(BaseModel):
 
 
 class RunIntent(BaseModel):
-    """标准化且归一化的运行时意图载体 """
+    """标准化且归一化的运行时意图载体"""
 
     text: str = ""
     """提取出的纯文本指令（用于路由、日志和并发控制判断）"""

@@ -39,7 +39,6 @@ class JinaEmbeddingHandler(OpenAIEmbeddingHandler):
                 VideoPart,
             )
 
-
             for payload in batch.payloads:
                 jina_content = []
                 for part in payload.parts:

@@ -78,4 +78,3 @@ class WorkflowRunResult(BaseModel):
     """最后一个成功执行的步骤所产出的内容"""
     final_output: StepOutput | None = None
     """工作流根节点最终包装的完整产出对象"""
-

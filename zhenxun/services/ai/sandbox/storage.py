@@ -129,5 +129,3 @@ def coerce_posix_path(path: str | PurePath) -> PurePosixPath:
     else:
         path = path.replace("\\", "/")
     return PurePosixPath(path)
-
-

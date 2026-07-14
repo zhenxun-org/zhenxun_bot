@@ -101,7 +101,7 @@ class MemoryManagementToolkit(BaseToolkit):
             context=context,
             target_builder=scope_builder,
             extra_scopes=self.scopes,
-            custom_namespace=self._namespace
+            custom_namespace=self._namespace,
         )
         return scope, session_meta
 
