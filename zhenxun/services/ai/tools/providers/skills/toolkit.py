@@ -295,6 +295,9 @@ class SkillMetaToolkit(BaseToolkit, SkillSandboxExecutionMixin):
             if sandbox is None and context is not None:
                 sandbox = Inject._providers["sandbox"]["global"](context)
 
+            if sandbox is None:
+                return ToolResult(output="❌ 缺少沙箱环境或执行上下文").as_error()
+
             executor = await sandbox.get_or_create_session(session_id, blueprint=bp)
             fs_executor = cast(SupportsFileSystem, executor)
 

@@ -450,7 +450,7 @@ def bind_matcher(
     """
 
     if require_prefix:
-        ns = infer_plugin_namespace(default="global")
+        ns = infer_plugin_namespace()
         if ns and ns not in ("global", "unknown"):
             if not name.startswith(f"{ns}_"):
                 name = f"{ns}_{name}"

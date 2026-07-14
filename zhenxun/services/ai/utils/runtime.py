@@ -60,7 +60,7 @@ class ContextUtils:
         context: Any, scope: Any, default_session_id: str
     ) -> str:
         """根据并发隔离范围 scope 动态计算并返回当前会话的并发锁 ID"""
-        from zhenxun.services.ai.flow.base import ConcurrencyScope
+        from zhenxun.services.ai.flow.core.models import ConcurrencyScope
 
         scope = scope or ConcurrencyScope.GROUP
 
@@ -133,6 +133,66 @@ class ContextUtils:
             accessible_scopes=accessible_scopes,
             selector=selector,
             isolation_level=scope_builder,
+        )
+
+    @staticmethod
+    def build_session_meta(
+        context: Any,
+        target_builder: Any | None = None,
+        extra_scopes: dict[str, Any] | None = None,
+        custom_namespace: str | None = None,
+    ) -> Any:
+        """基于 RunContext 动态提取并生成 SessionMetadata"""
+        from zhenxun.services.ai.context.memory.types import Isolation, SessionMetadata
+
+        ns = custom_namespace or getattr(
+            getattr(context, "session", None), "namespace", "global"
+        )
+        agent_name = getattr(getattr(context, "run", None), "agent_name", None)
+        deps = getattr(context, "deps", None)
+
+        if target_builder is None:
+            target_builder = Isolation.AGENT_USER()
+
+        selector = target_builder.resolve(
+            deps=deps,
+            prefix="",
+            default_namespace=ns,
+            default_agent=agent_name,
+        )
+
+        all_scopes = {"/"}
+        parts = selector.get_scope_parts()
+        current_path = ""
+        for part in parts:
+            current_path += f"/{part}"
+            all_scopes.add(current_path)
+
+        scope_name_mapping = {}
+        if extra_scopes:
+            for name, builder in extra_scopes.items():
+                sel = builder.resolve(
+                    deps=deps, prefix="", default_namespace=ns, default_agent=agent_name
+                )
+                all_scopes.add(sel.scope_prefix)
+                scope_name_mapping[sel.scope_prefix] = name
+
+        accessible_scopes = list(all_scopes)
+        accessible_scopes.sort(key=lambda x: len(x.split("/")))
+
+        session_id = (
+            getattr(context, "session_id", None)
+            or getattr(getattr(context, "session", None), "session_id", None)
+            or selector.scope_prefix
+        )
+
+        return SessionMetadata(
+            session_id=session_id,
+            selector=selector,
+            scope_prefix=selector.scope_prefix,
+            accessible_scopes=accessible_scopes,
+            scope_name_mapping=scope_name_mapping,
+            isolation_level=target_builder,
         )
 
 

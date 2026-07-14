@@ -214,7 +214,7 @@ class ScopeBuilder:
             selector.namespace = (
                 default_namespace
                 or getattr(deps, "namespace", None)
-                or infer_plugin_namespace(default="global")
+                or infer_plugin_namespace()
             )
         if "agent" in self._dims:
             selector.agent_name = default_agent

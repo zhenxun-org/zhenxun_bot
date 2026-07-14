@@ -1,14 +1,27 @@
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
 import inspect
 from typing import Annotated, Any, ClassVar, cast
+
+
+@lru_cache(maxsize=2048)
+def _get_signature_cached(func: Callable) -> inspect.Signature:
+    return inspect.signature(func)
+
+
+def get_signature(func: Callable) -> inspect.Signature:
+    try:
+        return _get_signature_cached(func)
+    except TypeError:
+        return inspect.signature(func)
+
 
 from nonebot.adapters import Bot, Event
 from nonebot.matcher import Matcher
 from nonebot.utils import is_coroutine_callable
 from nonebot_plugin_session import EventSession, extract_session
 
-from zhenxun.services.ai.context.memory.facades import AgentSessionFacade
 from zhenxun.utils.utils import infer_plugin_namespace
 
 from .blackboard import BlackboardManager
@@ -59,7 +72,7 @@ CurrentEventPayload = Annotated[Any, Hidden(), _InjectMarker("stream_event")]
 CurrentBlackboard = Annotated[
     BlackboardManager | None, Hidden(), _InjectMarker("blackboard")
 ]
-CurrentMemory = Annotated[AgentSessionFacade, Hidden(), _InjectMarker("memory")]
+
 CurrentSandbox = Annotated[Any, Hidden(), _InjectMarker("sandbox")]
 
 
@@ -159,9 +172,6 @@ class Inject:
 
     Blackboard = CurrentBlackboard
     """自动注入：当前工作流/团队挂载的强类型黑板 (BlackboardManager) 实例"""
-
-    Memory = CurrentMemory
-    """自动注入：当前会话的持久化记忆存取门面 (AgentSessionFacade) 实例"""
 
     Sandbox = CurrentSandbox
     """自动注入：当前沙箱环境管理器实例"""
@@ -314,7 +324,7 @@ class DependencyInjector:
         context: RunContext,
     ) -> Any:
         """统一执行带有依赖注入的函数 (支持同步/异步)"""
-        sig = inspect.signature(func)
+        sig = get_signature(func)
         resolved_kwargs = await cls.resolve_all(sig, call_kwargs, context)
         filtered_kwargs = {
             k: v for k, v in resolved_kwargs.items() if k in sig.parameters
@@ -354,7 +364,6 @@ Inject.register_provider(
 Inject.register_provider(
     "shared_state", lambda ctx: ctx.session.shared_state, scope="global"
 )
-Inject.register_provider("memory", lambda ctx: ctx.session.memory, scope="global")
 
 
 def _resolve_blackboard(ctx: RunContext):

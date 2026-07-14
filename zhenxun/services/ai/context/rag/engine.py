@@ -11,11 +11,13 @@ from .ingestion import (
 )
 from .models import (
     BaseRecord,
+    QueryRequest,
     SearchResult,
 )
 from .retrieval import (
     BaseRetriever,
 )
+from .utils import normalize_query_text
 
 
 class ScopedRAGClient:
@@ -55,7 +57,15 @@ class ScopedRAGClient:
         self.scope_prefix = self.scopes[0] if self.scopes else "/"
 
     async def ingest(self, records: list[BaseRecord]) -> int:
-        """通过 RAG Ingestion Pipeline 处理并入库数据"""
+        """
+        通过 RAG Ingestion Pipeline 处理并入库数据。
+
+        参数:
+            records: 待导入的数据记录列表。
+
+        返回:
+            int: 成功导入并存入的记录数量。
+        """
         for r in records:
             if "scope" not in r.metadata:
                 r.metadata["scope"] = self.scope_prefix
@@ -73,7 +83,16 @@ class ScopedRAGClient:
         """
         多作用域联合切片视图检索 (Union Search)。
         并发向多个独立的作用域发起检索，并对结果进行合并、去重和重排。
-        """
+
+        参数:
+            query: 检索的查询对象，可以是文本字符串、向量或高级查询对象。
+            limit: 最大返回结果条数。
+            scopes: (可选) 自定义检索的作用域。若不提供，则使用客户端初始化时设定的 scopes。
+            **kwargs: 传递给底层检索器的其他关键字参数。
+
+        返回:
+            list[SearchResult]: 检索到的相似度排序后的结果列表。
+        """  # noqa: E501
         target_scopes = self.scopes
         if scopes is not None:
             target_scopes = (
@@ -85,13 +104,40 @@ class ScopedRAGClient:
         if not target_scopes:
             return []
 
-        kwargs["scopes"] = target_scopes
-        return await self.retriever.retrieve(query, limit=limit, **kwargs)
+        text_query = normalize_query_text(query)
+        metadata_filters = kwargs.pop("metadata_filters", None)
+
+        request = QueryRequest(
+            text=text_query,
+            limit=limit,
+            scopes=target_scopes,
+            metadata_filters=metadata_filters,
+            extra=kwargs,
+        )
+
+        return await self.retriever.retrieve(request)
 
     async def update(self, record: BaseRecord) -> None:
+        """
+        更新指定的已有数据记录。
+        会自动强行附加当前客户端的单作用域前缀 (scope_prefix)。
+
+        参数:
+            record: 待更新的完整数据记录对象。
+        """
         record.metadata["scope"] = self.scope_prefix
         await self.storage.update(record)
 
     async def delete(self, record_ids: list[str] | None = None, **kwargs: Any) -> int:
+        """
+        删除指定的已有数据记录，操作限定在当前客户端的单作用域前缀下。
+
+        参数:
+            record_ids: (可选) 待删除的记录 ID 列表。
+            **kwargs: 传递给底层存储后端的其他过滤或删除参数。
+
+        返回:
+            int: 成功删除的记录条数。
+        """
         kwargs["scope_prefix"] = self.scope_prefix
         return await self.storage.delete(record_ids=record_ids, **kwargs)

@@ -12,6 +12,7 @@ from .hooks import Hooks
 from .models import (
     AgentRunResult,
     AgentTask,
+    RunIntent,
     StreamedRunResult,
 )
 from .session import session_manager
@@ -28,6 +29,7 @@ __all__ = [
     "Inject",
     "NoneBotDeps",
     "RunContext",
+    "RunIntent",
     "StreamedRunResult",
     "UIController",
     "get_current_run_context",

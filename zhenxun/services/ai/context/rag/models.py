@@ -42,6 +42,10 @@ class QueryRequest(BaseModel):
     """元数据精确匹配字典"""
     limit: int = Field(default=10)
     """返回的最大条数"""
+    scopes: list[str] | None = Field(default=None)
+    """检索的数据隔离作用域列表"""
+    extra: dict[str, Any] = Field(default_factory=dict)
+    """透传参数逃生舱"""
 
 
 StorageConfigType = dict[str, Any]

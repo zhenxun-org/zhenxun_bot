@@ -6,7 +6,6 @@ from typing import Any, Literal
 from pydantic import Field, create_model
 
 from zhenxun.services.ai.context.memory.manager import memory_manager
-from zhenxun.services.ai.context.memory.models import MemoryConfig
 from zhenxun.services.ai.context.memory.types import (
     MemorySlot,
     SessionMetadata,
@@ -16,6 +15,7 @@ from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.models import ToolOptions, ToolResult
+from zhenxun.services.ai.utils.runtime import ContextUtils
 
 _SLOT_LOCKS: dict[str, asyncio.Lock] = {}
 _GLOBAL_LOCK = asyncio.Lock()
@@ -45,119 +45,78 @@ class MemorySlotToolkit(BaseToolkit):
 
         shared_options = ToolOptions(silent=True)
 
-    default_instructions = """\
-## 📋 状态与规则面板 (Memory Slots / 中期记忆)
-该系统是你的「桌面便利贴」或「共享黑板」，用于保存你当前需要随时查阅的核心状态与全局规范。
+    _INTRO_TEXT = (
+        "## 📋 状态与规则面板 (Memory Slots / 中期记忆)\n"
+        "该系统是你的「桌面便利贴」或「共享黑板」，用于保存你当前需要随时查阅的核心状态与全局规范。\n\n"
+        "### 💡 核心机制\n"
+        "- 记忆槽内容会在每次对话时**直接注入提示词中**，你无需搜索即可看见。\n"
+        "- 槽位容量极其有限，仅用于维持最新的运行状态。\n\n"
+        "### 📝 职责说明\n"
+    )
+    _READ_GUIDE = (
+        "- **探索可用面板**：接手新任务时，可使用 `list_slots` "
+        "宏观查看当前存在哪些面板。\n"
+    )
+    _WRITE_GUIDE = (
+        "- **维护规范与进度**：如设定'沟通口吻'等规范（`update_slot`），"
+        "或记录'待办清单'（`append_slot`）。\n"
+        "- **保持精简**：内容过长时，主动将其归档到长期记忆，"
+        "再重新提炼或调用 `delete_slot` 删除。\n"
+    )
 
-### 💡 核心机制
-- 被保存在记忆槽中的内容（如果已置顶），会在每次对话时**直接注入到你的上下文提示词中**，你无需任何搜索即可看见。
-- 槽位容量极其有限，仅用于维持当前最新的运行状态。
+    default_instructions = _INTRO_TEXT + _READ_GUIDE + _WRITE_GUIDE
 
-### 📝 何时使用记忆槽？
-- **维护全局规则**：例如设定"用户整体偏好"、"沟通口吻"、"全局指导原则"等需要时刻遵守的规范（使用 `update_slot`）。
-- **追踪当前进度**：例如记录"待办事项清单"、"当前任务进度"、"上下文摘要"（使用 `append_slot` 列表或 `update_slot` 覆盖）。
+    @classmethod
+    def read_only(cls, **kwargs) -> "MemorySlotToolkit":
+        """[工厂方法] 创建一个只读模式的记忆槽工具箱。"""
+        kwargs["include"] = ["list_slots", "read_slot"]
+        kwargs.setdefault("instructions", cls._INTRO_TEXT + cls._READ_GUIDE)
+        return cls(**kwargs)
 
-### ⚙️ 操作规范
-1. **探索可用面板**：接手新任务时，可使用 `list_slots` 宏观查看当前存在哪些状态面板。
-2. **保持精简**：槽位有严格的字符数限制。当内容过长时，请主动将其归档到长期记忆后，重新提炼并覆盖槽位，或直接调用 `delete_slot` 删除不再需要的槽位。\
-"""  # noqa: E501
+    @classmethod
+    def write_only(cls, **kwargs) -> "MemorySlotToolkit":
+        """[工厂方法] 创建一个仅写入模式的记忆槽工具箱。"""
+        kwargs["exclude"] = ["list_slots", "read_slot"]
+        kwargs.setdefault("instructions", cls._INTRO_TEXT + cls._WRITE_GUIDE)
+        return cls(**kwargs)
 
     def __init__(
         self,
-        memory_config: MemoryConfig | None = None,
+        scopes: dict[str, Any] | None = None,
+        backend: Any = None,
         namespace: str | None = None,
         **kwargs: Any,
     ):
-        """
-        初始化中期记忆槽工具箱。
-
-        参数：
-            memory_config: 记忆系统的全局配置对象，为空则使用全局默认。
-            namespace: 当前隔离环境的命名空间。
-            kwargs: 其他透传给 BaseToolkit 的参数。
-        """
         super().__init__(**kwargs)
-        self.memory_config = memory_config
+        self.scopes = scopes or {}
+        self.backend = backend
         self._namespace = namespace
 
     def _get_runtime_meta_and_ctx(
         self, context: RunContext, scope_name: str | None = None
     ) -> tuple[Any, SessionMetadata]:
         ns = self._namespace or getattr(context.session, "namespace", "global")
-        slot_ctx = memory_manager.get_slot_context(self.memory_config, namespace=ns)
+        slot_ctx = self.backend or memory_manager.get_backend("slots", namespace=ns)
 
-        scope_builder = None
-        if (
-            self.memory_config
-            and self.memory_config.slots
-            and self.memory_config.slots.scopes
-        ):
-            scopes_dict = self.memory_config.slots.scopes
-            if not scope_name:
-                scope_builder = next(iter(scopes_dict.values()))
-            else:
-                scope_builder = scopes_dict.get(scope_name)
-
-        if not scope_builder:
-            scope_builder = getattr(self.memory_config, "base_isolation", None)
-            if not scope_builder:
-                from zhenxun.services.ai.context.memory.types import Isolation
-
-                scope_builder = Isolation.AGENT_USER()
-
-        selector = scope_builder.resolve(
-            deps=context.deps,
-            prefix="",
-            default_namespace=ns,
-            default_agent=context.run.agent_name,
+        scope_builder = (
+            self.scopes.get(scope_name)
+            if scope_name
+            else next(iter(self.scopes.values()), None)
         )
-        parts = selector.get_scope_parts()
-        all_scopes = {"/"}
-        current_path = ""
-        for part in parts:
-            current_path += f"/{part}"
-            all_scopes.add(current_path)
-        accessible_scopes = list(all_scopes)
-        accessible_scopes.sort(key=lambda x: len(x.split("/")))
-
-        scope_name_mapping = {}
-        if (
-            self.memory_config
-            and self.memory_config.slots
-            and self.memory_config.slots.scopes
-        ):
-            for name, builder in self.memory_config.slots.scopes.items():
-                sel = builder.resolve(
-                    deps=context.deps,
-                    prefix="",
-                    default_namespace=ns,
-                    default_agent=context.run.agent_name,
-                )
-                scope_name_mapping[sel.scope_prefix] = name
-
-        session_meta = SessionMetadata(
-            session_id=context.session_id or "default_session",
-            selector=selector,
-            scope_prefix=selector.scope_prefix,
-            accessible_scopes=accessible_scopes,
-            scope_name_mapping=scope_name_mapping,
+        session_meta = ContextUtils.build_session_meta(
+            context=context,
+            target_builder=scope_builder,
+            extra_scopes=self.scopes,
+            custom_namespace=self._namespace,
         )
         return slot_ctx, session_meta
 
     async def get_tools(self, context: RunContext | None = None) -> dict[str, BaseTool]:
         tools = await super().get_tools(context)
 
-        if (
-            not self.memory_config
-            or not self.memory_config.slots
-            or not self.memory_config.slots.enable
-        ):
+        if not self.scopes:
             return tools
-
-        scopes_dict = self.memory_config.slots.scopes
-        if not scopes_dict:
-            return tools
-        scope_keys = tuple(scopes_dict.keys())
+        scope_keys = tuple(self.scopes.keys())
 
         if len(scope_keys) > 1:
             ScopeType = Literal[scope_keys]
@@ -237,12 +196,7 @@ class MemorySlotToolkit(BaseToolkit):
         res = ["已创建的记忆槽列表："]
 
         show_scope = False
-        if (
-            self.memory_config
-            and self.memory_config.slots
-            and self.memory_config.slots.scopes
-            and len(self.memory_config.slots.scopes) > 1
-        ):
+        if len(self.scopes) > 1:
             show_scope = True
 
         for s in slots:

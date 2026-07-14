@@ -21,3 +21,5 @@ __all__ = [
     "WrapperCapability",
     "capability",
 ]
+
+from . import builtin  # noqa: F401

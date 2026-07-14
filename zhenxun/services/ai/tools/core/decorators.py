@@ -218,7 +218,7 @@ def tool(
             if require_prefix:
                 from zhenxun.utils.utils import infer_plugin_namespace
 
-                ns = infer_plugin_namespace(default="global")
+                ns = infer_plugin_namespace()
                 if ns and ns not in ("global", "unknown"):
                     if not tool_name.startswith(f"{ns}_"):
                         tool_name = f"{ns}_{tool_name}"

@@ -12,12 +12,12 @@ from zhenxun.services.ai.core.exceptions import (
     ControlFlowExit,
     InterventionHandledException,
 )
-from zhenxun.services.ai.core.messages import UsageInfo
-from zhenxun.services.ai.flow.base import BaseRunnable
+from zhenxun.services.ai.core.messages import PromptInput, UsageInfo
+from zhenxun.services.ai.flow.core.base import BaseRunnable
 from zhenxun.services.ai.run import AgentRunResult, RunContext
-from zhenxun.services.ai.run.models import AgentRunEnd, AgentRunError
+from zhenxun.services.ai.run.models import AgentRunEnd, AgentRunError, AgentTask
 from zhenxun.services.ai.run.ui import UIController
-from zhenxun.services.ai.utils.logger import log_agent as logger
+from zhenxun.services.ai.utils.logger import log_flow as logger
 from zhenxun.utils.message import MessageUtils
 from zhenxun.utils.platform import PlatformUtils
 
@@ -25,9 +25,9 @@ T_Deps = TypeVar("T_Deps", default=Any)
 T_Out = TypeVar("T_Out", default=str)
 
 
-class AgentRunner(Generic[T_Out]):
+class FlowRunner(Generic[T_Out]):
     """
-    智能体运行器。
+    执行流交互运行器。
     负责将大模型的纯净数据流包装为平台交互动作（发消息、UI渲染）。
     自带 ContextVars 隐式上下文提取魔法。
     """
@@ -63,7 +63,10 @@ class AgentRunner(Generic[T_Out]):
         return self.context.get_event()
 
     async def reply(
-        self, prompt: Any = None, reply_to: bool = False, **kwargs: Any
+        self,
+        prompt: PromptInput | AgentTask | None = None,
+        reply_to: bool = False,
+        **kwargs: Any,
     ) -> AgentRunResult[T_Out]:
         """交互式执行：将 Agent 运行过程中的工具调用状态和最终结果自动发送给用户。"""
         final_result = None

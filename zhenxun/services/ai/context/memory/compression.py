@@ -4,6 +4,7 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
+from zhenxun.services.ai.context.memory.models import MemoryConfig
 from zhenxun.services.ai.core.engine.token_counter import token_counter
 from zhenxun.services.ai.core.messages import (
     AudioPart,
@@ -386,7 +387,7 @@ class LLMSummarizerReducer(AbstractSummarizerReducer):
     ) -> LLMMessage | None:
         prompt_text = f"### 📋 [对话摘要任务]\n{self.summarization_prompt}\n\n"
         if prev_summary:
-            prompt_text += "####  önceki_summary (参考先前的快照):\n"
+            prompt_text += "####  prev_summary (参考先前的快照):\n"
             prompt_text += f"> {prev_summary}\n\n"
         prompt_text += "#### 待处理的历史消息流：\n"
         for m in to_summarize:
@@ -512,7 +513,7 @@ class CondenserPipeline:
 
     @classmethod
     def create_from_configs(
-        cls, memory_config: Any, model_name: str
+        cls, memory_config: MemoryConfig | None, model_name: str
     ) -> "CondenserPipeline":
         """基于全局和局部配置组装压缩管线工厂方法"""
         from zhenxun.services.ai.config import get_llm_config
@@ -602,7 +603,7 @@ class CondenserPipeline:
 
 class MemoryPolicy:
     """
-    记忆策略工厂 (Strategy Factory Facade)。
+    记忆策略工厂。
     为开发者提供开箱即用的上下文压缩管线组装方案。
     """
 

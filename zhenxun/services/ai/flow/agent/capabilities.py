@@ -1,24 +1,108 @@
 import asyncio
 from typing import Any, cast
 
-from zhenxun.services.ai.capabilities import AbstractCapability
+from zhenxun.services.ai.capabilities import AbstractCapability, WrapRunHandler
 from zhenxun.services.ai.capabilities.base import CapabilityOrdering
 from zhenxun.services.ai.core.engine.structured_parser import (
     BaseOutputProcessor,
-    SubmitFinalResultExecutable,
 )
-from zhenxun.services.ai.core.exceptions import UpstreamServerException
+from zhenxun.services.ai.core.exceptions import (
+    ControlFlowExit,
+    ModelRetry,
+    SchemaParseError,
+    UpstreamServerException,
+)
 from zhenxun.services.ai.core.messages import TaskLifecycleEvent
+from zhenxun.services.ai.core.models import ToolDefinition
 from zhenxun.services.ai.core.options import BaseOutputDefinition, ToolOutput
-from zhenxun.services.ai.guardrails import parse_guardrails
+from zhenxun.services.ai.guardrails import (
+    BaseGuardrail,
+    GuardrailSource,
+    parse_guardrails,
+)
 from zhenxun.services.ai.run import AgentRunResult, AgentTask, RunContext
+from zhenxun.services.ai.tools.core.tool import BaseTool
+from zhenxun.services.ai.tools.models import StructuredSubmissionResult, ToolResult
 from zhenxun.services.ai.utils.logger import log_agent as logger
+
+
+class SubmitFinalResultExecutable(BaseTool):
+    """
+    动态生成的提交最终结果工具。
+    用于将大模型的结构化输出拦截并终止 AgentExecutor 的循环。
+    """
+
+    def __init__(
+        self,
+        output_processor: BaseOutputProcessor,
+        guardrails: list[BaseGuardrail] | None = None,
+    ):
+        """
+        初始化提交最终结果的动态执行工具。
+
+        参数:
+            output_processor: 绑定的结构化输出处理器，用于验证提交的最终结果。
+            guardrails: 用于在结果输出前进行安全合规拦截的护栏中间件列表，默认 None。
+        """
+        super().__init__(
+            name="submit_final_result",
+            description=(
+                "当你完成所有必要的调查 and 思考后，"
+                "必须且只能调用此工具来提交最终的结构化结果。"
+                "提交后任务将立刻结束。"
+            ),
+        )
+        self.output_processor = output_processor
+        self.guardrails = guardrails or []
+
+    async def get_definition(
+        self, context: RunContext | None = None
+    ) -> ToolDefinition | None:
+        if getattr(self, "_dynamic_def", None) is not None:
+            return self._dynamic_def
+        schema = self.output_processor.get_json_schema()
+        return ToolDefinition(
+            name=self.name,
+            description=self.description,
+            parameters=schema,
+        )
+
+    async def execute(self, context: RunContext | None = None, **kwargs) -> ToolResult:
+        parse_target = kwargs
+        if isinstance(kwargs, dict):
+            if "kwargs" in kwargs and len(kwargs) == 1:
+                parse_target = kwargs["kwargs"]
+            elif "result" in kwargs and len(kwargs) == 1:
+                parse_target = kwargs["result"]
+
+        try:
+            json_str = __import__("json").dumps(parse_target, ensure_ascii=False)
+            final_obj = await self.output_processor.validate_and_parse(
+                json_str, context=context
+            )
+            from zhenxun.services.ai.guardrails import GuardrailPipeline
+
+            pipeline = GuardrailPipeline(self.guardrails)
+            json_str, final_obj = await pipeline.run_output_pipeline(
+                json_str, final_obj, context
+            )
+
+            return StructuredSubmissionResult(
+                output="结构化数据已成功提交", parsed_obj=final_obj
+            )
+        except ControlFlowExit as e:
+            raise e
+        except ModelRetry as e:
+            raise e
+        except Exception as e:
+            error_msg = f"系统捕获到解析异常：\n{e}"
+            raise SchemaParseError(error_msg)
 
 
 class OutputValidationCapability(AbstractCapability):
     """输出拦截与校验能力组件 (支持纯文本及结构化护栏)"""
 
-    def get_ordering(self) -> Any:
+    def get_ordering(self) -> CapabilityOrdering | None:
         from zhenxun.services.ai.capabilities.builtin import (
             ReflexionCapability,
         )
@@ -27,8 +111,8 @@ class OutputValidationCapability(AbstractCapability):
 
     def __init__(
         self,
-        output_type: Any | None = None,
-        guardrails: list[Any] | None = None,
+        output_type: type[Any] | BaseOutputDefinition | None = None,
+        guardrails: list[GuardrailSource] | None = None,
         raw_schema: dict[str, Any] | None = None,
     ):
         self.output_type = output_type
@@ -83,7 +167,7 @@ class OutputValidationCapability(AbstractCapability):
             ]
         return []
 
-    async def get_tools(self, context: RunContext) -> list[Any]:
+    async def get_tools(self, context: RunContext) -> list[BaseTool]:
         """动态挂载提交最终结果的工具"""
         if self.submit_tool:
             return [self.submit_tool]
@@ -95,7 +179,9 @@ class OutputValidationCapability(AbstractCapability):
         llm_context.request.extra["guardrails"] = self.guardrails
         return await handler(llm_context)
 
-    async def wrap_run(self, context: RunContext, handler: Any) -> AgentRunResult[Any]:
+    async def wrap_run(
+        self, context: RunContext, handler: WrapRunHandler
+    ) -> AgentRunResult[Any]:
         """运行结束后，校验是否成功提取了结构化数据"""
         result = await handler()
         if self.output_type is not None or self.raw_schema is not None:
@@ -117,7 +203,9 @@ class TaskTrackingCapability(AbstractCapability):
         self.task = task
         self.agent_name = agent_name
 
-    async def wrap_run(self, context: RunContext, handler: Any) -> AgentRunResult[Any]:
+    async def wrap_run(
+        self, context: RunContext, handler: WrapRunHandler
+    ) -> AgentRunResult[Any]:
         """任务生命周期追踪"""
 
         task_name = self.task.name or self.task.id[:8]

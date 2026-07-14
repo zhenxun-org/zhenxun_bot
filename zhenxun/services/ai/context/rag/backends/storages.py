@@ -11,6 +11,10 @@ from zhenxun.services.ai.context.rag.models import (
     SearchResult,
 )
 from zhenxun.services.ai.context.rag.retrieval import FilterEvaluator
+from zhenxun.services.ai.context.rag.utils import (
+    InMemoryScorer,
+    normalize_vector,
+)
 from zhenxun.services.ai.utils.logger import log_rag as logger
 from zhenxun.services.ai.utils.scope import ScopeSelector
 from zhenxun.services.db_context import Model
@@ -24,9 +28,7 @@ class StorageBackend(Protocol):
         """保存或更新数据块"""
         ...
 
-    async def search(
-        self, query: QueryRequest, scopes: list[str] | None = None
-    ) -> list[SearchResult]:
+    async def search(self, request: QueryRequest) -> list[SearchResult]:
         """按向量和前缀检索数据块"""
         ...
 
@@ -49,22 +51,6 @@ class StorageBackend(Protocol):
         ...
 
 
-def normalize_vector(vec: list[float] | np.ndarray) -> np.ndarray:
-    """将一维向量转化为 float32 数组并进行 L2 归一化"""
-    v = np.array(vec, dtype=np.float32)
-    norm = np.linalg.norm(v)
-    if norm == 0:
-        return v
-    return v / norm
-
-
-def normalize_matrix(mat: np.ndarray) -> np.ndarray:
-    """将二维矩阵的每一行进行 L2 归一化"""
-    norms = np.linalg.norm(mat, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    return mat / norms
-
-
 class DictStorageBackend(StorageBackend):
     """基于内存字典的轻量级纯净 RAG 存储实现"""
 
@@ -83,62 +69,36 @@ class DictStorageBackend(StorageBackend):
             else:
                 self._vectors.pop(r.id, None)
 
-    async def search(
-        self, query: QueryRequest, scopes: list[str] | None = None
-    ) -> list[SearchResult]:
+    async def search(self, request: QueryRequest) -> list[SearchResult]:
         candidate_ids = []
         for record in self._records.values():
-            if scopes is not None:
-                if record.metadata.get("scope", "/") not in scopes:
+            if request.scopes is not None:
+                if record.metadata.get("scope", "/") not in request.scopes:
                     continue
-            if not FilterEvaluator.evaluate(record.metadata, query.metadata_filters):
+            if not FilterEvaluator.evaluate(record.metadata, request.metadata_filters):
                 continue
-            if not query.embedding and query.text and query.text not in record.content:
+            if (
+                not request.embedding
+                and request.text
+                and request.text not in record.content
+            ):
                 continue
             candidate_ids.append(record.id)
 
         if not candidate_ids:
             return []
 
-        results = []
-        if query.search_type == "sparse":
-            import jieba
+        records = [self._records[r_id] for r_id in candidate_ids]
 
-            tokens = set(jieba.lcut_for_search(query.text.lower()))
-            for r_id in candidate_ids:
-                record = self._records[r_id]
-                content = record.content.lower()
-                matched_count = sum(1 for t in tokens if t in content)
-                if matched_count > 0:
-                    score = matched_count / len(tokens)
-                    results.append(SearchResult(record=record, score=score))
-        elif query.search_type == "dense" and query.embedding:
-            q_vec = normalize_vector(query.embedding)
-            valid_ids = [r_id for r_id in candidate_ids if r_id in self._vectors]
-
-            if valid_ids:
-                try:
-                    mat = np.array([self._vectors[r_id] for r_id in valid_ids])
-                    scores = mat @ q_vec
-                    for r_id, score in zip(valid_ids, scores):
-                        results.append(
-                            SearchResult(record=self._records[r_id], score=float(score))
-                        )
-                except ValueError as e:
-                    logger.warning(
-                        "⚠️ DictStorage 中缓存的向量维度与当前查询维度不匹配，"
-                        f"跳过向量检索。原因: {e}"
-                    )
-
-            missing_ids = [r_id for r_id in candidate_ids if r_id not in self._vectors]
-            for r_id in missing_ids:
-                results.append(SearchResult(record=self._records[r_id], score=0.1))
+        if request.search_type == "sparse":
+            results = InMemoryScorer.calculate_sparse_scores(request.text, records)
+        elif request.search_type == "dense" and request.embedding:
+            results = InMemoryScorer.calculate_dense_scores(request.embedding, records)
         else:
-            for r_id in candidate_ids:
-                results.append(SearchResult(record=self._records[r_id], score=0.1))
+            results = [SearchResult(record=r, score=0.1) for r in records]
 
         results.sort(key=lambda x: x.score, reverse=True)
-        return results[: query.limit]
+        return results[: request.limit]
 
     async def update(self, record: BaseRecord) -> None:
         if record.id in self._records:
@@ -212,94 +172,48 @@ class TortoiseStorageBackend(StorageBackend):
                 },
             )
 
-    async def search(
-        self, query: QueryRequest, scopes: list[str] | None = None
-    ) -> list[SearchResult]:
+    async def search(self, request: QueryRequest) -> list[SearchResult]:
         query_orm = self.model_class.all()
-        if scopes is not None:
-            query_orm = query_orm.filter(scope__in=scopes)
+        if request.scopes is not None:
+            query_orm = query_orm.filter(scope__in=request.scopes)
 
-        if query.search_type == "sparse" and query.text:
+        if request.search_type == "sparse" and request.text:
             import jieba
             from tortoise.expressions import Q
 
             tokens = [
-                t for t in jieba.lcut_for_search(query.text) if len(t.strip()) > 1
-            ] or [query.text]
+                t for t in jieba.lcut_for_search(request.text) if len(t.strip()) > 1
+            ] or [request.text]
             q_expr = Q()
             for token in tokens:
                 q_expr |= Q(content__icontains=token)
             query_orm = query_orm.filter(q_expr)
-        elif query.search_type == "dense" and not query.embedding and query.text:
-            query_orm = query_orm.filter(content__icontains=query.text)
+        elif request.search_type == "dense" and not request.embedding and request.text:
+            query_orm = query_orm.filter(content__icontains=request.text)
 
         rows = await query_orm
 
         valid_rows = []
         for row in rows:
             row_meta = row.meta_data if isinstance(row.meta_data, dict) else {}
-            if not FilterEvaluator.evaluate(row_meta, query.metadata_filters):
+            if not FilterEvaluator.evaluate(row_meta, request.metadata_filters):
                 continue
             valid_rows.append(row)
 
         if not valid_rows:
             return []
 
-        results = []
-        if query.search_type == "sparse":
-            import jieba
+        records = [self._to_base_record(row) for row in valid_rows]
 
-            tokens = set(jieba.lcut_for_search(query.text.lower()))
-            for row in valid_rows:
-                content = row.content.lower()
-                matched_count = sum(1 for t in tokens if t in content)
-                score = matched_count / len(tokens) if tokens else 0.1
-                results.append(
-                    SearchResult(record=self._to_base_record(row), score=score)
-                )
-        elif query.search_type == "dense" and query.embedding:
-            q_vec = normalize_vector(query.embedding)
-            vec_rows = []
-            missing_rows = []
-
-            for row in valid_rows:
-                if isinstance(row.embedding, list):
-                    vec_rows.append(row)
-                else:
-                    missing_rows.append(row)
-
-            if vec_rows:
-                try:
-                    raw_mat = np.array(
-                        [r.embedding for r in vec_rows], dtype=np.float32
-                    )
-                    norm_mat = normalize_matrix(raw_mat)
-                    scores = norm_mat @ q_vec
-
-                    for row, score in zip(vec_rows, scores):
-                        results.append(
-                            SearchResult(
-                                record=self._to_base_record(row), score=float(score)
-                            )
-                        )
-                except ValueError as e:
-                    logger.warning(
-                        "⚠️ 数据库中缓存的向量维度与当前模型查询维度不匹配，"
-                        f"已安全跳过向量检索(降级为稀疏匹配)。原因: {e}"
-                    )
-
-            for row in missing_rows:
-                results.append(
-                    SearchResult(record=self._to_base_record(row), score=0.1)
-                )
+        if request.search_type == "sparse":
+            results = InMemoryScorer.calculate_sparse_scores(request.text, records)
+        elif request.search_type == "dense" and request.embedding:
+            results = InMemoryScorer.calculate_dense_scores(request.embedding, records)
         else:
-            for row in valid_rows:
-                results.append(
-                    SearchResult(record=self._to_base_record(row), score=0.1)
-                )
+            results = [SearchResult(record=r, score=0.1) for r in records]
 
         results.sort(key=lambda x: x.score, reverse=True)
-        return results[: query.limit]
+        return results[: request.limit]
 
     async def update(self, record: BaseRecord) -> None:
         await self.model_class.filter(id=record.id).update(
@@ -386,50 +300,50 @@ class QdrantStorageBackend(StorageBackend):
             )
         await self.client.upsert(collection_name=self.collection_name, points=points)
 
-    async def search(
-        self, query: QueryRequest, scopes: list[str] | None = None
-    ) -> list[SearchResult]:
-        if query.search_type == "dense" and not query.embedding:
+    async def search(self, request: QueryRequest) -> list[SearchResult]:
+        if request.search_type == "dense" and not request.embedding:
             return []
-        if query.embedding:
-            await self._ensure_collection(len(query.embedding))
+        if request.embedding:
+            await self._ensure_collection(len(request.embedding))
 
         from qdrant_client.models import FieldCondition, Filter, MatchText, MatchValue
 
         must_conditions = []
 
-        if scopes is not None:
+        if request.scopes is not None:
             try:
                 from qdrant_client.models import MatchAny
 
                 must_conditions.append(
-                    FieldCondition(key="metadata.scope", match=MatchAny(any=scopes))
+                    FieldCondition(
+                        key="metadata.scope", match=MatchAny(any=request.scopes)
+                    )
                 )
             except ImportError:
                 scope_conditions = [
                     FieldCondition(key="metadata.scope", match=MatchValue(value=s))
-                    for s in scopes
+                    for s in request.scopes
                 ]
                 must_conditions.append(Filter(should=scope_conditions))
 
-        if query.metadata_filters:
-            for k, v in query.metadata_filters.items():
+        if request.metadata_filters:
+            for k, v in request.metadata_filters.items():
                 must_conditions.append(
                     FieldCondition(key=f"metadata.{k}", match=MatchValue(value=v))
                 )
 
-        if query.search_type == "sparse":
+        if request.search_type == "sparse":
             must_conditions.append(
-                FieldCondition(key="content", match=MatchText(text=query.text))
+                FieldCondition(key="content", match=MatchText(text=request.text))
             )
 
         query_filter = Filter(must=must_conditions) if must_conditions else None
 
-        if query.search_type == "sparse":
+        if request.search_type == "sparse":
             results = await self.client.scroll(
                 collection_name=self.collection_name,
                 scroll_filter=query_filter,
-                limit=query.limit,
+                limit=request.limit,
                 with_payload=True,
             )
             return [
@@ -446,8 +360,8 @@ class QdrantStorageBackend(StorageBackend):
 
         results = await self.client.search(  # type: ignore
             collection_name=self.collection_name,
-            query_vector=query.embedding,
-            limit=query.limit,
+            query_vector=request.embedding,
+            limit=request.limit,
             query_filter=query_filter,
         )
 
@@ -559,27 +473,25 @@ class LanceDBStorageBackend(StorageBackend):
         else:
             self.db.open_table(self.table_name).add(data)
 
-    async def search(
-        self, query: QueryRequest, scopes: list[str] | None = None
-    ) -> list[SearchResult]:
+    async def search(self, request: QueryRequest) -> list[SearchResult]:
         if self.table_name not in self.db.table_names():
             return []
-        if query.search_type == "dense" and not query.embedding:
+        if request.search_type == "dense" and not request.embedding:
             return []
 
         tbl = self.db.open_table(self.table_name)
-        if query.search_type == "sparse":
+        if request.search_type == "sparse":
             try:
                 results = (
-                    tbl.search(query.text, query_type="fts")
-                    .limit(query.limit)
+                    tbl.search(request.text, query_type="fts")
+                    .limit(request.limit)
                     .to_list()
                 )
             except Exception as e:
                 logger.warning(f"LanceDB FTS 检索失败(可能是由于尚未创建FTS索引): {e}")
                 return []
         else:
-            results = tbl.search(query.embedding).limit(query.limit).to_list()
+            results = tbl.search(request.embedding).limit(request.limit).to_list()
 
         import ast
 

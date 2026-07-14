@@ -1,16 +1,20 @@
 from abc import ABC
 from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
+import json
+import re
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel
 
+from zhenxun.services.ai.capabilities import AbstractCapability
 from zhenxun.services.ai.core.exceptions import AbortException
 from zhenxun.services.ai.core.messages import AgentMessage, LLMMessage
 from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent
 from zhenxun.services.ai.core.templates import PromptTemplate
 from zhenxun.services.ai.flow.agent.agent import Agent, ToolSource
 from zhenxun.services.ai.flow.agent.models import AgentConfig
-from zhenxun.services.ai.run import AgentTask, RunContext
+from zhenxun.services.ai.flow.core.base import BaseRunnable
+from zhenxun.services.ai.run import RunContext, RunIntent
 from zhenxun.services.ai.run.blackboard import BlackboardManager
 from zhenxun.services.ai.tools.bridges.delegate import DelegateTool
 from zhenxun.services.ai.tools.providers.builtin.blackboard import BlackboardToolkit
@@ -25,7 +29,7 @@ from .models import (
     TeamAction,
     Transition,
 )
-from .router import BaseRouter
+from .router import BaseRouter, ChainRouter, FunctionRouter, LLMRouter
 from .task_tools import TaskPlanningToolkit
 
 if TYPE_CHECKING:
@@ -50,10 +54,16 @@ class BaseTeamStrategy(ABC):
         template = self.custom_prompt or self.default_system_prompt
         return PromptTemplate(template).render(**kwargs)
 
+    def get_member_capabilities(
+        self, team: "Team", member: BaseRunnable
+    ) -> list[AbstractCapability]:
+        """获取派发给子成员时需要动态注入的能力组件"""
+        return []
+
     async def generate_plan(
         self,
         team: "Team",
-        prompt: str | AgentTask | None,
+        intent: RunIntent,
         context: RunContext,
         **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
@@ -66,36 +76,39 @@ class BaseTeamStrategy(ABC):
         2. 使用 `yield FinishAction(...)` 结束团队协作。
 
         """
-        yield FinishAction(
-            result="The Strategy has not implemented generate_plan() yet."
-        )
+        yield FinishAction(result="该策略尚未实现 generate_plan() 方法。")
 
     def _build_leader_agent(
-        self, team: "Team", name: str, instruction: str, tools: list[ToolSource]
+        self,
+        team: "Team",
+        role_name: str,
+        extra_instruction: str = "",
+        extra_tools: list[ToolSource] | None = None,
     ) -> Agent:
         """
-        统一的团队 Leader / Planner 装配工厂。
-        自动处理无状态配置以及 HITL 状态继承。
+        统一的团队 Leader / Planner / Broadcaster 装配工厂。
+        自动合并默认指令、追加指令、基类工具和策略专属工具，
+        并处理无状态配置以及 HITL 状态继承。
         """
+        instruction = self.get_prompt()
+        if extra_instruction:
+            instruction += f"\n\n{extra_instruction}"
+
+        tools = getattr(self, "leader_tools", []).copy()
+        if extra_tools:
+            tools.extend(extra_tools)
+
         leader_config = AgentConfig(
             stateless=team.runtime_config.stateless if team.runtime_config else True,
             enable_hitl=getattr(team.runtime_config, "leader_enable_hitl", False),
         )
 
-        target_model = getattr(self, "leader_model", None) or getattr(
-            team, "model", None
-        )
-        if not target_model:
-            for m in team.members:
-                if m_model := getattr(m, "model_name", None) or getattr(
-                    m, "model", None
-                ):
-                    target_model = m_model
-                    break
+        target_model = getattr(self, "leader_model", None) or team.default_model
 
         return Agent(
-            name=name,
+            name=f"{team.name}_{role_name}",
             instruction=instruction,
+            persona=team.persona,
             model=target_model,
             tools=tools,
             config=leader_config,
@@ -107,7 +120,7 @@ class RouteStrategy(BaseTeamStrategy):
 
     def __init__(
         self,
-        state_flow: "Mapping[str, Sequence[str | Any]] | Callable | None" = None,
+        state_flow: Mapping[str, Sequence[str | Any]] | Callable | None = None,
         selector_func: Callable[..., str | None] | None = None,
         router: BaseRouter | None = None,
         leader_model: str | None = None,
@@ -148,17 +161,79 @@ class RouteStrategy(BaseTeamStrategy):
         else:
             self.state_flow = state_flow
 
+    def get_member_capabilities(
+        self, team: "Team", member: BaseRunnable
+    ) -> list[AbstractCapability]:
+        from .capabilities import TeamRoutingCapability
+
+        return [
+            TeamRoutingCapability(
+                team_name=team.name,
+                members=team.members,
+                state_flow=self.state_flow,
+                max_handoffs=self.max_handoffs,
+            )
+        ]
+
+    def _build_handoff_history(
+        self, handoff_reason: str, context_data: Any
+    ) -> list[AgentMessage]:
+        """将移交数据格式化为系统的引导历史消息"""
+        handoff_history_messages = []
+        upstream_info = []
+        if handoff_reason:
+            upstream_info.append(f"【移交说明】\n{handoff_reason}")
+        if context_data:
+            if isinstance(context_data, dict):
+                formatted_data = json.dumps(context_data, ensure_ascii=False, indent=2)
+                upstream_info.append(
+                    f"【结构化上下文载荷】\n```json\n{formatted_data}\n```"
+                )
+            else:
+                upstream_info.append(f"【核心上下文数据】\n{context_data}")
+
+        if combined_info := "\n\n".join(upstream_info):
+            handoff_msg = LLMMessage.system(
+                f"### 🔄 [来自上游节点的移交数据]\n{combined_info}"
+            )
+            handoff_history_messages.append(handoff_msg)
+        return handoff_history_messages
+
+    def _check_fast_route(
+        self, current_target: str, output_str: str
+    ) -> tuple[bool, str]:
+        """检查并执行快速硬路由，返回(是否触发路由, 新目标名称)"""
+        if (
+            not isinstance(self.state_flow, dict)
+            or current_target not in self.state_flow
+        ):
+            return False, current_target
+
+        for t in self.state_flow[current_target]:
+            if trigger_regex := getattr(t, "trigger_regex", None):
+                if re.search(trigger_regex, output_str):
+                    return True, getattr(t, "target", current_target)
+
+            if trigger_func := getattr(t, "trigger_func", None):
+                try:
+                    res = trigger_func(output_str)
+                    if res:
+                        if isinstance(res, str):
+                            return True, res
+                        return True, getattr(t, "target", current_target)
+                except Exception:
+                    pass
+        return False, current_target
+
     async def generate_plan(
         self,
         team: "Team",
-        prompt: str | AgentTask | None,
+        intent: RunIntent,
         context: RunContext,
         **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
         router = self.router
         if not router:
-            from .router import ChainRouter, FunctionRouter, LLMRouter
-
             routers = []
             if self.selector_func:
                 routers.append(FunctionRouter(self.selector_func))
@@ -166,7 +241,7 @@ class RouteStrategy(BaseTeamStrategy):
                 LLMRouter(
                     team_name=team.name,
                     members=team.members,
-                    leader_model=self.leader_model,
+                    leader_model=self.leader_model or team.default_model,
                     leader_tools=self.leader_tools,
                     state_flow=self.state_flow,
                     runtime_config=getattr(team, "runtime_config", None),
@@ -182,7 +257,7 @@ class RouteStrategy(BaseTeamStrategy):
 
         logger.debug(f"🛣️ '{team.name}' 正在获取初始路由决策...")
 
-        decision = await router.route(context, [], prompt)
+        decision = await router.route(context, [], intent)
         if not decision:
             logger.warning(f"🚨 Team '{team.name}' 的所有路由策略未能命中目标。")
             raise AbortException(
@@ -210,33 +285,13 @@ class RouteStrategy(BaseTeamStrategy):
                     display="🚨 团队协作陷入死循环，已被系统强制中断。",
                 )
 
-            handoff_history_messages: list[AgentMessage] = []
-            upstream_info = []
-            if handoff_reason:
-                upstream_info.append(f"【移交说明】\n{handoff_reason}")
-            if context_data:
-                if isinstance(context_data, dict):
-                    import json
-
-                    formatted_data = json.dumps(
-                        context_data, ensure_ascii=False, indent=2
-                    )
-                    upstream_info.append(
-                        f"【结构化上下文载荷】\n```json\n{formatted_data}\n```"
-                    )
-                else:
-                    upstream_info.append(f"【核心上下文数据】\n{context_data}")
-            combined_info = "\n\n".join(upstream_info)
-
-            if combined_info:
-                handoff_msg = LLMMessage.system(
-                    f"### 🔄 [来自上游节点的移交数据]\n{combined_info}"
-                )
-                handoff_history_messages.append(handoff_msg)
+            handoff_history_messages = self._build_handoff_history(
+                handoff_reason, context_data
+            )
 
             run_result = yield CallAction(
                 agent=current_target,
-                task=prompt or "",
+                task=intent.original_input or "",
                 history=handoff_history_messages,
                 kwargs=kwargs,
             )
@@ -249,32 +304,11 @@ class RouteStrategy(BaseTeamStrategy):
 
             output_str = str(run_result.output)
 
-            fast_routed = False
-            if isinstance(self.state_flow, dict) and current_target in self.state_flow:
-                for t in self.state_flow[current_target]:
-                    trigger_regex = getattr(t, "trigger_regex", None)
-                    if trigger_regex:
-                        import re
-
-                        if re.search(trigger_regex, output_str):
-                            current_target = getattr(t, "target", current_target)
-                            handoff_reason = ""
-                            context_data = output_str
-                            fast_routed = True
-                            break
-                    trigger_func = getattr(t, "trigger_func", None)
-                    if trigger_func:
-                        try:
-                            if trigger_func(output_str):
-                                current_target = getattr(t, "target", current_target)
-                                handoff_reason = ""
-                                context_data = output_str
-                                fast_routed = True
-                                break
-                        except Exception:
-                            pass
-
+            fast_routed, new_target = self._check_fast_route(current_target, output_str)
             if fast_routed:
+                current_target = new_target
+                handoff_reason = ""
+                context_data = output_str
                 logger.debug(
                     f"🛣️ **路由决策**: 委派给专员 👨💼`{current_target}`"
                     "(系统拦截：正则/函数状态流发生转移)"
@@ -317,16 +351,13 @@ class CoordinateStrategy(BaseTeamStrategy):
     async def generate_plan(
         self,
         team: "Team",
-        prompt: str | AgentTask | None,
+        intent: RunIntent,
         context: RunContext,
         **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
         delegation_tools = []
         for m in team.members:
-            persona = getattr(m, "persona", None)
-            desc = getattr(m, "description", "") or "处理节点"
-            if persona and not isinstance(persona, dict):
-                desc = f"角色：{persona.role}，目标：{persona.goal}"
+            desc = m.profile_summary
 
             delegation_tools.append(
                 DelegateTool(
@@ -337,14 +368,10 @@ class CoordinateStrategy(BaseTeamStrategy):
                 )
             )
 
-        leader_tools = self.leader_tools.copy()
-        leader_tools.extend(delegation_tools)
-
         leader_agent = self._build_leader_agent(
             team=team,
-            name=f"{team.name}_Leader",
-            instruction=self.get_prompt(),
-            tools=leader_tools,
+            role_name="Leader",
+            extra_tools=delegation_tools,
         )
 
         logger.debug(f"✨ **团队 [{team.name}] Leader** 正在汇总各方报告...")
@@ -358,7 +385,9 @@ class CoordinateStrategy(BaseTeamStrategy):
 
         logger.debug(f"👨💼 [CoordinateStrategy] '{team.name}' 正在启动协调推理循环...")
 
-        leader_res = yield CallAction(agent=leader_agent, task=prompt or "")
+        leader_res = yield CallAction(
+            agent=leader_agent, task=intent.original_input or ""
+        )
 
         yield FinishAction(result=leader_res)
 
@@ -391,13 +420,11 @@ class BroadcastStrategy(BaseTeamStrategy):
     async def generate_plan(
         self,
         team: "Team",
-        prompt: str | AgentTask | None,
+        intent: RunIntent,
         context: RunContext,
         **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
-        task_desc_str = (
-            prompt.description if isinstance(prompt, AgentTask) else (prompt or "")
-        )
+        task_desc_str = intent.text
 
         await context.run.emit(
             ToolStreamChunkEvent(
@@ -406,7 +433,10 @@ class BroadcastStrategy(BaseTeamStrategy):
             )
         )
 
-        actions = [CallAction(agent=m.name, task=task_desc_str) for m in team.members]
+        actions = [
+            CallAction(agent=m.name, task=intent.original_input or "")
+            for m in team.members
+        ]
         results = yield ConcurrentCallAction(actions=actions)
 
         await context.run.emit(
@@ -430,9 +460,7 @@ class BroadcastStrategy(BaseTeamStrategy):
 
         leader_agent = self._build_leader_agent(
             team=team,
-            name=f"{team.name}_Leader",
-            instruction=self.get_prompt(),
-            tools=self.leader_tools,
+            role_name="Leader",
         )
 
         leader_res = yield CallAction(agent=leader_agent, task=synthesize_prompt)
@@ -497,33 +525,36 @@ class TaskStrategy(BaseTeamStrategy):
                 schema=schema, initial_state=initial_state
             )
             self.bb_toolkit = BlackboardToolkit(self.blackboard)
-            self.leader_tools.append(self.bb_toolkit)
+
+    def get_member_capabilities(
+        self, team: "Team", member: BaseRunnable
+    ) -> list[AbstractCapability]:
+        caps = super().get_member_capabilities(team, member)
+        if self.bb_toolkit:
+
+            class BlackboardInjectCapability(AbstractCapability):
+                def __init__(self, tk):
+                    self.toolkit = tk
+
+                async def get_tools(self, context: RunContext) -> list[Any]:
+                    return [self.toolkit]
+
+            caps.append(BlackboardInjectCapability(self.bb_toolkit))
+        return caps
 
     async def generate_plan(
         self,
         team: "Team",
-        prompt: str | AgentTask | None,
+        intent: RunIntent,
         context: RunContext,
         **kwargs,
     ) -> AsyncGenerator[TeamAction, Any]:
         if self.blackboard is not None:
             context.session.blackboard = self.blackboard
 
-        if self.bb_toolkit:
-            for m in team.members:
-                if not hasattr(m, "tool_definitions"):
-                    setattr(m, "tool_definitions", [])
-
-                m_tools = getattr(m, "tool_definitions")
-                if self.bb_toolkit not in m_tools:
-                    m_tools.append(self.bb_toolkit)
-
         member_infos = []
         for m in team.members:
-            desc = getattr(m, "description", "") or "处理节点"
-            persona = getattr(m, "persona", None)
-            if persona and not isinstance(persona, dict):
-                desc = f"角色：{persona.role}，目标：{persona.goal}"
+            desc = m.profile_summary
             member_infos.append(
                 f'<member id="{m.name}" name="{m.name}">\n'
                 f"  Description: {desc}\n"
@@ -532,18 +563,11 @@ class TaskStrategy(BaseTeamStrategy):
 
         members_xml = "<team_members>\n" + "\n".join(member_infos) + "\n</team_members>"
 
-        final_instruction = self.get_prompt() + "\n\n" + members_xml
-
-        task_toolkit = TaskPlanningToolkit(members=team.members)
-
-        leader_tools = self.leader_tools.copy()
-        leader_tools.append(task_toolkit)
-
         leader_agent = self._build_leader_agent(
             team=team,
-            name=f"{team.name}_Planner",
-            instruction=final_instruction,
-            tools=leader_tools,
+            role_name="Planner",
+            extra_instruction=members_xml,
+            extra_tools=[TaskPlanningToolkit(members=team.members)],
         )
 
         logger.debug(
@@ -555,7 +579,7 @@ class TaskStrategy(BaseTeamStrategy):
         board = cast(TaskBoardState, context.session.shared_state["__task_board__"])
 
         max_iterations = self.max_iterations
-        planner_prompt = prompt
+        planner_prompt = intent.original_input
 
         for iteration in range(max_iterations):
             if board.is_goal_complete:
@@ -567,12 +591,7 @@ class TaskStrategy(BaseTeamStrategy):
             if not available_tasks:
                 if iteration > 0:
                     board_str = board.render_board_to_string()
-                    goal_str = getattr(prompt, "description", None) or (
-                        str(prompt) if prompt else ""
-                    )
-                    expected_out = getattr(prompt, "expected_output", None)
-                    if expected_out:
-                        goal_str += f"\n\n### 🎯 [预期产出要求]\n{expected_out}"
+                    goal_str = intent.text
 
                     planner_prompt = f"""### 🎯 用户的终极目标 (Original Goal)
 {goal_str}
@@ -637,8 +656,6 @@ class TaskStrategy(BaseTeamStrategy):
                         )
 
                 if task.metadata:
-                    import json
-
                     meta_str = json.dumps(task.metadata, ensure_ascii=False)
                     task_prompt += f"\n\n### ⚙️ 附加系统元数据约束：\n{meta_str}"
 

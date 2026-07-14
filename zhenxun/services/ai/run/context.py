@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Generic, cast, get_origin
 from typing_extensions import TypeVar
 import uuid
 
+if TYPE_CHECKING:
+    from zhenxun.services.ai.context.memory.types import SessionMetadata
+
 from nonebot.adapters import Bot, Event
 from nonebot.matcher import Matcher, current_bot, current_event, current_matcher
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,15 +22,11 @@ from zhenxun.services.ai.core.models import CancellationToken
 from zhenxun.services.ai.core.protocols.tool import ToolExecutable
 from zhenxun.services.ai.core.stream_events import AgentStreamEvent, EventBus
 from zhenxun.services.ai.utils import ContextUtils
-from zhenxun.services.ai.utils.scope import ScopeSelector
 from zhenxun.services.scheduler.types import ScheduleContext
 from zhenxun.utils.platform import PlatformUtils
 from zhenxun.utils.utils import infer_plugin_namespace
 
 from .blackboard import BlackboardManager
-
-if TYPE_CHECKING:
-    from zhenxun.services.ai.context.memory.facades import AgentSessionFacade
 
 AgentDepsT = TypeVar("AgentDepsT", default=Any)
 """泛型类型变量：外部环境依赖对象 (Agent Dependencies)。"""
@@ -114,31 +113,8 @@ class SessionContext(Generic[AgentDepsT]):
     """触发事件的插件命名空间"""
     append_only_manager: Any = dataclasses.field(default=None)
     """用于大模型前缀缓存命中优化的追加写入管理器。"""
-
-    @property
-    def memory(self) -> "AgentSessionFacade":
-        """
-        获取当前会话的持久化记忆访问门面 (AgentSessionFacade)。
-        提供极简的 history 和 slots 操作 API。
-        """
-        from zhenxun.services.ai.context.memory.facades import AgentSessionFacade
-        from zhenxun.services.ai.context.memory.manager import memory_manager
-        from zhenxun.services.ai.context.memory.types import SessionMetadata
-
-        user_id = ContextUtils.extract_user_id(self.deps)
-        group_id = ContextUtils.extract_group_id(self.deps)
-        platform = ContextUtils.extract_platform(self.deps)
-
-        meta = SessionMetadata(
-            session_id=self.session_id,
-            selector=ScopeSelector(
-                user_id=user_id,
-                group_id=group_id,
-                platform=platform,
-                namespace=self.namespace,
-            ),
-        )
-        return AgentSessionFacade(memory_manager, meta)
+    session_meta: "SessionMetadata | None" = dataclasses.field(default=None)
+    """隔离会话的元信息(Session ID, 命名空间, 权限等)，在状态流转中生成"""
 
 
 @dataclasses.dataclass
@@ -324,7 +300,7 @@ class RunContext(Generic[AgentDepsT]):
                 self.deps.get("namespace") if isinstance(self.deps, dict) else None
             )
         if not ns:
-            ns = infer_plugin_namespace(default="global")
+            ns = infer_plugin_namespace()
 
         self.session = SessionContext(
             session_id=self.session_id or "default_session",

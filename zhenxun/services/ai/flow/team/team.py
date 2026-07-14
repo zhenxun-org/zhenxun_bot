@@ -1,6 +1,4 @@
-import asyncio
-from collections.abc import Callable, Mapping, Sequence
-import contextlib
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from typing_extensions import Self
@@ -12,24 +10,20 @@ from zhenxun.services.ai.capabilities import (
     CapabilitySource,
     DynamicCapability,
 )
-from zhenxun.services.ai.core.exceptions import ConcurrencyInterruptException
 from zhenxun.services.ai.core.messages import PromptInput
 from zhenxun.services.ai.core.models import CancellationToken
-from zhenxun.services.ai.core.stream_events import EventBus
+from zhenxun.services.ai.core.stream_events import AgentStreamEvent, EventBus
 from zhenxun.services.ai.flow.agent.agent import ToolSource
 from zhenxun.services.ai.flow.agent.models import Persona
-from zhenxun.services.ai.flow.base import BaseRunnable, ConcurrencyPolicy
-from zhenxun.services.ai.flow.concurrency import apply_concurrency_policy
+from zhenxun.services.ai.flow.core.base import BaseRunnable
 from zhenxun.services.ai.run import (
     AgentRunResult,
     AgentTask,
     RunContext,
-    StreamedRunResult,
+    RunIntent,
 )
-from zhenxun.services.ai.run.models import AgentRunError
 from zhenxun.services.ai.tools.providers.skills.capabilities import SkillCapability
 from zhenxun.services.ai.tools.providers.skills.models import Skill, SkillSource
-from zhenxun.services.ai.utils import ContextUtils
 from zhenxun.utils.utils import infer_plugin_namespace
 
 from .models import TeamRuntimeConfig, Transition
@@ -52,7 +46,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
         model: str | Callable[[], str] | None = None,
         strategy: BaseTeamStrategy | None = None,
         description: str | None = None,
-        persona: Persona | dict | None = None,
+        persona: Persona | None = None,
         runtime_config: TeamRuntimeConfig | dict | None = None,
         capabilities: list[CapabilitySource] | None = None,
         skills: Sequence[str | Path | Skill | SkillSource] | None = None,
@@ -74,15 +68,17 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
         self.members = members
         self.model = model
         self.strategy = strategy
-        self.description = (
-            description
-            or f"一个名为 {self.name} 的协作团队，包含 {len(self.members)} 个处理节点。"
-        )
         self.persona = persona
 
         self.namespace = infer_plugin_namespace() or "unknown"
 
-        self.capabilities: list[Any] = []
+        if description:
+            self.description = description
+        else:
+            self.description = f"一个名为 {self.name} 的协作团队，"
+            f"包含 {len(self.members)} 个处理节点。"
+
+        self.capabilities: list[AbstractCapability] = []
         if capabilities:
             for cap in capabilities:
                 if isinstance(cap, AbstractCapability):
@@ -107,6 +103,18 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
             getattr(strategy, "selector_func", None) if strategy else None
         )
 
+    @property
+    def default_model(self) -> str | None:
+        """获取当前团队默认调用的可用大模型。优先取自身配置，其次遍历成员寻找可用模型。"""
+        if getattr(self, "model", None):
+            return str(self.model() if callable(self.model) else self.model)
+
+        for m in self.members:
+            m_model = getattr(m, "model_name", None) or getattr(m, "model", None)
+            if m_model:
+                return str(m_model() if callable(m_model) else m_model)
+        return None
+
     def with_strategy(self, strategy: BaseTeamStrategy) -> Self:
         """
         挂载自定义的团队协作策略。
@@ -122,9 +130,7 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
 
     def with_routing(
         self,
-        state_flow: (
-            Mapping[str, Sequence[Transition | str | Any]] | Callable | None
-        ) = None,
+        state_flow: (Mapping[str, Sequence[Transition | str]] | Callable | None) = None,
         selector_func: Callable[..., str | None] | None = None,
         router: BaseRouter | None = None,
         leader_model: str | None = None,
@@ -287,20 +293,18 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
             prompt=prompt, context=context, capabilities=capabilities, **kwargs
         )
 
-    @contextlib.asynccontextmanager
-    async def run_stream(
+    async def _execute_stream(
         self,
-        prompt: PromptInput | AgentTask | None = None,
-        *,
-        context: "RunContext | None" = None,
-        capabilities: list[CapabilitySource] | None = None,
-        skills: Sequence[str | Path | Skill | SkillSource] | None = None,
+        intent: RunIntent,
+        context: RunContext,
+        cancel_token: CancellationToken,
+        event_bus: EventBus,
         **kwargs: Any,
-    ):
+    ) -> AsyncIterator[AgentStreamEvent]:
         self._ensure_strategy()
 
-        if context is None:
-            context = RunContext()
+        capabilities = kwargs.pop("capabilities", None)
+        skills = kwargs.pop("skills", None)
 
         if not hasattr(context, "capabilities"):
             context.capabilities = []
@@ -310,6 +314,10 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
 
         if skills:
             capabilities = list(capabilities) if capabilities else []
+            from zhenxun.services.ai.tools.providers.skills.capabilities import (
+                SkillCapability,
+            )
+
             capabilities.append(
                 SkillCapability(skills=skills, namespace=self.namespace)
             )
@@ -323,54 +331,8 @@ class Team(BaseRunnable[AgentRunResult[Any]]):
 
         from .runner import TeamRunner
 
-        event_bus = EventBus()
-        context.run.event_bus = event_bus
         assert self.strategy is not None
         runner = TeamRunner(self, self.strategy)
 
-        policy = getattr(self.runtime_config, "concurrency_policy", None)
-        if policy is None:
-            policy = (
-                ConcurrencyPolicy.ALLOW
-                if getattr(self.runtime_config, "stateless", True)
-                else ConcurrencyPolicy.QUEUE
-            )
-
-        intervention_policy = getattr(self.runtime_config, "intervention_policy", None)
-
-        lock_id = ContextUtils.extract_concurrency_lock_id(
-            context,
-            getattr(self.runtime_config, "concurrency_scope", None),
-            context.session_id or "default_session",
-        )
-
-        async def _execution_task():
-            cancel_token = context.run.cancellation_token or CancellationToken()
-            context.run.cancellation_token = cancel_token
-
-            try:
-                async with apply_concurrency_policy(
-                    session_id=context.session_id or "default_session",
-                    lock_id=lock_id,
-                    policy=policy,
-                    cancel_token=cancel_token,
-                    intervention_policy=intervention_policy,
-                    message=prompt,
-                ):
-                    async for event in runner.run_stream(prompt, context, **kwargs):
-                        await event_bus.emit(event)
-            except BaseException as e:
-                if isinstance(e, asyncio.CancelledError):
-                    e = ConcurrencyInterruptException("团队执行已被新请求打断并接管")
-                await event_bus.emit(AgentRunError(error=e))
-            finally:
-                await event_bus.end()
-
-        task = asyncio.create_task(_execution_task())
-        result_obj = StreamedRunResult[Any](event_bus)
-
-        try:
-            yield result_obj
-        finally:
-            if not task.done():
-                task.cancel()
+        async for event in runner.run_stream(intent, context, **kwargs):
+            yield event

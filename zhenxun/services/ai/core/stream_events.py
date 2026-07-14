@@ -106,6 +106,7 @@ class EventBus:
             defaultdict(list)
         )
         self._background_tasks = set()
+        self._async_handlers_queues: dict[Callable, asyncio.Queue] = {}
 
     def subscribe(
         self, event_type: type[T_Event], handler: Callable[[T_Event], Any]
@@ -118,6 +119,33 @@ class EventBus:
             handler: 事件处理回调函数。当对应事件发布时被触发，参数为事件实例。
         """
         self._subscribers[event_type].append(handler)
+
+        if (
+            is_coroutine_callable(handler)
+            and handler not in self._async_handlers_queues
+        ):
+            q = asyncio.Queue(maxsize=1000)
+            self._async_handlers_queues[handler] = q
+
+            async def _worker(h=handler, queue=q):
+                while True:
+                    evt = await queue.get()
+                    if evt is None:
+                        queue.task_done()
+                        break
+                    try:
+                        await h(evt)
+                    except asyncio.CancelledError:
+                        queue.task_done()
+                        break
+                    except Exception as err:
+                        logger.error(f"EventBus 订阅者执行异常: {err}")
+                    finally:
+                        queue.task_done()
+
+            task = asyncio.create_task(_worker())
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
     async def emit(self, event: AgentStreamEvent) -> None:
         """
@@ -133,21 +161,14 @@ class EventBus:
 
         for handler in handlers:
             if is_coroutine_callable(handler):
-
-                async def _run_handler(h=handler, e=event):
-                    try:
-                        await h(e)
-                    except Exception as err:
-                        logger.error(f"EventBus 订阅者执行异常: {err}")
-
-                task = asyncio.create_task(_run_handler())
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
+                q = self._async_handlers_queues.get(handler)
+                if q:
+                    await q.put(event)
             else:
                 try:
                     handler(event)
                 except Exception as err:
-                    logger.error(f"EventBus 订阅者执行异常: {err}")
+                    logger.error(f"EventBus 同步订阅者执行异常: {err}")
 
         if not self._finished:
             await self._queue.put(event)
@@ -156,11 +177,17 @@ class EventBus:
         """
         结束事件总线。等待所有后台任务执行完毕，并向队列中投放结束标记以终止异步迭代。
         """
+        self._finished = True
+        await self._queue.put(None)
+
+        for q in self._async_handlers_queues.values():
+            await q.put(None)
+
         if self._background_tasks:
             tasks = list(self._background_tasks)
             await asyncio.gather(*tasks, return_exceptions=True)
-        self._finished = True
-        await self._queue.put(None)
+            self._background_tasks.clear()
+            self._async_handlers_queues.clear()
 
     async def __aiter__(self):
         """

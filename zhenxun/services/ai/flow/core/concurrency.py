@@ -1,17 +1,16 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Any
 
 from zhenxun.services.ai.core.exceptions import (
     ConcurrencyRejectException,
     InterventionHandledException,
 )
 from zhenxun.services.ai.core.models import CancellationToken
-from zhenxun.services.ai.run.models import AgentTask
+from zhenxun.services.ai.run.models import RunIntent
 from zhenxun.services.ai.run.session import LockContext, session_manager
 from zhenxun.services.ai.utils.logger import log_flow as logger
 
-from .base import ConcurrencyPolicy, InterventionPolicy
+from .models import ConcurrencyPolicy, InterventionPolicy
 
 
 @asynccontextmanager
@@ -20,8 +19,8 @@ async def apply_concurrency_policy(
     lock_id: str,
     policy: ConcurrencyPolicy,
     cancel_token: CancellationToken,
-    intervention_policy: Any = None,
-    message: Any = None,
+    intervention_policy: InterventionPolicy | None = None,
+    intent: RunIntent | None = None,
 ):
     """
     异步上下文管理器：对大模型执行流应用特定的并发及消息干预调度策略。
@@ -56,21 +55,14 @@ async def apply_concurrency_policy(
             ):
                 session = await session_manager.get_or_create(session_id)
 
-                actual_msg = message
-
-                if isinstance(message, AgentTask):
-                    actual_msg = message.description
-                elif hasattr(message, "extract_plain_text"):
-                    actual_msg = message.extract_plain_text()
-
                 if intervention_policy == InterventionPolicy.STEER:
-                    session.steer_queue.enqueue(str(actual_msg))
+                    session.steer_queue.enqueue(intent.text if intent else "")
                     raise InterventionHandledException(
                         "Steer successful",
                         display_content="💬 已将您的补充信息传递给正在思考的 AI...",
                     )
                 elif intervention_policy == InterventionPolicy.FOLLOW_UP:
-                    session.follow_up_queue.enqueue(str(actual_msg))
+                    session.follow_up_queue.enqueue(intent.text if intent else "")
                     raise InterventionHandledException(
                         "Follow-up successful",
                         display_content="📝 已记录，AI 处理完当前任务后即刻执行...",

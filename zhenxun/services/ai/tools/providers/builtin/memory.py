@@ -2,15 +2,17 @@ from typing import Any, Literal, Optional
 
 from pydantic import Field, create_model
 
-from zhenxun.services.ai.context.memory.manager import memory_manager
-from zhenxun.services.ai.context.memory.models import MemoryConfig
+from zhenxun.services.ai.context.memory.storage.backends import MemoryScope
 from zhenxun.services.ai.context.memory.types import SessionMetadata
+from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
 from zhenxun.services.ai.tools.models import ToolOptions, ToolResult
 from zhenxun.services.ai.utils.logger import log_tool as logger
+from zhenxun.services.ai.utils.runtime import ContextUtils
+from zhenxun.services.ai.utils.scope import ScopeBuilder
 
 
 class MemoryManagementToolkit(BaseToolkit):
@@ -26,23 +28,45 @@ class MemoryManagementToolkit(BaseToolkit):
 
         shared_options = ToolOptions(silent=True)
 
-    default_instructions = """\
-## 🧠 长期记忆管理系统 (Long-Term Memory)
-该系统是你的「无限档案馆」。⚠️ **注意：系统默认不会主动向你提供所有历史信息，你必须通过主动搜索来回忆。**
+    _INTRO_TEXT = (
+        "## 🧠 长期记忆管理系统 (Long-Term Memory)\n"
+        "该系统是你的「无限档案馆」。系统默认不会主动向你提供所有历史信息，你必须通过主动搜索来回忆。\n\n"
+        "### 📝 职责说明\n"
+    )
+    _READ_GUIDE = (
+        "- **寻找历史线索**：当遇到未知情况，或用户提及过去的事情、"
+        "特定设定时，必须主动检索历史库（使用 `search_memory`）。\n"
+    )
+    _WRITE_GUIDE = (
+        "- **记录离散事实与经验**：当需要记录某个独立事件、历史经验、"
+        "问题解决方案或具体事实时（使用 `save_memory`）。\n"
+        "- **隐式记录**：当接收到值得记忆的重要信息时，请静默记录。"
+        "除非用户主动提问，否则无需向用户显式汇报'我已记住'。\n"
+        "- **按需更新**：如果发现某项历史记录已过时或状态发生扭转，"
+        "请先检索出它的 ID，再修改（`update_memory`）或废弃（`delete_memory`）。\n"
+        "- **精准提炼**：保存记忆时请提炼核心价值，避免保存无意义的闲聊。\n"
+    )
 
-### 📝 何时使用长期记忆？
-- **记录离散事实与经验**：当需要记录某个独立事件、历史经验、问题解决方案或具体事实时（使用 `save_memory`）。
-- **寻找历史线索**：当遇到未知情况，或用户提及过去的事情、特定设定时，必须主动检索历史库（使用 `search_memory`）。
+    default_instructions = _INTRO_TEXT + _READ_GUIDE + _WRITE_GUIDE
 
-### ⚙️ 操作规范
-1. **隐式记录**：当接收到值得记忆的重要信息时，请静默记录。除非用户主动提问，否则无需向用户显式汇报"我已记住"。
-2. **按需更新**：如果发现某项历史记录已过时或状态发生扭转，请先检索出它的 ID，再进行修改（使用 `update_memory`）或废弃（使用 `delete_memory`）。
-3. **精准提炼**：保存记忆时请提炼核心价值，避免保存无意义的闲聊。\
-"""  # noqa: E501
+    @classmethod
+    def read_only(cls, **kwargs) -> "MemoryManagementToolkit":
+        """[工厂方法] 创建一个只读模式的长期记忆工具箱。"""
+        kwargs["include"] = ["search_memory"]
+        kwargs.setdefault("instructions", cls._INTRO_TEXT + cls._READ_GUIDE)
+        return cls(**kwargs)
+
+    @classmethod
+    def write_only(cls, **kwargs) -> "MemoryManagementToolkit":
+        """[工厂方法] 创建一个仅写入模式的长期记忆工具箱。"""
+        kwargs["exclude"] = ["search_memory"]
+        kwargs.setdefault("instructions", cls._INTRO_TEXT + cls._WRITE_GUIDE)
+        return cls(**kwargs)
 
     def __init__(
         self,
-        memory_config: MemoryConfig | None = None,
+        rag_client: ScopedRAGClient | None = None,
+        scopes: dict[str, ScopeBuilder] | None = None,
         namespace: str | None = None,
         **kwargs: Any,
     ):
@@ -50,85 +74,43 @@ class MemoryManagementToolkit(BaseToolkit):
         初始化主动记忆管理工具箱。
 
         参数：
-            memory_config: 记忆系统的全局配置对象，为空则使用全局默认。
+            rag_client: 底层 RAG 检索引擎客户端实例。
+            scopes: 作用域构建器映射字典，用于动态限定存储的分区。
             namespace: 当前隔离环境的命名空间。
             kwargs: 其他透传给 BaseToolkit 的参数。
         """
         super().__init__(**kwargs)
-        self.memory_config = memory_config
+        self.rag_client = rag_client
+        from zhenxun.services.ai.context.memory.types import Isolation
+
+        self.scopes = scopes or {"私有": Isolation.AGENT_USER()}
         self._namespace = namespace
 
     def _get_runtime_meta_and_scope(
         self, context: RunContext, scope_name: str | None = None
     ) -> tuple[Any, SessionMetadata]:
         """动态获取当前运行时的数据库实例与会话元信息，实现无状态化"""
-        ns = self._namespace or getattr(context.session, "namespace", "global")
-        scope = memory_manager.get_long_term_memory(self.memory_config, namespace=ns)
+        scope = MemoryScope(rag_client=self.rag_client) if self.rag_client else None
 
-        scope_builder = None
-        if (
-            self.memory_config
-            and self.memory_config.long_term
-            and self.memory_config.long_term.scopes
-        ):
-            scopes_dict = self.memory_config.long_term.scopes
-            if not scope_name:
-                scope_builder = next(iter(scopes_dict.values()))
-            else:
-                scope_builder = scopes_dict.get(scope_name)
-
-        if not scope_builder:
-            scope_builder = getattr(self.memory_config, "base_isolation", None)
-            if not scope_builder:
-                from zhenxun.services.ai.context.memory.types import Isolation
-
-                scope_builder = Isolation.AGENT_USER()
-
-        selector = scope_builder.resolve(
-            deps=context.deps,
-            prefix="",
-            default_namespace=ns,
-            default_agent=context.run.agent_name,
+        scope_builder = (
+            self.scopes.get(scope_name)
+            if scope_name
+            else next(iter(self.scopes.values()), None)
         )
-        parts = selector.get_scope_parts()
-        all_scopes = {"/"}
-        current_path = ""
-        for part in parts:
-            current_path += f"/{part}"
-            all_scopes.add(current_path)
-        accessible_scopes = list(all_scopes)
-        accessible_scopes.sort(key=lambda x: len(x.split("/")))
-
-        scope_name_mapping = {}
-        if (
-            self.memory_config
-            and self.memory_config.long_term
-            and self.memory_config.long_term.scopes
-        ):
-            for name, builder in self.memory_config.long_term.scopes.items():
-                sel = builder.resolve(
-                    deps=context.deps,
-                    prefix="",
-                    default_namespace=ns,
-                    default_agent=context.run.agent_name,
-                )
-                scope_name_mapping[sel.scope_prefix] = name
-
-        session_meta = SessionMetadata(
-            session_id=context.session_id or "default_session",
-            selector=selector,
-            scope_prefix=selector.scope_prefix,
-            accessible_scopes=accessible_scopes,
-            scope_name_mapping=scope_name_mapping,
+        session_meta = ContextUtils.build_session_meta(
+            context=context,
+            target_builder=scope_builder,
+            extra_scopes=self.scopes,
+            custom_namespace=self._namespace
         )
         return scope, session_meta
 
     async def get_tools(self, context: RunContext | None = None) -> dict[str, BaseTool]:
         tools = await super().get_tools(context)
-        if not self.memory_config or not self.memory_config.long_term.enable:
+        if not getattr(self, "rag_client", None):
             return tools
 
-        scopes_dict = self.memory_config.long_term.scopes
+        scopes_dict = getattr(self, "scopes", {})
         if not scopes_dict:
             return tools
 

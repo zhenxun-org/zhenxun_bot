@@ -1,6 +1,9 @@
 import asyncio
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .team import Team
 
 from zhenxun.services.ai.core.exceptions import (
     AbortException,
@@ -8,19 +11,19 @@ from zhenxun.services.ai.core.exceptions import (
     LLMException,
 )
 from zhenxun.services.ai.core.messages import UsageInfo
+from zhenxun.services.ai.core.stream_events import AgentStreamEvent
 from zhenxun.services.ai.flow.agent.models import AgentConfig
-from zhenxun.services.ai.run import AgentRunResult, RunContext
+from zhenxun.services.ai.run import AgentRunResult, RunContext, RunIntent
 from zhenxun.services.ai.run.models import AgentRunEnd
 from zhenxun.services.ai.utils.logger import log_team as logger
 from zhenxun.utils.pydantic_compat import model_construct
 
-from .capabilities import TeamRoutingCapability
 from .models import (
     CallAction,
     ConcurrentCallAction,
     FinishAction,
 )
-from .strategy import BaseTeamStrategy, RouteStrategy
+from .strategy import BaseTeamStrategy
 
 
 class TeamRunner:
@@ -28,9 +31,32 @@ class TeamRunner:
     多智能体团队核心执行引擎。
     """
 
-    def __init__(self, team: Any, strategy: BaseTeamStrategy):
+    def __init__(self, team: "Team", strategy: BaseTeamStrategy):
         self.team = team
         self.strategy = strategy
+
+    async def _consume_event_queue(
+        self,
+        queue: asyncio.Queue,
+        tasks: list[asyncio.Task],
+        expected_results: int,
+        results_box: dict[int, tuple[str, AgentRunResult]],
+    ) -> AsyncGenerator[AgentStreamEvent, None]:
+        """辅助方法：统一消费队列中的流事件、异常和结果"""
+        try:
+            while len(results_box) < expected_results:
+                msg_type, *payload = await queue.get()
+                if msg_type == "yield_event":
+                    yield payload[0]
+                elif msg_type == "control_flow_error":
+                    raise payload[0]
+                elif msg_type == "result":
+                    idx, agent_name, agent_res = payload
+                    results_box[idx] = (agent_name, agent_res)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
 
     async def _execute_call_action_to_queue(
         self,
@@ -69,14 +95,9 @@ class TeamRunner:
         sub_context = context.clone_for_member(target_agent.name)
         sub_context.capabilities = list(sub_context.capabilities)
 
-        if isinstance(self.strategy, RouteStrategy):
-            routing_cap = TeamRoutingCapability(
-                team_name=self.team.name,
-                members=self.team.members,
-                state_flow=getattr(self.strategy, "state_flow", None),
-                max_handoffs=getattr(self.strategy, "max_handoffs", 3),
-            )
-            sub_context.capabilities.append(routing_cap)
+        sub_context.capabilities.extend(
+            self.strategy.get_member_capabilities(self.team, target_agent)
+        )
 
         logger.debug(f"🚀 **专员 👨💼`{target_agent.name}`** 开始执行子任务...")
 
@@ -125,7 +146,7 @@ class TeamRunner:
             target_name = agent_res.handoff.target
             reason = agent_res.handoff.reason
 
-            logger.info(
+            logger.debug(
                 f"🛣️ **路由决策**: 委派给专员 👨💼`{target_name}` (理由: {reason})"
             )
 
@@ -138,15 +159,37 @@ class TeamRunner:
 
         await queue.put(("result", index, target_agent.name, agent_res))
 
+    async def _dispatch_actions(
+        self,
+        actions: list[CallAction],
+        context: RunContext,
+        session_id: str,
+        results_container: list,
+    ) -> AsyncGenerator[AgentStreamEvent, None]:
+        """统一的任务派发、流事件转译与结果回传调度器"""
+        queue = asyncio.Queue()
+        tasks = [
+            asyncio.create_task(
+                self._execute_call_action_to_queue(i, act, context, session_id, queue)
+            )
+            for i, act in enumerate(actions)
+        ]
+        results_box: dict[int, tuple[str, AgentRunResult]] = {}
+        async for event in self._consume_event_queue(
+            queue, tasks, len(actions), results_box
+        ):
+            yield event
+        results_container.extend([results_box[i] for i in range(len(actions))])
+
     async def run_stream(
-        self, prompt: Any, context: RunContext, **kwargs: Any
-    ) -> AsyncGenerator[Any, None]:
+        self, intent: RunIntent, context: RunContext, **kwargs: Any
+    ) -> AsyncGenerator[AgentStreamEvent, None]:
         session_id = context.session_id or "default_team_session"
-        task_desc = getattr(prompt, "description", str(prompt))
+        task_desc = intent.text
 
-        logger.info(f"🤝 **团队 [{self.team.name}] 开始协作**: `{task_desc}`")
+        logger.debug(f"🤝 **团队 [{self.team.name}] 开始协作**: `{task_desc}`")
 
-        plan_gen = self.strategy.generate_plan(self.team, prompt, context, **kwargs)
+        plan_gen = self.strategy.generate_plan(self.team, intent, context, **kwargs)
 
         send_value = None
         final_result = None
@@ -160,61 +203,23 @@ class TeamRunner:
                     break
 
                 if isinstance(action, CallAction):
-                    queue = asyncio.Queue()
-                    task = asyncio.create_task(
-                        self._execute_call_action_to_queue(
-                            0, action, context, session_id, queue
-                        )
-                    )
-                    try:
-                        while True:
-                            msg_type, *payload = await queue.get()
-                            if msg_type == "yield_event":
-                                yield payload[0]
-                            elif msg_type == "control_flow_error":
-                                raise payload[0]
-                            elif msg_type == "result":
-                                idx, agent_name, agent_res = payload
-                                send_value = agent_res
-                                cumulative_usage += agent_res.usage
-                                break
-                    finally:
-                        if not task.done():
-                            task.cancel()
+                    res_container = []
+                    async for event in self._dispatch_actions(
+                        [action], context, session_id, res_container
+                    ):
+                        yield event
+                    _, send_value = res_container[0]
+                    cumulative_usage += send_value.usage
 
                 elif isinstance(action, ConcurrentCallAction):
-                    queue = asyncio.Queue()
-                    tasks = []
-                    for i, act in enumerate(action.actions):
-                        tasks.append(
-                            asyncio.create_task(
-                                self._execute_call_action_to_queue(
-                                    i, act, context, session_id, queue
-                                )
-                            )
-                        )
-
-                    results_dict = {}
-                    try:
-                        while len(results_dict) < len(action.actions):
-                            msg_type, *payload = await queue.get()
-                            if msg_type == "yield_event":
-                                yield payload[0]
-                            elif msg_type == "control_flow_error":
-                                for t in tasks:
-                                    t.cancel()
-                                raise payload[0]
-                            elif msg_type == "result":
-                                idx, agent_name, agent_res = payload
-                                results_dict[idx] = (agent_name, agent_res)
-                                cumulative_usage += agent_res.usage
-                        send_value = [
-                            results_dict[i] for i in range(len(action.actions))
-                        ]
-                    finally:
-                        for task in tasks:
-                            if not task.done():
-                                task.cancel()
+                    res_container = []
+                    async for event in self._dispatch_actions(
+                        action.actions, context, session_id, res_container
+                    ):
+                        yield event
+                    send_value = res_container
+                    for _, res in res_container:
+                        cumulative_usage += res.usage
 
                 elif isinstance(action, FinishAction):
                     final_result = action.result
@@ -225,7 +230,7 @@ class TeamRunner:
         except Exception as e:
             raise e
 
-        logger.info(f"🏁 **团队 [{self.team.name}]** 协作圆满结束！")
+        logger.debug(f"🏁 **团队 [{self.team.name}]** 协作圆满结束！")
 
         if not isinstance(final_result, AgentRunResult):
             final_result = model_construct(

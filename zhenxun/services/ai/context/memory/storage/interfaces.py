@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
 
 from zhenxun.services.ai.context.memory.types import (
     MemorySlot,
@@ -10,7 +11,14 @@ from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.utils.scope import ScopeSelector
 
 
-class BaseChatContext(ABC):
+@runtime_checkable
+class IClearableBackend(Protocol):
+    """支持声明式清理的作用域后端协议"""
+
+    async def clear_by_query(self, query: ScopeSelector) -> int | None: ...
+
+
+class BaseChatContext(IClearableBackend, ABC):
     """短期对话历史记忆接口"""
 
     @abstractmethod
@@ -44,13 +52,8 @@ class BaseChatContext(ABC):
         """清空当前会话的历史消息。"""
         ...
 
-    @abstractmethod
-    async def clear_by_query(self, query: ScopeSelector) -> None:
-        """根据条件领域查询对象清理对话历史。"""
-        ...
 
-
-class BaseSlotContext(ABC):
+class BaseSlotContext(IClearableBackend, ABC):
     """中期记忆槽持久化接口"""
 
     @abstractmethod
@@ -80,11 +83,6 @@ class BaseSlotContext(ABC):
         """列出当前会话的所有记忆槽（包括未置顶的）。"""
         ...
 
-    @abstractmethod
-    async def clear_by_query(self, query: ScopeSelector) -> None:
-        """根据条件领域查询对象清理记忆槽。"""
-        ...
-
 
 class BaseMemoryReducer(ABC):
     """记忆压缩器基类"""
@@ -97,7 +95,19 @@ class BaseMemoryReducer(ABC):
         model_name: str,
         base_overhead: int = 0,
     ) -> tuple[list[LLMMessage], bool, int]:
-        """对消息列表进行压缩处理。"""
+        """
+        执行记忆压缩处理，精简或提炼对话上下文以降低 Token 消耗。
+
+        参数:
+            messages: 需要进行压缩的原始 LLM 消息历史列表。
+            current_tokens: 压缩前消息列表的当前 Token 总数。
+            model_name: 用于判定压缩阈值或计算 Token 的底层大模型名称。
+            base_overhead: 基础系统提示词等静态开销的 Token 计数。
+
+        返回:
+            tuple[list[LLMMessage], bool, int]: 包含压缩后的新消息历史列表、
+                本次是否实际触发了压缩的布尔标记、以及压缩后的新 Token 总数。
+        """
         ...
 
 

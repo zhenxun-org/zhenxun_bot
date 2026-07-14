@@ -1,16 +1,18 @@
+from abc import ABC, abstractmethod
 import asyncio
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 import copy
-from typing import Any, cast
+from typing import cast
 
 from zhenxun.services.ai.core.messages import PromptInput
-from zhenxun.services.ai.flow.base import BaseRunnable
-from zhenxun.services.ai.run import AgentTask, RunContext
+from zhenxun.services.ai.core.stream_events import AgentStreamEvent
+from zhenxun.services.ai.flow.core.base import BaseRunnable
+from zhenxun.services.ai.run import RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
-from zhenxun.services.ai.run.models import AgentRunEnd
+from zhenxun.services.ai.run.models import AgentRunEnd, RunIntent
 from zhenxun.services.ai.utils.logger import log_flow as logger
 
-from .base import BaseNode
+from .base import BaseNode, StreamCapturer
 from .policies import BaseFailurePolicy
 from .types import (
     StepInput,
@@ -24,7 +26,7 @@ NodeSource = BaseNode | BaseRunnable | Callable
 
 class Step(BaseNode):
     """
-    工作流中的最小执行单元门面 (Facade)。
+    工作流中的最小执行单元门面
     对外部隐藏了 AgentNode 和 FunctionNode 的具体实现。
     当实例化 Step 时，底层会自动根据 executor 的类型返回专属的节点对象。
     """
@@ -35,7 +37,7 @@ class Step(BaseNode):
             if executor is None and len(args) > 1:
                 executor = args[1]
 
-            from zhenxun.services.ai.flow.base import BaseRunnable
+            from zhenxun.services.ai.flow.core.base import BaseRunnable
 
             if isinstance(executor, BaseRunnable):
                 return object.__new__(RunnableNode)
@@ -75,7 +77,7 @@ class Step(BaseNode):
 
     async def run_stream(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncIterator[AgentStreamEvent | StepOutput]:
         if False:
             yield None
         raise NotImplementedError("这是一个外观门面，实际的执行发生在子类中。")
@@ -86,32 +88,28 @@ class RunnableNode(Step):
 
     async def run_stream(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncIterator[AgentStreamEvent | StepOutput]:
         executor = cast(BaseRunnable, self.executor)
 
-        if isinstance(step_input.previous_step_content, AgentTask):
-            prompt_data = step_input.previous_step_content
-            prev_content_to_append = None
-        else:
-            prompt_data = self.prompt if self.prompt is not None else step_input.input
-            prev_content_to_append = step_input.previous_step_content
+        base_prompt = self.prompt if self.prompt is not None else step_input.input
+        node_intent = RunIntent.from_input(base_prompt)
 
-        if isinstance(prompt_data, AgentTask):
-            prompt_data = copy.copy(prompt_data)
-            if prev_content_to_append:
-                prev_content = str(prev_content_to_append)
-                prompt_data.description = (
+        prev_content = step_input.previous_step_content
+        prompt_data = base_prompt
+
+        if prev_content:
+            if node_intent.task_obj:
+                task_clone = copy.copy(node_intent.task_obj)
+                task_clone.description = (
                     f"### 🔙 [上游节点执行输出]\n{prev_content}\n\n"
-                    f"### 🎯 [当前需执行的任务]\n{prompt_data.description}"
+                    f"### 🎯 [当前需执行的任务]\n{task_clone.description}"
                 )
-            context.run.user_input = prompt_data.description
-        else:
-            if prev_content_to_append:
+                prompt_data = task_clone
+            else:
                 prompt_data = (
-                    f"[上游节点执行输出]:\n{prev_content_to_append}\n\n"
-                    f"[当前需执行的任务]:\n{prompt_data or ''}"
+                    f"[上游节点执行输出]:\n{prev_content}\n\n"
+                    f"[当前需执行的任务]:\n{node_intent.text}"
                 )
-            context.run.user_input = str(prompt_data) if prompt_data else ""
 
         final_result = None
         sandbox_context = context.clone_for_member(self.name)
@@ -136,7 +134,7 @@ class FunctionNode(Step):
 
     async def run_stream(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncIterator[AgentStreamEvent | StepOutput]:
         context.run.user_input = str(step_input.input) if step_input.input else ""
 
         executor = cast(Callable, self.executor)
@@ -170,21 +168,20 @@ class Steps(BaseNode):
 
     async def run_stream(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncIterator[AgentStreamEvent | StepOutput]:
         current_input = StepInput(
             input=step_input.input,
+            intent=step_input.intent,
             previous_step_content=step_input.previous_step_content,
             additional_data=step_input.additional_data.copy(),
         )
 
         all_outputs: list[StepOutput] = []
         for step_obj in self.steps:
-            out_box: list[StepOutput] = []
-            async for event in self._forward_stream(
-                step_obj.aexecute_stream(current_input, context), out_box
-            ):
+            capturer = StreamCapturer(step_obj.aexecute_stream(current_input, context))
+            async for event in capturer:
                 yield event
-            step_out = out_box[0] if out_box else None
+            step_out = capturer.output
 
             if step_out:
                 all_outputs.append(step_out)
@@ -199,12 +196,47 @@ class Steps(BaseNode):
         )
 
 
-class Condition(BaseNode):
+class BranchingNode(BaseNode, ABC):
+    """
+    处理基于条件或路由的单分支复合节点基类
+    """
+
+    @abstractmethod
+    async def select_branch(
+        self, step_input: StepInput, context: RunContext
+    ) -> tuple[list[BaseNode], str, str]:
+        """
+        子类实现此方法进行路由决策。
+        返回: (目标节点列表, 分支标识名, 未命中有效分支时的兜底提示信息)
+        """
+        pass
+
+    async def run_stream(
+        self, step_input: StepInput, context: RunContext
+    ) -> AsyncIterator[AgentStreamEvent | StepOutput]:
+        context.run.user_input = str(step_input.input) if step_input.input else ""
+        target_steps, branch_name, fallback_msg = await self.select_branch(
+            step_input, context
+        )
+
+        if not target_steps:
+            yield StepOutput(content=fallback_msg, success=True)
+            return
+
+        steps_container = Steps(steps=target_steps, name=f"{self.name}_{branch_name}")
+        capturer = StreamCapturer(steps_container.aexecute_stream(step_input, context))
+        async for event in capturer:
+            yield event
+        if capturer.output:
+            yield capturer.output
+
+
+class Condition(BranchingNode):
     """根据条件函数的返回结果，决定走向 steps 还是 else_steps"""
 
     def __init__(
         self,
-        evaluator: Any,
+        evaluator: bool | Callable[..., bool | Awaitable[bool]],
         steps: Sequence[NodeSource],
         else_steps: Sequence[NodeSource] | None = None,
         name: str = "ConditionGroup",
@@ -227,9 +259,9 @@ class Condition(BaseNode):
     def node_type(self) -> StepType:
         return StepType.CONDITION
 
-    async def run_stream(
+    async def select_branch(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> tuple[list[BaseNode], str, str]:
         if callable(self.evaluator):
             condition_result = await DependencyInjector.invoke(
                 self.evaluator, {"step_input": step_input}, context
@@ -238,32 +270,22 @@ class Condition(BaseNode):
             condition_result = bool(self.evaluator)
 
         target_steps = self.steps if condition_result else self.else_steps
-        branch_name = "if" if condition_result else "else"
+        branch_name = "if_branch" if condition_result else "else_branch"
+        fallback_msg = f"条件求值为 {condition_result}，无对应步骤需执行。"
 
-        if not target_steps:
-            yield StepOutput(
-                content=f"条件求值为 {condition_result}，无对应步骤需执行。",
-                success=True,
-            )
-            return
-
-        steps_container = Steps(
-            steps=target_steps, name=f"{self.name}_{branch_name}_branch"
-        )
-        out_box: list[StepOutput] = []
-        async for event in self._forward_stream(
-            steps_container.aexecute_stream(step_input, context), out_box
-        ):
-            yield event
-        if out_box:
-            yield out_box[0]
+        return target_steps, branch_name, fallback_msg
 
 
-class Router(BaseNode):
+class Router(BranchingNode):
     """根据选择器函数的返回值(名称)，从候选项中挑选步骤执行"""
 
     def __init__(
-        self, choices: Sequence[NodeSource], selector: Any, name: str = "RouterGroup"
+        self,
+        choices: Sequence[NodeSource],
+        selector: str
+        | list[str]
+        | Callable[..., str | list[str] | Awaitable[str | list[str]]],
+        name: str = "RouterGroup",
     ):
         """
         初始化选择路由器节点。
@@ -285,9 +307,9 @@ class Router(BaseNode):
     def node_type(self) -> StepType:
         return StepType.ROUTER
 
-    async def run_stream(
+    async def select_branch(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> tuple[list[BaseNode], str, str]:
         if callable(self.selector):
             selected = await DependencyInjector.invoke(
                 self.selector, {"step_input": step_input}, context
@@ -308,18 +330,7 @@ class Router(BaseNode):
             else:
                 target_steps.append(NodeFactory.build(s))
 
-        if not target_steps:
-            yield StepOutput(content="没有命中任何有效路由分支。", success=True)
-            return
-
-        steps_container = Steps(steps=target_steps, name=f"{self.name}_routed_steps")
-        out_box: list[StepOutput] = []
-        async for event in self._forward_stream(
-            steps_container.aexecute_stream(step_input, context), out_box
-        ):
-            yield event
-        if out_box:
-            yield out_box[0]
+        return target_steps, "routed_steps", "没有命中任何有效路由分支。"
 
 
 class Loop(BaseNode):
@@ -329,7 +340,7 @@ class Loop(BaseNode):
         self,
         steps: Sequence[NodeSource],
         max_iterations: int = 3,
-        end_condition: Any = None,
+        end_condition: bool | Callable[..., bool | Awaitable[bool]] | None = None,
         name: str = "LoopGroup",
     ):
         """
@@ -353,7 +364,7 @@ class Loop(BaseNode):
 
     async def run_stream(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncIterator[AgentStreamEvent | StepOutput]:
         logger.debug(
             f"  🔁 开始循环: [Loop] `{self.name}` (最大 {self.max_iterations} 次)"
         )
@@ -362,6 +373,7 @@ class Loop(BaseNode):
         all_results: list[StepOutput] = []
         current_input = StepInput(
             input=step_input.input,
+            intent=step_input.intent,
             previous_step_content=step_input.previous_step_content,
             additional_data=step_input.additional_data.copy(),
         )
@@ -372,12 +384,12 @@ class Loop(BaseNode):
             steps_container = Steps(
                 steps=self.steps, name=f"{self.name}_iter_{iteration + 1}"
             )
-            out_box: list[StepOutput] = []
-            async for event in self._forward_stream(
-                steps_container.aexecute_stream(current_input, context), out_box
-            ):
+            capturer = StreamCapturer(
+                steps_container.aexecute_stream(current_input, context)
+            )
+            async for event in capturer:
                 yield event
-            iter_output = out_box[0] if out_box else None
+            iter_output = capturer.output
 
             should_stop = False
             if iter_output:
@@ -434,13 +446,13 @@ class Parallel(BaseNode):
 
     async def run_stream(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncIterator[AgentStreamEvent | StepOutput]:
         logger.debug(f"  🔀 [并发] `{self.name}` 开启了 {len(self.steps)} 个并发任务")
 
         queue = asyncio.Queue()
         bg_tasks = []
 
-        async def worker(idx: int, s_obj: Any, c_ctx: RunContext):
+        async def worker(idx: int, s_obj: BaseNode, c_ctx: RunContext):
             try:
                 async for evt in s_obj.aexecute_stream(step_input, c_ctx):
                     await queue.put(("event", evt))
@@ -524,7 +536,7 @@ class NodeFactory:
         cls,
         executor: NodeSource,
         name: str | None = None,
-        failure_policy: Any = None,
+        failure_policy: BaseFailurePolicy | None = None,
     ) -> BaseNode:
         """底层物理实例化分发"""
         kwargs = {

@@ -4,16 +4,15 @@ from __future__ import annotations
 运行时（Run）相关核心类型定义
 """
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 import json
 from typing import Any, Generic, cast
-from typing_extensions import TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from zhenxun.services.ai.core.messages import AgentMessage, LLMMessage, UsageInfo
+from zhenxun.services.ai.core.messages.types import OutputDataT
 from zhenxun.services.ai.core.options import BaseOutputDefinition
-from zhenxun.services.ai.core.protocols.tool import ToolResolvable
 from zhenxun.services.ai.core.stream_events import (
     AgentStreamEvent,
     EventBus,
@@ -21,7 +20,6 @@ from zhenxun.services.ai.core.stream_events import (
     ToolStreamChunkEvent,
 )
 from zhenxun.services.ai.guardrails import BaseGuardrail, GuardrailSource
-from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.utils.pydantic_compat import model_dump, model_validator
 
 
@@ -69,9 +67,6 @@ class HandoffPayload(BaseModel):
     """移交的原因描述"""
     context_data: Any = ""
     """随移交传递的上下文数据"""
-
-
-OutputDataT = TypeVar("OutputDataT", default=str)
 
 
 class AgentRunResult(BaseModel, Generic[OutputDataT]):
@@ -238,9 +233,7 @@ class AgentTask(BaseModel):
     """强制要求返回的强类型结构 (Pydantic Model) 或
     OutputDefinition，为空则返回普通文本"""
 
-    tools: list[str | Callable | dict[str, Any] | BaseTool | ToolResolvable] | None = (
-        None
-    )
+    tools: list[Any] | None = None
     """针对此特定任务动态追加或覆盖的工具列表"""
 
     guardrails: list[GuardrailSource] | None = None
@@ -259,9 +252,74 @@ class AgentTask(BaseModel):
         return self
 
 
+class RunIntent(BaseModel):
+    """标准化且归一化的运行时意图载体 """
+
+    text: str = ""
+    """提取出的纯文本指令（用于路由、日志和并发控制判断）"""
+    original_input: Any = None
+    """用户最原始的输入对象（如 UniMessage 等，用于多模态图像/音频数据提取）"""
+    payload_to_render: Any = None
+    """将要被压入 MessageBuilder 渲染为大模型 Prompt 的实际载体"""
+    task_obj: AgentTask | None = None
+    """如果是强类型任务契约，存储其原始对象引用"""
+    response_model: type[BaseModel] | BaseOutputDefinition | None = None
+    """提取出的强类型输出约束"""
+    extra_tools: list[Any] = Field(default_factory=list)
+    """提取出的附加工具集"""
+    guardrails: list[BaseGuardrail] = Field(default_factory=list)
+    """提取出的安全护栏集"""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @classmethod
+    def from_input(cls, prompt: Any) -> "RunIntent":
+        task_obj = None
+        text_content = ""
+        extra_tools = []
+        response_model = None
+        guardrails = []
+        payload_to_render = prompt
+
+        if isinstance(prompt, AgentTask):
+            task_obj = prompt
+            response_model = task_obj.response_model
+            if task_obj.tools:
+                extra_tools.extend(task_obj.tools)
+            if hasattr(task_obj, "_parsed_guardrails"):
+                guardrails.extend(task_obj._parsed_guardrails)
+
+            prompt_parts = [
+                f"### 📋 [任务指令]\n{task_obj.description}",
+                f"### 🎯 [预期产出要求]\n{task_obj.expected_output}",
+            ]
+            text_content = "\n\n".join(prompt_parts)
+            payload_to_render = text_content
+        elif prompt is not None:
+            text_content = getattr(prompt, "description", None) or (
+                getattr(prompt, "extract_plain_text", lambda: str(prompt))()
+                if prompt
+                else str(prompt)
+            )
+        else:
+            text_content = ""
+            payload_to_render = None
+
+        return cls(
+            text=text_content,
+            original_input=prompt,
+            payload_to_render=payload_to_render,
+            task_obj=task_obj,
+            response_model=response_model,
+            extra_tools=extra_tools,
+            guardrails=guardrails,
+        )
+
+
 __all__ = [
     "AgentRunResult",
     "AgentTask",
     "OutputDataT",
+    "RunIntent",
     "StreamedRunResult",
 ]

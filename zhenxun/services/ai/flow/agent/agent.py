@@ -1,6 +1,4 @@
-import asyncio
 from collections.abc import AsyncIterator, Callable, Sequence
-import contextlib
 from pathlib import Path
 from typing import Any, Generic, cast
 
@@ -11,17 +9,11 @@ from zhenxun.services.ai.capabilities import (
 from zhenxun.services.ai.config import get_llm_config
 from zhenxun.services.ai.context.knowledge.base import BaseKnowledge
 from zhenxun.services.ai.context.memory.builder import MemoryBuilder
-from zhenxun.services.ai.context.memory.capabilities import (
-    AgenticMemoryCapability,
-    SlotMemoryCapability,
-)
 from zhenxun.services.ai.context.memory.models import MemoryConfig
 from zhenxun.services.ai.core.exceptions import (
-    ConcurrencyInterruptException,
     ControlFlowExit,
 )
 from zhenxun.services.ai.core.messages import (
-    LLMMessage,
     PromptInput,
     UsageInfo,
 )
@@ -33,8 +25,8 @@ from zhenxun.services.ai.core.options import (
 from zhenxun.services.ai.core.protocols.tool import ToolExecutable, ToolResolvable
 from zhenxun.services.ai.core.stream_events import AgentStreamEvent, EventBus
 from zhenxun.services.ai.core.templates import PromptTemplate
-from zhenxun.services.ai.flow.base import BaseRunnable, ConcurrencyPolicy
-from zhenxun.services.ai.flow.concurrency import apply_concurrency_policy
+from zhenxun.services.ai.flow.core.base import BaseRunnable
+from zhenxun.services.ai.flow.core.models import InterventionPolicy
 from zhenxun.services.ai.guardrails import GuardrailSource, parse_guardrails
 from zhenxun.services.ai.llm.builder import IntentBuilder
 from zhenxun.services.ai.message_builder import MessageBuilder
@@ -47,14 +39,9 @@ from zhenxun.services.ai.run.context import AgentDepsT
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.run.models import (
     AgentRunEnd,
-    AgentRunError,
     AgentRunStart,
     OutputDataT,
-    StreamedRunResult,
-)
-from zhenxun.services.ai.run.subscribers import (
-    DefaultUISubscriber,
-    TelemetrySubscriber,
+    RunIntent,
 )
 from zhenxun.services.ai.tools.bridges.delegate import DelegateTool
 from zhenxun.services.ai.tools.core.tool import BaseTool, FunctionTool
@@ -65,8 +52,6 @@ from zhenxun.services.ai.tools.providers.skills.capabilities import (
     SkillCapability,
 )
 from zhenxun.services.ai.tools.providers.skills.models import Skill, SkillSource
-from zhenxun.services.ai.utils import ContextUtils
-from zhenxun.services.ai.utils.logger import log_agent as logger
 from zhenxun.utils.pydantic_compat import (
     model_construct,
     model_copy,
@@ -104,8 +89,8 @@ class AgentBuilder(Generic[AgentDepsT, OutputDataT]):
     def __init__(self, name: str):
         self._kwargs: dict[str, Any] = {"name": name}
         self._config: AgentConfig | dict | None = None
-        self._executor: Any | None = None
-        self._directive_handlers: dict[str, Any] = {}
+        self._executor: "BaseAgentExecutor | None" = None
+        self._directive_handlers: dict[str, Callable] = {}
 
     def with_instruction(
         self, instruction: str | PromptTemplate
@@ -203,7 +188,7 @@ class AgentBuilder(Generic[AgentDepsT, OutputDataT]):
         配置对话记忆与上下文管理策略。
 
         参数:
-            memory: 是否开启长期记忆与上下文压缩，支持布尔值或显式配置对象。
+            memory: 是否开启短期记忆与上下文压缩，支持布尔值或显式配置对象。
         """
         self._kwargs["memory"] = memory
         return self
@@ -220,7 +205,9 @@ class AgentBuilder(Generic[AgentDepsT, OutputDataT]):
         self._kwargs["generation_config"] = config
         return self
 
-    def with_intervention(self, policy: Any) -> "AgentBuilder[AgentDepsT, OutputDataT]":
+    def with_intervention(
+        self, policy: "InterventionPolicy | None"
+    ) -> "AgentBuilder[AgentDepsT, OutputDataT]":
         """配置运行时消息干预策略。"""
         if self._config is None:
             self._config = AgentConfig()
@@ -349,7 +336,7 @@ class Agent(
         name: str,
         instruction: str | PromptTemplate = "",
         description: str | None = None,
-        persona: Persona | dict | None = None,
+        persona: Persona | None = None,
         model: str | Callable[[], str] | None = None,
         tools: Sequence[ToolSource] | None = None,
         skills: Sequence[str | Path | Skill | SkillSource] | None = None,
@@ -361,7 +348,7 @@ class Agent(
         guardrails: list[GuardrailSource] | None = None,
         capabilities: list[CapabilitySource] | None = None,
         executor: BaseAgentExecutor | None = None,
-        directive_handlers: dict[str, Any] | None = None,
+        directive_handlers: dict[str, Callable] | None = None,
     ):
         """
         初始化 Agent。
@@ -370,13 +357,13 @@ class Agent(
             name: Agent 名称，用于日志、事件和链路标识。
             instruction: 静态系统指令，可为普通字符串或模板字符串。
             description: 智能体描述，用于外部路由节点决定是否调用。
-            persona: 角色设定配置，传入 dict 会自动构造成 Persona。
+            persona: 角色设定配置 (Persona 实例)。
             model: 默认模型名称 (如 Provider/Model) 或返回模型名的回调。
             tools: 初始工具定义列表，支持混合使用工具对象与字符串工具名。
             skills: 注入的领域知识技能，支持 ID、目录 Path、Skill 对象或动态源。
             generation_config: 默认生成配置，支持 GenerationConfig、IntentBuilder 或 dict。
             response_model: 结构化输出模型，若为空则按纯文本输出。
-            memory: 是否开启长期记忆与上下文压缩，支持布尔值或 MemoryBuilder/Config。
+            memory: 是否开启短期记忆与上下文压缩，支持布尔值或 MemoryBuilder/Config。
             knowledge: 挂载的知识库，支持单个或列表，底层自动将其注册入工具链。
             config: 统一配置，合并了全局与单次运行策略，支持字典。
             guardrails: 护栏定义列表，支持可调用对象、规则字符串或护栏实例。
@@ -388,18 +375,12 @@ class Agent(
 
         if description:
             self.description = description
-        elif persona:
-            p_obj = persona if isinstance(persona, Persona) else Persona(**persona)
-            self.description = f"角色：{p_obj.role}，目标：{p_obj.goal}"
         else:
             self.description = str(instruction)[:150] if instruction else "AI Agent"
 
         self.instruction = instruction
 
-        if isinstance(persona, dict):
-            self.persona = Persona(**persona)
-        else:
-            self.persona = persona
+        self.persona = persona
         self.model_name = model
 
         self.namespace = infer_plugin_namespace() or "unknown"
@@ -465,16 +446,6 @@ class Agent(
 
         self.capabilities: list[CapabilitySource] = []
 
-        if self.memory_config.long_term.enable and self.memory_config.long_term.agentic:
-            self.capabilities.append(
-                AgenticMemoryCapability(self.memory_config, self.namespace)
-            )
-
-        if self.memory_config.slots.enable:
-            self.capabilities.append(
-                SlotMemoryCapability(self.memory_config, self.namespace)
-            )
-
         if capabilities:
             self.capabilities.extend(capabilities)
 
@@ -492,7 +463,7 @@ class Agent(
         *,
         name: str | None = None,
         description: str | None = None,
-        settings: Any | None = None,
+        settings: ToolOptions | None = None,
     ):
         """
         实例级工具注册装饰器。
@@ -556,7 +527,7 @@ class Agent(
 
         return decorator if func is None else decorator(func)
 
-    def guardrail(self, func: Callable | str | Any | None = None):
+    def guardrail(self, func: GuardrailSource | None = None):
         """护栏装饰器/注册器 (支持传入函数或自然语言风控规则字符串)"""
         if func is None:
 
@@ -614,26 +585,20 @@ class Agent(
             **kwargs,
         )
 
-    @contextlib.asynccontextmanager
-    async def run_stream(
+    async def _execute_stream(
         self,
-        prompt: PromptInput | AgentTask | None = None,
-        *,
-        config: AgentConfig | dict | None = None,
-        deps: AgentDepsT | None = None,
-        context: RunContext[AgentDepsT] | None = None,
-        event_bus: EventBus | None = None,
+        intent: RunIntent,
+        context: RunContext[AgentDepsT],
+        cancel_token: CancellationToken,
+        event_bus: EventBus,
         **kwargs: Any,
-    ) -> AsyncIterator[StreamedRunResult[OutputDataT]]:
-        """
-        智能体流式运行入口。
-        返回上下文管理器，可安全、解耦地获取底层事件或纯净文本结果。
-        """
-        override_conf = (
-            AgentConfig(**config)
-            if isinstance(config, dict)
-            else (config or AgentConfig())
-        )
+    ) -> AsyncIterator[AgentStreamEvent]:
+        raw_config = kwargs.pop("config", None)
+        if isinstance(raw_config, dict):
+            override_conf = AgentConfig(**raw_config)
+        else:
+            override_conf = raw_config or AgentConfig()
+
         effective_config = self.config.merge_with(override_conf)
 
         if effective_config.skills:
@@ -644,9 +609,6 @@ class Agent(
                     skills=effective_config.skills, namespace=infer_plugin_namespace()
                 )
             )
-        bus = event_bus or EventBus()
-
-        TelemetrySubscriber().attach(bus)
 
         if self._event_listeners:
             for ev_type, callbacks in self._event_listeners.items():
@@ -655,130 +617,30 @@ class Agent(
                     def _make_handler(callback_func: Callable) -> Callable:
                         async def _di_handler(event: AgentStreamEvent):
                             await DependencyInjector.invoke(
-                                callback_func, {"stream_event": event}, safe_context
+                                callback_func, {"stream_event": event}, context
                             )
 
                         return _di_handler
 
-                    bus.subscribe(ev_type, _make_handler(cb))
+                    event_bus.subscribe(ev_type, _make_handler(cb))
 
-        if context is None:
-            explicit_session_id = kwargs.get("session_id")
-            safe_context = RunContext[AgentDepsT](session_id=explicit_session_id)
-            if deps is not None:
-                safe_context.deps = cast(AgentDepsT, deps)
-        else:
-            safe_context = context
-            if deps is not None and safe_context.deps is None:
-                safe_context.deps = cast(AgentDepsT, deps)
-
-        if safe_context.get_bot() and safe_context.get_event():
-            verbose_ui = effective_config.verbose_ui
-            DefaultUISubscriber(safe_context, verbose=verbose_ui).attach(bus)
-
-        policy = getattr(self.config, "concurrency_policy", None)
-        if policy is None:
-            policy = (
-                ConcurrencyPolicy.ALLOW
-                if getattr(self.config, "stateless", True)
-                else ConcurrencyPolicy.QUEUE
-            )
-
-        intervention_policy = getattr(self.config, "intervention_policy", None)
-
-        lock_id = ContextUtils.extract_concurrency_lock_id(
-            safe_context,
-            getattr(self.config, "concurrency_scope", None),
-            safe_context.session_id or "default_session",
+        yield AgentRunStart(agent_name=self.name)
+        result = await self._run_step(
+            intent=intent,
+            context=context,
+            config=effective_config,
+            cancellation_token=cancel_token,
+            event_bus=event_bus,
+            **kwargs,
         )
-
-        async def _execution_task():
-            cancel_token = safe_context.run.cancellation_token or CancellationToken()
-            safe_context.run.cancellation_token = cancel_token
-
-            try:
-                async with apply_concurrency_policy(
-                    session_id=safe_context.session_id or "default_session",
-                    lock_id=lock_id,
-                    policy=policy,
-                    cancel_token=cancel_token,
-                    intervention_policy=intervention_policy,
-                    message=prompt,
-                ):
-                    await bus.emit(AgentRunStart(agent_name=self.name))
-                    result = await self._run_step(
-                        prompt=prompt,
-                        context=safe_context,
-                        config=effective_config,
-                        cancellation_token=cancel_token,
-                        event_bus=bus,
-                        **kwargs,
-                    )
-                    await bus.emit(AgentRunEnd(result=result))
-            except ControlFlowExit as e:
-                await bus.emit(AgentRunError(error=e))
-            except asyncio.CancelledError:
-                logger.debug(f"Agent {self.name} 执行被并发策略中断取消。")
-                await bus.emit(
-                    AgentRunError(
-                        error=ConcurrencyInterruptException("任务已被新请求打断并接管")
-                    )
-                )
-            except Exception as e:
-                await bus.emit(AgentRunError(error=e))
-            finally:
-                await bus.end()
-
-        task = asyncio.create_task(_execution_task())
-        result_obj = StreamedRunResult[OutputDataT](bus)
-
-        try:
-            yield result_obj
-        finally:
-            if not task.done():
-                task.cancel()
-
-    def _parse_task_prompt(
-        self, prompt: PromptInput | AgentTask | None
-    ) -> tuple[AgentTask | None, Any | None, list[Any], Any, list[Any]]:
-        """解析输入意图，提取数据契约 (AgentTask)"""
-        task_obj = None
-        final_prompt_payload = None
-        extra_tools = []
-        run_output_type = self.response_model
-        task_guardrails = []
-
-        if isinstance(prompt, AgentTask):
-            task_obj = prompt
-            if task_obj.response_model:
-                run_output_type = task_obj.response_model
-            if task_obj.tools:
-                extra_tools.extend(task_obj.tools)
-            if hasattr(task_obj, "_parsed_guardrails"):
-                task_guardrails.extend(task_obj._parsed_guardrails)
-
-            prompt_parts = [
-                f"### 📋 [任务指令]\n{task_obj.description}",
-                f"### 🎯 [预期产出要求]\n{task_obj.expected_output}",
-            ]
-            final_prompt_payload = "\n\n".join(prompt_parts)
-        elif prompt is not None:
-            final_prompt_payload = prompt
-
-        return (
-            task_obj,
-            final_prompt_payload,
-            extra_tools,
-            run_output_type,
-            task_guardrails,
-        )
+        yield AgentRunEnd(result=result)
 
     async def on_state_init(
         self,
-        prompt: PromptInput | AgentTask | None = None,
+        intent: RunIntent,
         context: RunContext[AgentDepsT] | None = None,
         config: AgentConfig | None = None,
-        cancellation_token: Any = None,
+        cancellation_token: CancellationToken | None = None,
         event_bus: EventBus | None = None,
         **kwargs: Any,
     ) -> tuple[AgentState, AgentRunResources]:
@@ -789,19 +651,17 @@ class Agent(
         if config is None:
             config = AgentConfig()
 
-        (
-            task_obj,
-            final_prompt_payload,
-            extra_tools,
-            run_output_type,
-            task_guardrails,
-        ) = self._parse_task_prompt(prompt)
+        task_obj = intent.task_obj
+        final_prompt_payload = intent.payload_to_render
+        extra_tools = intent.extra_tools
+        run_output_type = intent.response_model or self.response_model
+        task_guardrails = intent.guardrails
 
         effective_memory = AgentProfileResolver.resolve_memory(
             self.memory_config, config.memory
         )
 
-        session_metadata, reader, writer = SessionBuilder.build_session_and_memory(
+        session_metadata, memory_context = SessionBuilder.build_session_and_memory(
             context, self.namespace, self.name, effective_memory
         )
 
@@ -821,8 +681,7 @@ class Agent(
         resources = AgentRunResources(
             run_context=context,
             session_meta=session_metadata,
-            memory_reader=reader,
-            memory_writer=writer,
+            memory_context=memory_context,
             run_scoped_cap=run_scoped_cap,
             task_obj=task_obj,
             config=config,
@@ -831,13 +690,7 @@ class Agent(
         state.current_request_extra["final_prompt_payload"] = final_prompt_payload
         state.current_request_extra["extra_tools"] = extra_tools
 
-        if final_prompt_payload is not None:
-            if isinstance(final_prompt_payload, str):
-                context.run.user_input = final_prompt_payload
-            elif hasattr(final_prompt_payload, "extract_plain_text"):
-                context.run.user_input = final_prompt_payload.extract_plain_text()
-            else:
-                context.run.user_input = str(final_prompt_payload)
+        context.run.user_input = intent.text
 
         context.run.agent_name = self.name
         context.run.cancellation_token = cancellation_token
@@ -855,7 +708,7 @@ class Agent(
         """装配记忆与提示词上下文、解析可用工具集"""
 
         context = resources.run_context
-        reader = resources.memory_reader
+        memory_context = resources.memory_context
         run_scoped_cap = (
             resources.run_scoped_cap
             if isinstance(resources.run_scoped_cap, CombinedCapability)
@@ -873,16 +726,6 @@ class Agent(
             run_scoped_cap=run_scoped_cap,
             persona=cast(Persona | None, self.persona),
         )
-
-        if reader:
-            long_term_fact = await reader.get_long_term_context(
-                context.run.user_input or ""
-            )
-            if long_term_fact:
-                dynamic_messages.append(LLMMessage.system(long_term_fact))
-            slots_fact = await reader.get_slots_context()
-            if slots_fact:
-                dynamic_messages.append(LLMMessage.system(slots_fact))
 
         tool_payload = await ToolBuilder.resolve_tools(
             tool_definitions=self.tool_definitions,
@@ -910,11 +753,11 @@ class Agent(
             static_prompts_list.extend(tool_payload.injected_prompts)
 
         messages_for_run = (
-            await reader.get_short_term_context(
+            await memory_context.read(
                 model_name=context.run.current_model or "",
                 override_history=resources.config.message_history,
             )
-            if reader
+            if memory_context
             else []
         )
 
@@ -926,8 +769,8 @@ class Agent(
                 final_prompt_payload, bot=context.get_bot(), event=context.get_event()
             ):
                 messages_for_run.append(msgs[-1])
-                if resources.memory_writer:
-                    await resources.memory_writer.save_new_messages([msgs[-1]])
+                if resources.memory_context:
+                    await resources.memory_context.write([msgs[-1]])
 
         final_tools = await ToolBuilder.prepare_effective_tools(
             effective_tools, context, self.tool_filters, run_scoped_cap
@@ -960,14 +803,18 @@ class Agent(
             or StandardAgentExecutor(directive_handlers=self.directive_handlers)
         )
         resources.model_name = context.run.current_model
-        raw_result: Any = await executor.run(state=state, resources=resources)
+        raw_result: AgentRunResult[Any] = await executor.run(
+            state=state, resources=resources
+        )
 
         new_msgs = raw_result.messages[state.origin_msg_len :]
-        if resources.memory_writer:
-            await resources.memory_writer.save_new_messages(new_msgs)
+        if resources.memory_context:
+            await resources.memory_context.write(new_msgs)
 
         final_output = getattr(raw_result, "output", None) or (
-            raw_result.messages[-1].extract_text if raw_result.messages else ""
+            getattr(raw_result.messages[-1], "extract_text", "")
+            if raw_result.messages
+            else ""
         )
 
         return cast(
@@ -984,17 +831,17 @@ class Agent(
 
     async def _run_step(
         self,
-        prompt: PromptInput | AgentTask | None = None,
+        intent: RunIntent,
         *,
         context: RunContext[AgentDepsT],
         config: AgentConfig,
-        cancellation_token: Any = None,
+        cancellation_token: CancellationToken | None = None,
         event_bus: EventBus | None = None,
         **kwargs: Any,
     ) -> AgentRunResult[OutputDataT]:
         """原子步总管：将具体的生命周期方法编织为洋葱模型管道"""
         state, resources = await self.on_state_init(
-            prompt,
+            intent,
             context,
             config,
             cancellation_token,

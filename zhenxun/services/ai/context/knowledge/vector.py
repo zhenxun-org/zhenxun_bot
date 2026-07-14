@@ -5,6 +5,7 @@ import anyio
 from nonebot.adapters import Bot, Event
 from pydantic import BaseModel, Field
 
+from zhenxun.services.ai.context.rag.backends import StorageBackend
 from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
 from zhenxun.services.ai.context.rag.models import BaseRecord
 from zhenxun.services.ai.core.messages import LLMMessage
@@ -55,7 +56,7 @@ class VectorKnowledge(BaseKnowledge):
         "{knowledge_text}"
     )
 
-    _global_storage: Any = None
+    _global_storage: StorageBackend | None = None
 
     def __init__(
         self,
@@ -194,7 +195,7 @@ class VectorKnowledge(BaseKnowledge):
         return super().get_instructions()
 
     async def before_llm_request(
-        self, context: RunContext, messages: list[Any]
+        self, context: RunContext, messages: list[LLMMessage]
     ) -> None:
         """
         生命周期钩子：在向底层 LLM 发起请求前触发。
@@ -285,13 +286,27 @@ class VectorKnowledge(BaseKnowledge):
         return await self.rag_client.ingest([doc])
 
     async def add_directory(self, dir_path: str | Path) -> int:
-        """扫描目录并注入所有支持的文件"""
-        total_chunks = 0
+        """扫描目录并批量注入所有支持的文件"""
         aio_path = anyio.Path(dir_path)
+        docs_to_ingest = []
+
         async for p in aio_path.rglob("*"):
             if await p.is_file():
-                total_chunks += await self.add_file(Path(p))
-        return total_chunks
+                std_path = Path(p)
+                ext = std_path.suffix.lower()
+                reader = self.readers.get(ext)
+                if not reader:
+                    logger.warning(f"当前知识库未配置支持解析文件后缀: {ext}")
+                    continue
+
+                doc = await reader.read(std_path)
+                if doc:
+                    docs_to_ingest.append(doc)
+
+        if not docs_to_ingest:
+            return 0
+
+        return await self.rag_client.ingest(docs_to_ingest)
 
     @tool(
         name="search_knowledge",

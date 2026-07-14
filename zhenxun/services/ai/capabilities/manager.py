@@ -193,11 +193,7 @@ def capability(
         """装饰器内部函数，实现类注册"""
         final_name = name or cls.__name__
         final_tags = tags or []
-        ns = (
-            namespace
-            if namespace is not None
-            else infer_plugin_namespace(default="global")
-        )
+        ns = namespace if namespace is not None else infer_plugin_namespace()
         capability_manager.register(
             cls, name=final_name, namespace=ns, tags=final_tags, auto_apply=auto_apply
         )

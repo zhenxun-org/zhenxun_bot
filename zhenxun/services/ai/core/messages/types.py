@@ -25,6 +25,8 @@ RoleT = TypeVar("RoleT", default=str, covariant=True)
 ContentT = TypeVar("ContentT", default=LLMContentPart, covariant=True)
 """泛型：多模态片段数组的元素内容类型变量"""
 
+OutputDataT = TypeVar("OutputDataT", default=str)
+
 
 from .context_events import AgentEvent
 from .models import (
@@ -53,6 +55,7 @@ __all__ = [
     "AnyLLMMessage",
     "ContentT",
     "LLMContentPart",
+    "OutputDataT",
     "PromptInput",
     "RoleT",
     "UserContentUnion",

@@ -4,20 +4,13 @@ import time
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from zhenxun.services.ai.utils.logger import log_rag as logger
+from zhenxun.utils.pydantic_compat import model_copy
 
+from .backends.embedders import Embedder
 from .models import QueryRequest, SearchResult
 
 if TYPE_CHECKING:
     from .backends.storages import StorageBackend
-
-
-def normalize_query_text(query: Any) -> str:
-    """辅助函数：提取各种输入形式（如字符串、平台Message对象）的纯文本用于检索"""
-    if isinstance(query, str):
-        return query
-    if hasattr(query, "extract_plain_text"):
-        return query.extract_plain_text()
-    return str(query) if query is not None else ""
 
 
 @runtime_checkable
@@ -29,9 +22,7 @@ class BaseRetriever(Protocol):
     """
 
     @abstractmethod
-    async def retrieve(
-        self, query: Any, limit: int = 10, **kwargs: Any
-    ) -> list[SearchResult]: ...
+    async def retrieve(self, request: QueryRequest) -> list[SearchResult]: ...
 
 
 @runtime_checkable
@@ -72,7 +63,7 @@ class VectorDBRetriever(BaseRetriever):
     def __init__(
         self,
         storage: "StorageBackend",
-        embedder: Any,
+        embedder: Embedder,
         scope_prefix: str | None = None,
         score_threshold: float = 0.4,
     ):
@@ -90,29 +81,25 @@ class VectorDBRetriever(BaseRetriever):
         self.scope_prefix = scope_prefix
         self.score_threshold = score_threshold
 
-    async def retrieve(
-        self, query: Any, limit: int = 10, **kwargs: Any
-    ) -> list[SearchResult]:
-        text_query = normalize_query_text(query)
+    async def retrieve(self, request: QueryRequest) -> list[SearchResult]:
+        if not request.embedding and request.text:
+            vecs = await self.embedder(request.text, task="query")
+            request.embedding = vecs[0] if vecs else None
 
-        vecs = await self.embedder(query, task="query")
-        query_vec = vecs[0] if vecs else None
-
-        if not text_query.strip() and not query_vec:
+        if not request.text.strip() and not request.embedding:
             return []
 
-        req = QueryRequest(
-            text=text_query,
-            embedding=query_vec,
-            limit=limit * 2,
-            search_type="dense",
-            metadata_filters=kwargs.get("metadata_filters"),
-        )
-        effective_scopes = kwargs.get(
-            "scopes", [self.scope_prefix] if self.scope_prefix else None
-        )
-        results = await self.storage.search(req, scopes=effective_scopes)
-        return [r for r in results if r.score >= self.score_threshold][:limit]
+        request.search_type = "dense"
+        if not request.scopes and self.scope_prefix:
+            request.scopes = [self.scope_prefix]
+
+        original_limit = request.limit
+        request.limit = original_limit * 2
+
+        results = await self.storage.search(request)
+
+        request.limit = original_limit
+        return [r for r in results if r.score >= self.score_threshold][: request.limit]
 
 
 class DatabaseSparseRetriever(BaseRetriever):
@@ -136,24 +123,20 @@ class DatabaseSparseRetriever(BaseRetriever):
         self.scope_prefix = scope_prefix
         self.score_threshold = score_threshold
 
-    async def retrieve(
-        self, query: Any, limit: int = 10, **kwargs: Any
-    ) -> list[SearchResult]:
-        text_query = normalize_query_text(query)
-        if not text_query.strip():
+    async def retrieve(self, request: QueryRequest) -> list[SearchResult]:
+        if not request.text.strip():
             return []
 
-        req = QueryRequest(
-            text=text_query,
-            limit=limit * 2,
-            search_type="sparse",
-            metadata_filters=kwargs.get("metadata_filters"),
-        )
-        effective_scopes = kwargs.get(
-            "scopes", [self.scope_prefix] if self.scope_prefix else None
-        )
-        results = await self.storage.search(req, scopes=effective_scopes)
-        return [r for r in results if r.score > self.score_threshold][:limit]
+        request.search_type = "sparse"
+        if not request.scopes and self.scope_prefix:
+            request.scopes = [self.scope_prefix]
+
+        original_limit = request.limit
+        request.limit = original_limit * 2
+
+        results = await self.storage.search(request)
+        request.limit = original_limit
+        return [r for r in results if r.score > self.score_threshold][: request.limit]
 
 
 class RerankRetriever(BaseRetriever):
@@ -183,18 +166,16 @@ class RerankRetriever(BaseRetriever):
         self.oversample_factor = oversample_factor
         self.min_oversample = min_oversample
 
-    async def retrieve(
-        self, query: Any, limit: int = 10, **kwargs: Any
-    ) -> list[SearchResult]:
-        oversample_limit = max(limit * self.oversample_factor, self.min_oversample)
-        initial_results = await self.base_retriever.retrieve(
-            query, limit=oversample_limit, **kwargs
+    async def retrieve(self, request: QueryRequest) -> list[SearchResult]:
+        req_clone = model_copy(request, deep=True)
+        req_clone.limit = max(
+            request.limit * self.oversample_factor, self.min_oversample
         )
+
+        initial_results = await self.base_retriever.retrieve(req_clone)
 
         if not initial_results:
             return []
-
-        text_query = normalize_query_text(query)
 
         docs: list[str | dict[str, str]] = [
             res.record.content for res in initial_results
@@ -204,14 +185,14 @@ class RerankRetriever(BaseRetriever):
 
         try:
             reranked = await rerank(
-                query=text_query,
+                query=request.text,
                 documents=docs,
-                top_n=min(limit, self.top_n),
+                top_n=min(request.limit, self.top_n),
                 model=self.model_name,
             )
         except Exception as e:
             logger.warning(f"Rerank 重排请求失败，将降级返回初筛结果: {e}")
-            return initial_results[:limit]
+            return initial_results[: request.limit]
 
         final_results = []
         for rr in reranked:
@@ -243,15 +224,11 @@ class PipelineRetriever(BaseRetriever):
         self.post_processors = post_processors or []
         self.pre_processors = pre_processors or []
 
-    async def retrieve(
-        self, query: Any, limit: int = 10, **kwargs: Any
-    ) -> list[SearchResult]:
-        text_query = normalize_query_text(query)
+    async def retrieve(self, request: QueryRequest) -> list[SearchResult]:
+        requests_to_search = [request]
 
-        queries_to_search = [query]
-
-        if text_query.strip():
-            processed_texts = [text_query]
+        if request.text.strip():
+            processed_texts = [request.text]
             for pp in self.pre_processors:
                 new_texts = []
                 for t in processed_texts:
@@ -259,15 +236,23 @@ class PipelineRetriever(BaseRetriever):
                 processed_texts = new_texts
 
             if len(processed_texts) > 1 or (
-                len(processed_texts) == 1 and processed_texts[0] != text_query
+                len(processed_texts) == 1 and processed_texts[0] != request.text
             ):
-                queries_to_search.extend(processed_texts)
+                requests_to_search = []
+                for pt in processed_texts:
+                    new_req = model_copy(request, deep=True)
+                    new_req.text = pt
+                    requests_to_search.append(new_req)
 
         all_results = []
         seen_ids = set()
 
-        for q in queries_to_search:
-            res = await self.base_retriever.retrieve(q, limit=limit * 2, **kwargs)
+        for req in requests_to_search:
+            original_limit = req.limit
+            req.limit = original_limit * 2
+            res = await self.base_retriever.retrieve(req)
+            req.limit = original_limit
+
             for r in res:
                 if r.record.id not in seen_ids:
                     seen_ids.add(r.record.id)
@@ -276,9 +261,9 @@ class PipelineRetriever(BaseRetriever):
         results = sorted(all_results, key=lambda x: x.score, reverse=True)
 
         for pp in self.post_processors:
-            results = await pp.process(results, query)
+            results = await pp.process(results, request.text)
 
-        return results[:limit]
+        return results[: request.limit]
 
 
 class LifecyclePostProcessor(PostProcessor):
@@ -367,14 +352,22 @@ class HybridRetriever(BaseRetriever):
         self.oversample_factor = oversample_factor
         self.min_oversample = min_oversample
 
-    async def retrieve(
-        self, query: Any, limit: int = 10, **kwargs: Any
-    ) -> list[SearchResult]:
-        oversample_limit = max(limit * self.oversample_factor, self.min_oversample)
+    async def retrieve(self, request: QueryRequest) -> list[SearchResult]:
+        oversample_limit = max(
+            request.limit * self.oversample_factor, self.min_oversample
+        )
+
+        dense_req = model_copy(request, deep=True)
+        dense_req.limit = oversample_limit
+        dense_req.search_type = "dense"
+
+        sparse_req = model_copy(request, deep=True)
+        sparse_req.limit = oversample_limit
+        sparse_req.search_type = "sparse"
 
         results = await asyncio.gather(
-            self.dense_retriever.retrieve(query, limit=oversample_limit, **kwargs),
-            self.sparse_retriever.retrieve(query, limit=oversample_limit, **kwargs),
+            self.dense_retriever.retrieve(dense_req),
+            self.sparse_retriever.retrieve(sparse_req),
             return_exceptions=True,
         )
 
@@ -435,6 +428,6 @@ class HybridRetriever(BaseRetriever):
         logger.debug(
             f"⚖️ [HybridSearch] 融合完成: "
             f"Dense({len(dense_res)}) + Sparse({len(sparse_res)}) "
-            f"-> Merged({len(final_results)}), 截取 Top {limit}"
+            f"-> Merged({len(final_results)}), 截取 Top {request.limit}"
         )
-        return final_results[:limit]
+        return final_results[: request.limit]

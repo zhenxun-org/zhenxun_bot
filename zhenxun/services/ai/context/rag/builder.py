@@ -2,7 +2,7 @@ from typing import Any
 
 from zhenxun.services.ai.utils.logger import log_rag as logger
 
-from .backends import StorageBackend
+from .backends import Embedder, StorageBackend
 from .configs import RAGConfig
 from .engine import ScopedRAGClient
 from .ingestion import (
@@ -29,18 +29,25 @@ from .retrieval import (
 
 class RAGBuilder:
     """
-    RAG 管线组装构建器 (Fluent Builder Pattern)。
-    使用内部状态驱动模式 (The Memory Pattern)，内部维护私有的 RAGConfig 实例。
+    RAG 管线组装构建器。
+    使用内部状态驱动模式，内部维护私有的 RAGConfig 实例。
     """
 
     def __init__(
         self, storage: StorageBackend | None = None, config: RAGConfig | None = None
     ):
+        """
+        初始化 RAG 管线组装构建器。
+
+        参数:
+            storage: (可选) 底层存储后端实例。
+            config: (可选) RAG 配置对象。若不提供，将新建默认的 RAGConfig 实例。
+        """
         self._config = config or RAGConfig()
         if storage is not None:
             self._config.storage = storage
 
-    def with_embedder(self, embedder: Any) -> "RAGBuilder":
+    def with_embedder(self, embedder: Embedder) -> "RAGBuilder":
         """
         设置向量化引擎。
 

@@ -2,11 +2,13 @@
 LLM 服务的高级 API 接口 - 便捷函数入口 (无状态)
 """
 
+import json
 from pathlib import Path
 from typing import Any, Literal, TypeVar, overload
 
 from pydantic import BaseModel
 
+from zhenxun.services.ai.config import get_llm_config
 from zhenxun.services.ai.core.exceptions import (
     ControlFlowExit,
     LLMException,
@@ -27,14 +29,18 @@ from zhenxun.services.ai.core.messages import (
     RerankRequest,
     RerankResult,
     SpeechRequest,
+    UsageInfo,
 )
 from zhenxun.services.ai.core.models import ModelName
 from zhenxun.services.ai.core.options import (
     GenerationConfig,
     LLMEmbeddingConfig,
+    OutputFormatConfig,
+    ResponseFormat,
+    StructuredOutputStrategy,
     TTSConfig,
 )
-from zhenxun.services.ai.guardrails import GuardrailSource
+from zhenxun.services.ai.guardrails import GuardrailSource, parse_guardrails
 from zhenxun.services.ai.utils.logger import log_llm as logger
 
 from .builder import IntentBuilder
@@ -109,7 +115,7 @@ async def embed(
 
 @overload
 async def embed(
-    input_batch: list[Any],
+    input_batch: list[PromptInput],
     *,
     model: ModelName = None,
     task: Literal[
@@ -122,7 +128,7 @@ async def embed(
 
 
 async def embed(
-    input_batch: PromptInput | list[Any],
+    input_batch: PromptInput | list[PromptInput],
     *,
     model: ModelName = None,
     task: Literal[
@@ -158,8 +164,6 @@ async def embed(
     )
 
     if not batch.payloads:
-        from zhenxun.services.ai.core.messages import UsageInfo
-
         return EmbeddingResponse(
             embeddings=[], usage=UsageInfo(), model_name=str(model)
         )
@@ -256,20 +260,12 @@ async def generate_structured(
         T: 解析验证通过后的 Pydantic 模型实例。
     """  # noqa: E501
     try:
-        from zhenxun.services.ai.config import get_llm_config
         from zhenxun.services.ai.core.engine.structured_parser import (
             BaseOutputProcessor,
-        )
-        from zhenxun.services.ai.core.options import (
-            OutputFormatConfig,
-            ResponseFormat,
-            StructuredOutputStrategy,
         )
 
         if max_retries is None:
             max_retries = get_llm_config().client_settings.structured_retries
-
-        from zhenxun.services.ai.guardrails import parse_guardrails
 
         parsed_guardrails = parse_guardrails(guardrails)
 
@@ -290,8 +286,6 @@ async def generate_structured(
         prompt_parts: list[str] = []
         if instruction:
             prompt_parts.append(instruction)
-
-        import json
 
         schema_str = json.dumps(json_schema, ensure_ascii=False, indent=2)
         prompt_parts.append(
@@ -393,7 +387,9 @@ async def generate(
             llm_context = LLMContext(request=request)
             combined_cap = CombinedCapability(sys_caps)
 
-            async def inner_handler(ctx: LLMContext[Any, Any]) -> ChatResponse:
+            async def inner_handler(
+                ctx: LLMContext[ChatRequest, ChatResponse],
+            ) -> ChatResponse:
                 return await LLMOrchestrator.invoke(
                     ctx.request,
                     model_name=model,
@@ -420,7 +416,7 @@ async def generate(
 
 @overload
 async def create_image(
-    prompt: str | Any,
+    prompt: PromptInput,
     *,
     images: None = None,
     model: ModelName = None,
@@ -432,7 +428,7 @@ async def create_image(
 
 @overload
 async def create_image(
-    prompt: str | Any,
+    prompt: PromptInput,
     *,
     images: list[Path | bytes | str] | Path | bytes | str,
     model: ModelName = None,
@@ -443,7 +439,7 @@ async def create_image(
 
 
 async def create_image(
-    prompt: str | Any,
+    prompt: PromptInput,
     *,
     images: list[Path | bytes | str] | Path | bytes | str | None = None,
     model: ModelName = None,

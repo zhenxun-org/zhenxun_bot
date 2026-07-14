@@ -365,7 +365,7 @@ class ToolProviderManager:
 
     def register_tool(self, tool: ToolExecutable):
         """注册由 @tool 生成的单一工具"""
-        ns = infer_plugin_namespace(default="global")
+        ns = infer_plugin_namespace()
         self.local_provider.register_tool(tool, ns)
         tags = getattr(getattr(tool, "settings", None), "tags", [])
         tag_str = f" | Tags: {tags}" if tags else ""
@@ -376,7 +376,7 @@ class ToolProviderManager:
         """
         注册一个完整的 Toolkit 实例，使其可通过智能字符串路由（Tag或Name）被动态发现。
         """
-        ns = infer_plugin_namespace(default="global")
+        ns = infer_plugin_namespace()
         self.local_provider.register_toolkit(toolkit, ns)
         tk_name = getattr(toolkit, "__class__", type).__name__
 

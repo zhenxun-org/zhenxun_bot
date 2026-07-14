@@ -1,18 +1,18 @@
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-import inspect
+from collections.abc import Callable, Mapping, Sequence
 import re
-from typing import Any, cast
-
-from nonebot.utils import is_coroutine_callable
 
 from zhenxun.services.ai.core.messages import AgentMessage
 from zhenxun.services.ai.core.templates import PromptTemplate
-from zhenxun.services.ai.run import AgentTask, RunContext
+from zhenxun.services.ai.flow.agent.agent import Agent, ToolSource
+from zhenxun.services.ai.flow.agent.models import AgentConfig
+from zhenxun.services.ai.flow.core.base import BaseRunnable
+from zhenxun.services.ai.run import RunContext, RunIntent
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.utils.logger import log_team as logger
 
-from .models import RouteDecision, Transition
+from .capabilities import TeamRoutingCapability
+from .models import RouteDecision, TeamRuntimeConfig, Transition
 
 
 class BaseRouter(ABC):
@@ -23,7 +23,7 @@ class BaseRouter(ABC):
         self,
         context: RunContext,
         history: Sequence[AgentMessage],
-        prompt: str | AgentTask | None = None,
+        intent: RunIntent,
     ) -> RouteDecision | None:
         """核心路由方法"""
         pass
@@ -32,7 +32,9 @@ class BaseRouter(ABC):
 class FunctionRouter(BaseRouter):
     """基于纯函数的极速路由器"""
 
-    def __init__(self, selector_func: Callable[..., Any], target: str | None = None):
+    def __init__(
+        self, selector_func: Callable[..., str | bool | None], target: str | None = None
+    ):
         """
         初始化基于函数的极速路由器。
 
@@ -47,27 +49,21 @@ class FunctionRouter(BaseRouter):
         self,
         context: RunContext,
         history: Sequence[AgentMessage],
-        prompt: str | AgentTask | None = None,
+        intent: RunIntent,
     ) -> RouteDecision | None:
-        sig = inspect.signature(self.selector_func)
-        call_kwargs = {"prompt": prompt, "context": context, "history": history}
-        if isinstance(prompt, AgentTask):
-            call_kwargs["agent_task"] = prompt
-            call_kwargs["task"] = prompt
-
-        kwargs_resolved = await DependencyInjector.resolve_all(
-            sig, call_kwargs, context
-        )
-        filtered_kwargs = {
-            k: v for k, v in kwargs_resolved.items() if k in sig.parameters
+        call_kwargs = {
+            "intent": intent,
+            "prompt": intent.original_input,
+            "context": context,
+            "history": history,
         }
+        if intent.task_obj:
+            call_kwargs["agent_task"] = intent.task_obj
+            call_kwargs["task"] = intent.task_obj
 
-        if is_coroutine_callable(self.selector_func):
-            _async_func = cast(Callable[..., Awaitable[Any]], self.selector_func)
-            selected_target = await _async_func(**filtered_kwargs)
-        else:
-            _sync_func = cast(Callable[..., Any], self.selector_func)
-            selected_target = _sync_func(**filtered_kwargs)
+        selected_target = await DependencyInjector.invoke(
+            self.selector_func, call_kwargs, context
+        )
 
         if isinstance(selected_target, bool):
             if selected_target and self.target:
@@ -97,13 +93,9 @@ class RegexRouter(BaseRouter):
         self,
         context: RunContext,
         history: Sequence[AgentMessage],
-        prompt: str | AgentTask | None = None,
+        intent: RunIntent,
     ) -> RouteDecision | None:
-        text_to_match = (
-            prompt.description
-            if isinstance(prompt, AgentTask)
-            else (prompt or context.run.user_input or "")
-        )
+        text_to_match = intent.text or context.run.user_input or ""
 
         if self.pattern.search(text_to_match):
             logger.debug(f"命中正则极速路由 -> {self.target}")
@@ -127,10 +119,10 @@ class ChainRouter(BaseRouter):
         self,
         context: RunContext,
         history: Sequence[AgentMessage],
-        prompt: str | AgentTask | None = None,
+        intent: RunIntent,
     ) -> RouteDecision | None:
         for router in self.routers:
-            decision = await router.route(context, history, prompt)
+            decision = await router.route(context, history, intent)
             if decision is not None:
                 return decision
         return None
@@ -142,11 +134,11 @@ class LLMRouter(BaseRouter):
     def __init__(
         self,
         team_name: str,
-        members: list[Any],
+        members: list[BaseRunnable],
         leader_model: str | None = None,
-        leader_tools: list[Any] | None = None,
+        leader_tools: list[ToolSource] | None = None,
         state_flow: Mapping[str, Sequence[Transition | str]] | Callable | None = None,
-        runtime_config: Any = None,
+        runtime_config: TeamRuntimeConfig | None = None,
         custom_prompt: str | None = None,
         allowed_transitions: list[Transition] | None = None,
         max_handoffs: int = 3,
@@ -179,13 +171,8 @@ class LLMRouter(BaseRouter):
         self,
         context: RunContext,
         history: Sequence[AgentMessage],
-        prompt: str | AgentTask | None = None,
+        intent: RunIntent,
     ) -> RouteDecision | None:
-        from zhenxun.services.ai.flow.agent.agent import Agent
-        from zhenxun.services.ai.flow.agent.models import AgentConfig
-
-        from .capabilities import TeamRoutingCapability
-
         default_system_prompt = """## 角色与目标
 你是一个高级任务路由器 (所在团队: {{ team_name }})。
 请根据用户的输入意图，立刻调用相应的移交工具 (transfer_to_...)
@@ -217,13 +204,6 @@ class LLMRouter(BaseRouter):
         )
 
         target_model = self.leader_model
-        if not target_model:
-            for m in self.members:
-                if m_model := getattr(m, "model_name", None) or getattr(
-                    m, "model", None
-                ):
-                    target_model = m_model
-                    break
 
         router_agent = Agent(
             name=f"{self.team_name}_Router",
@@ -240,7 +220,7 @@ class LLMRouter(BaseRouter):
         logger.debug("🤖 [LLMRouter] 启动 LLM 思考路由决策...")
 
         res = await router_agent.run(
-            prompt=prompt,
+            prompt=intent.original_input,
             context=sub_context,
             config=AgentConfig(message_history=history),
         )

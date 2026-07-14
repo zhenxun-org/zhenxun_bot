@@ -2,13 +2,18 @@
 LLM 生成配置相关类和函数
 """
 
-from typing import Any, Literal
+import inspect
+from typing import Any, Literal, cast
 from typing_extensions import Self
 
+from pydantic import BaseModel
+
+from zhenxun.services.ai.config import get_gemini_safety_threshold
 from zhenxun.services.ai.core.exceptions import ConfigurationException
 from zhenxun.services.ai.core.options import (
     GenerationConfig,
     ResponseFormat,
+    StructuredOutputStrategy,
 )
 from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.pydantic_compat import model_json_schema, model_validate
@@ -94,20 +99,12 @@ class IntentBuilder:
         强制要求结构化输出意图。
         支持自动处理 Pydantic 模型并转换为厂商所需的 JSON Schema。
         """
-        import inspect
-
-        from pydantic import BaseModel
-
-        from zhenxun.services.ai.core.options import StructuredOutputStrategy
-
         self._config.output.response_format = ResponseFormat.JSON
         self._config.output.response_mime_type = "application/json"
         if schema:
             if inspect.isclass(schema) and issubclass(schema, BaseModel):
                 self._config.output.response_schema = model_json_schema(schema)
             else:
-                from typing import cast
-
                 self._config.output.response_schema = cast(dict[str, Any], schema)
         if strict:
             self._config.output.structured_output_strategy = (
@@ -137,8 +134,6 @@ class IntentBuilder:
         安全合规意图。
         level 取值: 'strict' (最严格), 'moderate' (中等), 'none' (完全无限制)。
         """
-        from zhenxun.services.ai.config import get_gemini_safety_threshold
-
         if level == "strict":
             self.gemini.set_safety_threshold("BLOCK_LOW_AND_ABOVE")
         elif level == "none":

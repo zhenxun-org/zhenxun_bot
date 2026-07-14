@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from zhenxun.services.ai.run.models import RunIntent
+
 
 class StepType(str, Enum):
     FUNCTION = "Function"
@@ -19,6 +21,9 @@ class StepInput(BaseModel):
 
     input: Any = Field(default=None)
     """继承自 Workflow 的初始输入"""
+
+    intent: RunIntent | None = Field(default=None)
+    """归一化后的意图载体，避免下游节点猜测解析 input 的原始类型"""
 
     previous_step_content: Any = Field(default=None)
     """上一个执行步骤产生的直接输出内容"""
@@ -73,3 +78,4 @@ class WorkflowRunResult(BaseModel):
     """最后一个成功执行的步骤所产出的内容"""
     final_output: StepOutput | None = None
     """工作流根节点最终包装的完整产出对象"""
+

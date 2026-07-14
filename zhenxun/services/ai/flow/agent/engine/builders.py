@@ -9,25 +9,26 @@ from zhenxun.services.ai.capabilities import (
     CombinedCapability,
 )
 from zhenxun.services.ai.context.memory.builder import MemoryBuilder
-from zhenxun.services.ai.context.memory.engine import MemoryReader, MemoryWriter
+from zhenxun.services.ai.context.memory.engine import SessionMemoryContext
 from zhenxun.services.ai.context.memory.models import MemoryConfig
 from zhenxun.services.ai.context.memory.types import SessionMetadata
 from zhenxun.services.ai.core.messages import LLMMessage, TextPart
-from zhenxun.services.ai.core.options import GenerationConfig
+from zhenxun.services.ai.core.options import BaseOutputDefinition, GenerationConfig
+from zhenxun.services.ai.core.protocols.tool import ToolExecutable
 from zhenxun.services.ai.core.templates import PromptTemplate
 from zhenxun.services.ai.flow.agent.capabilities import (
     OutputValidationCapability,
     TaskTrackingCapability,
 )
 from zhenxun.services.ai.flow.agent.models import Persona
-from zhenxun.services.ai.run import RunContext
+from zhenxun.services.ai.run import AgentTask, RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.tools.engine.registry import (
     ToolCollection,
     tool_provider_manager,
 )
 from zhenxun.services.ai.tools.models import ResolvedToolPayload
-from zhenxun.services.ai.utils.scope import ScopeSelector
+from zhenxun.services.ai.utils.runtime import ContextUtils
 from zhenxun.utils.pydantic_compat import model_copy
 
 
@@ -36,7 +37,8 @@ class AgentProfileResolver:
 
     @staticmethod
     def resolve_memory(
-        agent_memory_config: MemoryConfig, override_memory: Any | None
+        agent_memory_config: MemoryConfig,
+        override_memory: bool | MemoryConfig | MemoryBuilder | None,
     ) -> MemoryConfig:
         """
         解析并合并 Memory 记忆域的配置。
@@ -86,11 +88,11 @@ class CapabilityBuilder:
     async def build_for_run(
         agent_name: str,
         namespace: str,
-        output_type: Any | None,
+        output_type: type[Any] | BaseOutputDefinition | None,
         raw_schema: dict | None,
         agent_guardrails: list,
         task_guardrails: list,
-        task_obj: Any | None,
+        task_obj: AgentTask | None,
         agent_capabilities: list,
         profile_capabilities: list | None,
         context: RunContext,
@@ -160,11 +162,11 @@ class ContextBuilder:
     @staticmethod
     async def build_prompts(
         instruction: str | PromptTemplate,
-        system_prompts: list[Any],
+        system_prompts: list[Callable],
         run_context: RunContext,
         run_scoped_cap: CombinedCapability,
         persona: Persona | None = None,
-    ) -> tuple[str, list[Any]]:
+    ) -> tuple[str, list[LLMMessage]]:
         """
         解析、合并并渲染 Agent 的系统提示词和上下文记忆。
         包含对依赖参数的动态注入和 Jinja 模板渲染。
@@ -291,9 +293,9 @@ class ToolBuilder:
 
     @staticmethod
     async def resolve_tools(
-        tool_definitions: list[Any],
-        toolset_funcs: list[Any],
-        system_tools: list[Any],
+        tool_definitions: list[ToolExecutable | Callable | dict[str, Any] | str],
+        toolset_funcs: list[Callable],
+        system_tools: list[ToolExecutable | Callable | dict[str, Any] | str],
         namespace: str,
         run_context: RunContext,
         run_scoped_cap: CombinedCapability,
@@ -359,7 +361,7 @@ class ToolBuilder:
 
     @staticmethod
     async def prepare_effective_tools(
-        effective_tools: list[Any],
+        effective_tools: list[ToolExecutable],
         context: RunContext,
         tool_filters: list[Callable],
         run_scoped_cap: CombinedCapability,
@@ -407,11 +409,15 @@ class ToolBuilder:
 
         final_defs_map = {d.name.lower(): d for d in current_tool_defs if d}
         final_effective_tools_list = []
+        seen_names = set()
+
         for t_exec in effective_tools:
             t_name = getattr(t_exec, "name", "unknown")
-            if t_name.lower() in final_defs_map:
+            t_name_lower = t_name.lower()
+            if t_name_lower in final_defs_map and t_name_lower not in seen_names:
+                seen_names.add(t_name_lower)
                 cloned_tool = copy.copy(t_exec)
-                cloned_tool._dynamic_def = final_defs_map[t_name.lower()]
+                setattr(cloned_tool, "_dynamic_def", final_defs_map[t_name_lower])
                 final_effective_tools_list.append(cloned_tool)
         return ToolCollection(final_effective_tools_list)
 
@@ -425,7 +431,7 @@ class SessionBuilder:
         namespace: str,
         agent_name: str,
         effective_memory: MemoryConfig,
-    ) -> tuple[Any, Any, Any]:
+    ) -> tuple[SessionMetadata, SessionMemoryContext]:
         """
         根据当前用户、群组和平台标识，动态隔离前缀，计算并构建会话与记忆存储的读写门面。
 
@@ -436,78 +442,21 @@ class SessionBuilder:
             effective_memory: 运行时最终生效的 MemoryConfig 配置对象。
 
         返回：
-            tuple[Any, Any, Any]: 包含 (SessionMetadata 会话元数据, MemoryReader 记忆读取器, MemoryWriter 记忆写入器) 的元组。
+            tuple[SessionMetadata, SessionMemoryContext]: 包含 (会话元数据, 会话记忆门面上下文) 的元组。
         """  # noqa: E501
-        bot_id = None
-        bot_inst = context.get_bot()
-        if bot_inst and hasattr(bot_inst, "self_id"):
-            bot_id = str(bot_inst.self_id)
-
-        selector = ScopeSelector(
-            user_id=context.get_user_id(),
-            group_id=context.get_group_id(),
-            platform=context.get_platform(),
-            bot_id=bot_id,
-            namespace=namespace,
-            agent_name=agent_name,
-        )
-
-        all_scopes = {"/"}
-        scope_name_mapping = {}
-
+        target_builder = None
         if effective_memory.short_term and effective_memory.short_term.isolation:
-            sel = effective_memory.short_term.isolation.resolve(
-                deps=context.deps,
-                prefix="",
-                default_namespace=namespace,
-                default_agent=agent_name,
-            )
-            all_scopes.add(sel.scope_prefix)
+            target_builder = effective_memory.short_term.isolation
 
-        for config_part in [effective_memory.slots, effective_memory.long_term]:
-            if config_part and hasattr(config_part, "scopes") and config_part.scopes:
-                for name, builder in config_part.scopes.items():
-                    sel = builder.resolve(
-                        deps=context.deps,
-                        prefix="",
-                        default_namespace=namespace,
-                        default_agent=agent_name,
-                    )
-                    all_scopes.add(sel.scope_prefix)
-                    scope_name_mapping[sel.scope_prefix] = name
-
-        parts = selector.get_scope_parts()
-        for i in range(len(parts)):
-            all_scopes.add("/" + "/".join(parts[: i + 1]))
-
-        accessible_scopes = sorted(all_scopes, key=lambda x: len(x.split("/")))
-
-        short_term_builder = (
-            effective_memory.short_term.isolation
-            if effective_memory.short_term
-            else effective_memory.base_isolation
+        session_metadata = ContextUtils.build_session_meta(
+            context=context, target_builder=target_builder, custom_namespace=namespace
         )
-        short_term_selector = short_term_builder.resolve(
-            deps=context.deps,
-            prefix="",
-            default_namespace=namespace,
-            default_agent=agent_name,
-        )
+        context.session.session_meta = session_metadata
 
-        session_metadata = SessionMetadata(
-            session_id=short_term_selector.scope_prefix,
-            selector=selector,
-            scope_prefix=selector.scope_prefix,
-            accessible_scopes=accessible_scopes,
-            scope_name_mapping=scope_name_mapping,
-        )
-        reader = MemoryReader(
-            session_meta=session_metadata, memory_config=effective_memory
-        )
-        writer = MemoryWriter(
+        memory_context = SessionMemoryContext(
             session_meta=session_metadata,
             memory_config=effective_memory,
             context=context,
         )
 
-        return session_metadata, reader, writer
+        return session_metadata, memory_context

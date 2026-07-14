@@ -1,13 +1,11 @@
 from collections.abc import Callable, Mapping, Sequence
-import inspect
-from typing import Any, cast
-
-from nonebot.utils import is_coroutine_callable
 
 from zhenxun.services.ai.capabilities import AbstractCapability
+from zhenxun.services.ai.flow.core.base import BaseRunnable
 from zhenxun.services.ai.run import RunContext
 from zhenxun.services.ai.run.di import DependencyInjector
 from zhenxun.services.ai.tools.bridges.handoff import HandoffTool
+from zhenxun.services.ai.tools.core.tool import BaseTool
 
 from .models import Transition
 
@@ -18,8 +16,8 @@ class TeamRoutingCapability(AbstractCapability):
     def __init__(
         self,
         team_name: str,
-        members: list[Any],
-        state_flow: Mapping[str, Sequence[Any]] | Callable | None = None,
+        members: list[BaseRunnable],
+        state_flow: Mapping[str, Sequence[Transition | str]] | Callable | None = None,
         max_handoffs: int = 3,
     ):
         self.team_name = team_name
@@ -27,7 +25,9 @@ class TeamRoutingCapability(AbstractCapability):
         self.state_flow = state_flow
         self.max_handoffs = max_handoffs
 
-    async def _get_allowed_transitions(self, context: RunContext) -> list[Any] | None:
+    async def _get_allowed_transitions(
+        self, context: RunContext
+    ) -> list[Transition] | None:
         """核心FSM解析：解析静态字典或动态执行函数获取允许的 Transition 列表"""
         if self.state_flow is None:
             return None
@@ -45,15 +45,9 @@ class TeamRoutingCapability(AbstractCapability):
             ]
 
         if callable(self.state_flow):
-            sig = inspect.signature(self.state_flow)
-            kwargs = await DependencyInjector.resolve_all(
-                sig, call_kwargs={}, context=context
+            result = await DependencyInjector.invoke(
+                self.state_flow, call_kwargs={}, context=context
             )
-
-            if is_coroutine_callable(self.state_flow):
-                result = await cast(Callable, self.state_flow)(**kwargs)
-            else:
-                result = cast(Callable, self.state_flow)(**kwargs)
 
             if result is None:
                 return None
@@ -62,7 +56,7 @@ class TeamRoutingCapability(AbstractCapability):
 
         return None
 
-    async def get_tools(self, context: RunContext) -> list[Any]:
+    async def get_tools(self, context: RunContext) -> list[BaseTool]:
         tools = []
         allowed_transitions = await self._get_allowed_transitions(context)
 
@@ -81,10 +75,7 @@ class TeamRoutingCapability(AbstractCapability):
                     if transition is None:
                         continue
 
-                if getattr(m, "persona", None):
-                    desc = f"角色：{m.persona.role}，目标：{m.persona.goal}"
-                else:
-                    desc = getattr(m, "description", "") or "处理节点"
+                desc = m.profile_summary
 
                 if transition and getattr(transition, "description", ""):
                     desc += f" 【移交条件】：{transition.description}"

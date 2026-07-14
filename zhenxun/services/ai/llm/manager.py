@@ -17,6 +17,7 @@ from zhenxun.services.ai.utils.logger import log_llm as logger
 from zhenxun.utils.manager.priority_manager import PriorityLifecycle
 from zhenxun.utils.pydantic_compat import model_dump
 
+from .system.cache import clear_model_cache, get_or_create_model
 from .system.capabilities import get_model_capabilities
 from .system.network import health_manager
 
@@ -277,8 +278,6 @@ async def get_model_instance(
 
     provider_config_found, model_detail_found = config_tuple_found
 
-    from .system.cache import get_or_create_model
-
     return await get_or_create_model(
         provider_config_found, model_detail_found, override_config
     )
@@ -288,8 +287,6 @@ def clear_all_cache() -> None:
     """
     清空模型实例缓存与路由组解析缓存。
     """
-    from .system.cache import clear_model_cache
-
     clear_model_cache()
     clear_resolved_group_cache()
     logger.debug("已清空全局模型实例与路由组缓存")
@@ -300,10 +297,7 @@ async def _init_llm_config_on_startup():
     """启动时初始化 LLM 配置、密钥状态并预热工具提供者管理器。"""
     logger.info("正在初始化 LLM 配置并加载遥测状态...")
     try:
-        from zhenxun.services.ai.config import get_llm_config
         from zhenxun.services.ai.tools.engine.registry import tool_provider_manager
-
-        from .system.network import health_manager
 
         get_llm_config()
         await health_manager.initialize()

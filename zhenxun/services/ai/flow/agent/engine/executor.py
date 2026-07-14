@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 import asyncio
+from collections.abc import Awaitable, Callable
 import json
-from typing import Any
+from typing import Any, Literal, cast
 
 from zhenxun.services.ai.capabilities import CombinedCapability
 from zhenxun.services.ai.core.engine.context_renderer import ContextConverter
@@ -27,8 +28,9 @@ from zhenxun.services.ai.core.messages import (
     ToolReturnPart,
     VideoPart,
 )
-from zhenxun.services.ai.core.models import LLMContext
+from zhenxun.services.ai.core.models import CancellationToken, LLMContext, ToolChoice
 from zhenxun.services.ai.core.options import GenerationConfig
+from zhenxun.services.ai.core.protocols.tool import ToolExecutable
 from zhenxun.services.ai.core.stream_events import (
     LLMEndEvent,
     LLMStartEvent,
@@ -37,7 +39,8 @@ from zhenxun.services.ai.core.stream_events import (
 from zhenxun.services.ai.flow.agent.models import AgentRunResources, AgentState
 from zhenxun.services.ai.llm.engine.router import LLMOrchestrator
 from zhenxun.services.ai.run import AgentRunResult, RunContext
-from zhenxun.services.ai.run.session import session_manager
+from zhenxun.services.ai.run.models import OutputDataT
+from zhenxun.services.ai.run.session import SessionInfo, session_manager
 from zhenxun.services.ai.tools.engine.executor import ToolExecutor
 from zhenxun.services.ai.tools.models import ToolResult
 from zhenxun.services.ai.utils.logger import log_agent as logger
@@ -57,7 +60,7 @@ class BaseAgentExecutor(ABC):
 
     async def run(
         self, state: AgentState, resources: AgentRunResources
-    ) -> AgentRunResult[Any]:
+    ) -> AgentRunResult[OutputDataT]:
         """
         核心模板方法 (Template Method)。
         组织整个大模型推导与工具调用的生命周期循环。如无必要，请勿重写此方法。
@@ -156,7 +159,7 @@ class BaseAgentExecutor(ABC):
     @abstractmethod
     async def on_fallback(
         self, state: AgentState, resources: AgentRunResources
-    ) -> AgentRunResult[Any]:
+    ) -> AgentRunResult[OutputDataT]:
         """生命周期: 当大模型思考循环达到 max_cycles 时触发，执行兜底策略。"""
         pass
 
@@ -181,7 +184,7 @@ class StandardAgentExecutor(BaseAgentExecutor):
         return result.is_retryable
 
     def _check_follow_up(
-        self, state: AgentState, resources: AgentRunResources, session_info: Any
+        self, state: AgentState, resources: AgentRunResources, session_info: SessionInfo
     ) -> bool:
         """检查追加队列，排空并合并数据到上下文，返回是否发现新消息"""
         follow_ups = session_info.follow_up_queue.drain()
@@ -201,8 +204,8 @@ class StandardAgentExecutor(BaseAgentExecutor):
         state: AgentState,
         resources: AgentRunResources,
         messages: list[AgentMessage],
-        tools: list[Any] | None,
-        tool_choice: Any = None,
+        tools: list[ToolExecutable | dict[str, Any]] | None,
+        tool_choice: str | dict[str, Any] | ToolChoice | None = None,
     ) -> ChatResponse:
         """执行 LLM 请求，处理基础指标遥测统计，并将新对话上下文追加到状态流"""
         run_context = resources.run_context
@@ -274,10 +277,10 @@ class StandardAgentExecutor(BaseAgentExecutor):
         messages: list[LLMMessage],
         config: GenerationConfig,
         run_context: RunContext,
-        tools: list[Any] | None = None,
-        tool_choice: Any = None,
+        tools: list[ToolExecutable | dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | ToolChoice | None = None,
         extra: dict[str, Any] | None = None,
-        cancellation_token: Any = None,
+        cancellation_token: CancellationToken | None = None,
     ) -> ChatResponse:
         request = ChatRequest(
             messages=messages,
@@ -307,9 +310,24 @@ class StandardAgentExecutor(BaseAgentExecutor):
     async def on_start(self, state: AgentState, resources: AgentRunResources) -> None:
         resources.run_context.run.messages = state.messages
 
+    async def _execute_phase(
+        self,
+        phase_func: Callable[[AgentState, AgentRunResources], Awaitable[None]],
+        state: AgentState,
+        resources: AgentRunResources,
+        session_info: SessionInfo,
+    ) -> Literal["NEXT", "RESET_CYCLE", "FINISH"]:
+        """统一处理阶段执行与状态机完成/追加检查的高阶函数"""
+        await phase_func(state, resources)
+        if state.is_finished:
+            if self._check_follow_up(state, resources, session_info):
+                return "RESET_CYCLE"
+            return "FINISH"
+        return "NEXT"
+
     async def run(
         self, state: AgentState, resources: AgentRunResources
-    ) -> AgentRunResult[Any]:
+    ) -> AgentRunResult[OutputDataT]:
         """覆盖基类的模板方法，实现灵活的 while 控制流和 FOLLOW_UP 合并"""
         await self.on_start(state, resources)
         session_info = await session_manager.get_or_create(
@@ -325,29 +343,35 @@ class StandardAgentExecutor(BaseAgentExecutor):
                 await self.build_llm_request(state, resources)
                 await self.execute_llm(state, resources)
 
-                await self.handle_llm_response(state, resources)
-                if state.is_finished:
-                    if self._check_follow_up(state, resources, session_info):
-                        cycle_count = 0
-                        continue
+                status = await self._execute_phase(
+                    self.handle_llm_response, state, resources, session_info
+                )
+                if status == "RESET_CYCLE":
+                    cycle_count = 0
+                    continue
+                if status == "FINISH":
                     assert state.final_result is not None
                     return state.final_result
 
-                await self.filter_tool_calls(state, resources)
-                if state.is_finished:
-                    if self._check_follow_up(state, resources, session_info):
-                        cycle_count = 0
-                        continue
+                status = await self._execute_phase(
+                    self.filter_tool_calls, state, resources, session_info
+                )
+                if status == "RESET_CYCLE":
+                    cycle_count = 0
+                    continue
+                if status == "FINISH":
                     assert state.final_result is not None
                     return state.final_result
 
                 await self.execute_tools(state, resources)
 
-                await self.handle_tool_results(state, resources)
-                if state.is_finished:
-                    if self._check_follow_up(state, resources, session_info):
-                        cycle_count = 0
-                        continue
+                status = await self._execute_phase(
+                    self.handle_tool_results, state, resources, session_info
+                )
+                if status == "RESET_CYCLE":
+                    cycle_count = 0
+                    continue
+                if status == "FINISH":
                     assert state.final_result is not None
                     return state.final_result
 
@@ -544,7 +568,7 @@ class StandardAgentExecutor(BaseAgentExecutor):
     def _assemble_tool_message(
         self,
         original_call: ToolCallPart,
-        res_or_exc: Any,
+        res_or_exc: BaseException | tuple[ToolCallPart, ToolResult],
         tool_res: ToolResult | None,
         state: AgentState,
     ) -> LLMMessage:
@@ -631,7 +655,7 @@ class StandardAgentExecutor(BaseAgentExecutor):
 
     async def on_fallback(
         self, state: AgentState, resources: AgentRunResources
-    ) -> AgentRunResult[Any]:
+    ) -> AgentRunResult[OutputDataT]:
         run_context = resources.run_context
 
         if not resources.config.enable_fallback_summary:
@@ -666,10 +690,13 @@ class StandardAgentExecutor(BaseAgentExecutor):
             tool_choice="none",
         )
 
-        return model_construct(
-            AgentRunResult,
-            output=fallback_response.text,
-            messages=state.messages,
-            structured_data=None,
-            usage=state.usage,
+        return cast(
+            AgentRunResult[OutputDataT],
+            model_construct(
+                AgentRunResult,
+                output=fallback_response.text,
+                messages=state.messages,
+                structured_data=None,
+                usage=state.usage,
+            )
         )

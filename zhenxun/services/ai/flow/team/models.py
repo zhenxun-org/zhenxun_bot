@@ -7,9 +7,10 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zhenxun.services.ai.core.messages import AgentMessage
+from zhenxun.services.ai.core.messages import AgentMessage, PromptInput
 from zhenxun.services.ai.core.options import BaseOutputDefinition
-from zhenxun.services.ai.flow.base import BaseRunnable, BaseRuntimeConfig
+from zhenxun.services.ai.flow.core.base import BaseRunnable
+from zhenxun.services.ai.flow.core.models import BaseRuntimeConfig
 from zhenxun.services.ai.run import AgentTask
 
 
@@ -67,7 +68,7 @@ class CallAction(TeamAction):
 
     agent: str | BaseRunnable[Any]
     """目标 Agent 的名称（字符串）或动态生成的 Agent 实例"""
-    task: str | AgentTask
+    task: PromptInput | AgentTask
     """派发给该 Agent 的具体任务或提示词"""
     history: Sequence[AgentMessage] | None = None
     """需要传递给该 Agent 的上下文历史记录（可选）"""

@@ -95,7 +95,9 @@ class DBMessageSerializer:
         return content_parts
 
     @staticmethod
-    def serialize_content(content_payload: Any) -> list[dict[str, Any]]:
+    def serialize_content(
+        content_payload: list[LLMContentPart] | str,
+    ) -> list[dict[str, Any]]:
         """将 LLMMessage 消息内容序列化为可存储于数据库的 JSON 格式"""
         if isinstance(content_payload, str):
             return [{"type": "text", "text": content_payload}]
@@ -134,7 +136,7 @@ class MemoryScope:
     ):
         """初始化长期记忆作用域与 RAG 客户端"""
         self.rag_client = rag_client
-        self._background_tasks: set[Any] = set()
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     async def remember(
         self,
@@ -492,3 +494,13 @@ def get_orm_slot_context(model_class: type[AbstractSlotRecord]) -> TortoiseSlotC
     [工厂方法] 供第三方开发者调用，将 Tortoise ORM 表直接包装为记忆槽存储系统。
     """
     return TortoiseSlotContext(model_class=model_class)
+
+
+__all__ = [
+    "AbstractMemoryRecord",
+    "AbstractSlotRecord",
+    "InMemoryChatContext",
+    "MemoryScope",
+    "TortoiseChatContext",
+    "TortoiseSlotContext",
+]

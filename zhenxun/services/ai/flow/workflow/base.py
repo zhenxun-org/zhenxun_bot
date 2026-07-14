@@ -1,13 +1,14 @@
 from abc import ABC, abstractmethod
 import asyncio
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import cast
 
 from zhenxun.services.ai.core.exceptions import (
     AbortException,
     ControlFlowExit,
     ToolFatalError,
 )
+from zhenxun.services.ai.core.stream_events import AgentStreamEvent
 from zhenxun.services.ai.run import RunContext
 from zhenxun.services.ai.utils.logger import log_flow as logger
 
@@ -21,6 +22,21 @@ from .types import (
     StepOutput,
     StepType,
 )
+
+
+class StreamCapturer:
+    """内部辅助类：透传工作流节点的内部流事件，并捕获最终的 StepOutput 产出值"""
+
+    def __init__(self, stream: AsyncIterator[AgentStreamEvent | StepOutput]):
+        self._stream = stream
+        self.output: StepOutput | None = None
+
+    async def __aiter__(self) -> AsyncIterator[AgentStreamEvent]:
+        async for event in self._stream:
+            if isinstance(event, StepOutput):
+                self.output = event
+            else:
+                yield event
 
 
 class BaseNode(ABC):
@@ -50,7 +66,7 @@ class BaseNode(ABC):
 
     async def _handle_execution_failure(
         self, e: BaseException, step_input: StepInput, context: RunContext, attempt: int
-    ) -> tuple[str, StepOutput | None, StepInput | None, Any]:
+    ) -> tuple[str, StepOutput | None, StepInput | None, "BaseNode | None"]:
         """
         解析执行异常并应用容错策略
         """
@@ -128,19 +144,10 @@ class BaseNode(ABC):
     @abstractmethod
     async def run_stream(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncIterator[AgentStreamEvent | StepOutput]:
         """子类必须实现的核心流式执行逻辑"""
-        yield None
-
-    async def _forward_stream(
-        self, stream: AsyncIterator[Any], output_box: list[StepOutput]
-    ) -> AsyncIterator[Any]:
-        """辅助方法：转发内部流事件，并将最终的 StepOutput 拦截放入 output_box 列表中"""
-        async for event in stream:
-            if isinstance(event, StepOutput):
-                output_box.append(event)
-            else:
-                yield event
+        if False:
+            yield cast(StepOutput, None)
 
     async def aexecute(self, step_input: StepInput, context: RunContext) -> StepOutput:
         """非流式执行（聚合流并返回最终结果），子类无需重写"""
@@ -160,7 +167,7 @@ class BaseNode(ABC):
 
     async def aexecute_stream(
         self, step_input: StepInput, context: RunContext
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncIterator[AgentStreamEvent | StepOutput]:
         """标准化模板方法：处理缓存快进、授权挂起、异常熔断与生命周期事件分发"""
         logger.debug(f"  ⚙️ [节点] `{self.name}` 开始执行...")
 
@@ -222,4 +229,5 @@ class BaseNode(ABC):
                             yield evt
                 break
 
+        assert output is not None
         yield output

@@ -4,7 +4,7 @@
 
 from dataclasses import dataclass, field
 import fnmatch
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,9 +12,6 @@ from zhenxun.services.ai.core.messages import ToolCallPart, UsageInfo
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.utils.logger import log_tool as logger
 from zhenxun.utils.pydantic_compat import model_dump, model_validate
-
-if TYPE_CHECKING:
-    from zhenxun.services.ai.tools.core.tool import BaseTool
 
 
 class DirectivePayload(BaseModel):
@@ -272,7 +269,7 @@ class Query(BaseModel):
     metadata_filter: dict[str, Any] | None = Field(default=None)
     """如果提供，则工具的 metadata 必须包含这里列出的所有键值对。"""
 
-    def match(self, tool: "BaseTool") -> bool:
+    def match(self, tool: Any) -> bool:
         """判断某个工具或工具箱是否符合当前 Query 的筛选条件"""
 
         def _match_pattern(val: str, pattern: str | list[str]) -> bool:

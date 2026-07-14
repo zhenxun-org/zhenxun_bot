@@ -1,10 +1,14 @@
 import copy
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .base import BaseNode
 
 from pydantic import BaseModel, Field
 
 from zhenxun.services.ai.llm.api import generate_structured
+from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.utils.logger import log_flow as logger
 
 from .types import StepInput
@@ -26,7 +30,7 @@ class PolicyResult(BaseModel):
     """执行延迟或重试前需要等待的缓冲秒数"""
     new_input: StepInput | None = None
     """用于动态纠错自愈时替换传入的新参数结构"""
-    fallback_node: Any | None = None
+    fallback_node: "BaseNode | None" = None
     """策略裁定降级时所指定的备用工作流节点"""
     healer_agent_name: str | None = None
     """执行了高级自愈的大模型或修复者名称"""
@@ -36,7 +40,11 @@ class BaseFailurePolicy:
     """错误处理策略抽象基类"""
 
     async def handle_failure(
-        self, node: Any, exception: BaseException, step_input: StepInput, context: Any
+        self,
+        node: "BaseNode",
+        exception: BaseException,
+        step_input: StepInput,
+        context: RunContext,
     ) -> PolicyResult:
         """
         处理节点执行失败的策略入口方法。
@@ -57,7 +65,11 @@ class AbortPolicy(BaseFailurePolicy):
     """直接中断策略"""
 
     async def handle_failure(
-        self, node: Any, exception: BaseException, step_input: StepInput, context: Any
+        self,
+        node: "BaseNode",
+        exception: BaseException,
+        step_input: StepInput,
+        context: RunContext,
     ) -> PolicyResult:
         return PolicyResult(action=PolicyAction.ABORT)
 
@@ -66,7 +78,11 @@ class SkipPolicy(BaseFailurePolicy):
     """跳过并继续策略"""
 
     async def handle_failure(
-        self, node: Any, exception: BaseException, step_input: StepInput, context: Any
+        self,
+        node: "BaseNode",
+        exception: BaseException,
+        step_input: StepInput,
+        context: RunContext,
     ) -> PolicyResult:
         return PolicyResult(action=PolicyAction.CONTINUE)
 
@@ -86,7 +102,11 @@ class RetryPolicy(BaseFailurePolicy):
         self.delay = delay
 
     async def handle_failure(
-        self, node: Any, exception: BaseException, step_input: StepInput, context: Any
+        self,
+        node: "BaseNode",
+        exception: BaseException,
+        step_input: StepInput,
+        context: RunContext,
     ) -> PolicyResult:
         counts = context.state.setdefault("__retry_counts__", {})
         key = f"{node.name}_{id(self)}"
@@ -100,7 +120,7 @@ class RetryPolicy(BaseFailurePolicy):
 class FallbackPolicy(BaseFailurePolicy):
     """降级路由策略"""
 
-    def __init__(self, fallback_node: Any):
+    def __init__(self, fallback_node: "BaseNode"):
         """
         初始化降级路由策略。
 
@@ -110,7 +130,11 @@ class FallbackPolicy(BaseFailurePolicy):
         self.fallback_node = fallback_node
 
     async def handle_failure(
-        self, node: Any, exception: BaseException, step_input: StepInput, context: Any
+        self,
+        node: "BaseNode",
+        exception: BaseException,
+        step_input: StepInput,
+        context: RunContext,
     ) -> PolicyResult:
         return PolicyResult(
             action=PolicyAction.FALLBACK, fallback_node=self.fallback_node
@@ -132,7 +156,11 @@ class SelfHealingPolicy(BaseFailurePolicy):
         self.max_retries = max_retries
 
     async def handle_failure(
-        self, node: Any, exception: BaseException, step_input: StepInput, context: Any
+        self,
+        node: "BaseNode",
+        exception: BaseException,
+        step_input: StepInput,
+        context: RunContext,
     ) -> PolicyResult:
         counts = context.state.setdefault("__heal_counts__", {})
         key = f"{node.name}_{id(self)}"

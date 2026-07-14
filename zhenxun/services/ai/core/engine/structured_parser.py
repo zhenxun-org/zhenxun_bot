@@ -1,3 +1,4 @@
+import json
 import types
 from typing import Any, Generic, Union, cast, get_origin
 
@@ -6,14 +7,9 @@ from nonebot.compat import type_validate_json
 from pydantic import BaseModel, Field, ValidationError, create_model
 
 from zhenxun.services.ai.core.exceptions import (
-    ControlFlowExit,
-    ModelRetry,
     SchemaParseError,
 )
-from zhenxun.services.ai.core.models import ToolDefinition
-from zhenxun.services.ai.run.models import OutputDataT
-from zhenxun.services.ai.tools.core.tool import BaseTool
-from zhenxun.services.ai.tools.models import StructuredSubmissionResult, ToolResult
+from zhenxun.services.ai.core.messages.types import OutputDataT
 from zhenxun.services.ai.utils.logger import log_core as logger
 from zhenxun.utils.pydantic_compat import model_json_schema, model_validate
 
@@ -96,8 +92,6 @@ class BaseOutputProcessor(Generic[OutputDataT]):
     def _parse_and_validate(self, text: str) -> Any:
         """[私有方法] 执行带有容错修复的 JSON 解析与模型验证"""
         if self.raw_schema is not None:
-            import json
-
             try:
                 return json.loads(text)
             except Exception:
@@ -152,74 +146,3 @@ class BaseOutputProcessor(Generic[OutputDataT]):
             return final_obj
         except Exception as e:
             raise e
-
-
-class SubmitFinalResultExecutable(BaseTool):
-    """
-    动态生成的提交最终结果工具。
-    用于将大模型的结构化输出拦截并终止 AgentExecutor 的循环。
-    """
-
-    def __init__(
-        self,
-        output_processor: BaseOutputProcessor,
-        guardrails: list[Any] | None = None,
-    ):
-        """
-        初始化提交最终结果的动态执行工具。
-
-        参数:
-            output_processor: 绑定的结构化输出处理器，用于验证提交的最终结果。
-            guardrails: 用于在结果输出前进行安全合规拦截的护栏中间件列表，默认 None。
-        """
-        super().__init__(
-            name="submit_final_result",
-            description=(
-                "当你完成所有必要的调查 and 思考后，"
-                "必须且只能调用此工具来提交最终的结构化结果。"
-                "提交后任务将立刻结束。"
-            ),
-        )
-        self.output_processor = output_processor
-        self.guardrails = guardrails or []
-
-    async def get_definition(self, context: Any | None = None) -> ToolDefinition | None:
-        if getattr(self, "_dynamic_def", None) is not None:
-            return self._dynamic_def
-        schema = self.output_processor.get_json_schema()
-        return ToolDefinition(
-            name=self.name,
-            description=self.description,
-            parameters=schema,
-        )
-
-    async def execute(self, context: Any | None = None, **kwargs) -> ToolResult:
-        parse_target = kwargs
-        if isinstance(kwargs, dict):
-            if "kwargs" in kwargs and len(kwargs) == 1:
-                parse_target = kwargs["kwargs"]
-            elif "result" in kwargs and len(kwargs) == 1:
-                parse_target = kwargs["result"]
-
-        try:
-            json_str = __import__("json").dumps(parse_target, ensure_ascii=False)
-            final_obj = await self.output_processor.validate_and_parse(
-                json_str, context=context
-            )
-            from zhenxun.services.ai.guardrails import GuardrailPipeline
-
-            pipeline = GuardrailPipeline(self.guardrails)
-            json_str, final_obj = await pipeline.run_output_pipeline(
-                json_str, final_obj, context
-            )
-
-            return StructuredSubmissionResult(
-                output="结构化数据已成功提交", parsed_obj=final_obj
-            )
-        except ControlFlowExit as e:
-            raise e
-        except ModelRetry as e:
-            raise e
-        except Exception as e:
-            error_msg = f"系统捕获到解析异常：\n{e}"
-            raise SchemaParseError(error_msg)

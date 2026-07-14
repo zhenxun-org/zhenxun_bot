@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from zhenxun.services.ai.core.exceptions import AbortException, ControlFlowExit
 from zhenxun.services.ai.core.stream_events import ToolStreamChunkEvent
-from zhenxun.services.ai.flow.base import BaseRunnable
+from zhenxun.services.ai.flow.core.base import BaseRunnable
 from zhenxun.services.ai.run import RunContext
 from zhenxun.services.ai.tools.core.tool import BaseTool
 from zhenxun.services.ai.tools.models import ToolResult
@@ -49,7 +49,9 @@ class DelegateTool(BaseTool):
         """
         resolved_name = name or getattr(runnable, "name", "SubRunnable")
         resolved_desc = description or getattr(
-            runnable, "description", f"将子任务委派给 {resolved_name} 执行"
+            runnable,
+            "profile_summary",
+            getattr(runnable, "description", f"将子任务委派给 {resolved_name} 执行"),
         )
         final_name = (
             f"delegate_to_{resolved_name}"

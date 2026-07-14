@@ -2,7 +2,7 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
-from zhenxun.services.ai.flow.base import BaseRunnable
+from zhenxun.services.ai.flow.core.base import BaseRunnable
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.tools.core.decorators import tool
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit

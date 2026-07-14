@@ -1,7 +1,5 @@
-import asyncio
 from collections.abc import AsyncIterator
-import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 import uuid
 
 from nonebot.params import Depends
@@ -12,15 +10,16 @@ if TYPE_CHECKING:
 
 from zhenxun.services.ai.core.exceptions import ControlFlowExit, ToolRetryError
 from zhenxun.services.ai.core.messages import PromptInput, UsageInfo
-from zhenxun.services.ai.core.stream_events import EventBus
-from zhenxun.services.ai.flow.base import BaseRunnable, BaseRuntimeConfig
+from zhenxun.services.ai.core.models import CancellationToken
+from zhenxun.services.ai.core.stream_events import AgentStreamEvent, EventBus
+from zhenxun.services.ai.flow.core.base import BaseRunnable
+from zhenxun.services.ai.flow.core.models import BaseRuntimeConfig
 from zhenxun.services.ai.run.blackboard import BlackboardManager
 from zhenxun.services.ai.run.context import RunContext
 from zhenxun.services.ai.run.models import (
     AgentRunEnd,
-    AgentRunError,
     AgentRunResult,
-    StreamedRunResult,
+    RunIntent,
 )
 from zhenxun.services.ai.tools.core.tool import FunctionTool
 from zhenxun.services.ai.utils.logger import log_flow as logger
@@ -176,96 +175,37 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
         返回:
             WorkflowRunResult: 包含执行状态、断点快照、各节点产出的全量工作流结果对象。
         """
-        session_id = (
-            context.session_id if context and context.session_id else f"wf_{self.id}"
-        )
-        safe_context = context or RunContext(session_id=session_id)
+        async with self.run_stream(
+            prompt=prompt, context=context, **kwargs
+        ) as stream_result:
+            res = await stream_result.get_run_result()
+            return cast(WorkflowRunResult, res.structured_data)
 
-        if self.blackboard_schema and not safe_context.session.blackboard:
-            safe_context.session.blackboard = BlackboardManager(
+    async def _execute_stream(
+        self,
+        intent: RunIntent,
+        context: RunContext,
+        cancel_token: CancellationToken,
+        event_bus: EventBus,
+        **kwargs: Any,
+    ) -> AsyncIterator[AgentStreamEvent]:
+        """统一核心流，不再自己维护 Task 和 EventBus"""
+
+        if self.blackboard_schema and not context.session.blackboard:
+            context.session.blackboard = BlackboardManager(
                 schema=self.blackboard_schema,
                 initial_state=self.initial_blackboard_state,
             )
 
         logger.debug(f"🏭 **工作流 [{self.name}] 启动**")
 
-        initial_input = StepInput(input=prompt)
-        if kwargs:
-            initial_input.additional_data.update(kwargs)
-
-        try:
-            final_output = await self.root_steps.aexecute(initial_input, safe_context)
-
-            logger.debug(f"🏭 **工作流 [{self.name}] 运行结束**")
-
-            return self._build_result(initial_input, safe_context, final_output)
-
-        except BaseException as e:
-            if isinstance(e, ControlFlowExit):
-                logger.debug(f"⏭️ 工作流执行被业务控制流安全中止: {e}")
-                dummy_output = StepOutput(content=str(e), success=False)
-                return self._build_result(initial_input, safe_context, dummy_output)
-
-            raise e
-
-    @contextlib.asynccontextmanager
-    async def run_stream(
-        self,
-        prompt: PromptInput | None = None,
-        *,
-        context: RunContext | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator["StreamedRunResult[Any]"]:
-        """对齐 BaseRunnable 接口的流式上下文管理器"""
-        event_bus = EventBus()
-        if context:
-            context.run.event_bus = event_bus
-
-        async def _execution_task():
-            try:
-                async for event in self._internal_stream(prompt, context, **kwargs):
-                    await event_bus.emit(event)
-            except BaseException as e:
-                await event_bus.emit(AgentRunError(error=e))
-            finally:
-                await event_bus.end()
-
-        task = asyncio.create_task(_execution_task())
-        try:
-            yield StreamedRunResult[Any](event_bus)
-        finally:
-            if not task.done():
-                task.cancel()
-
-    async def _internal_stream(
-        self,
-        prompt: PromptInput | None = None,
-        context: RunContext | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[Any]:
-        """流式执行工作流节点树的内部实现"""
-        session_id = (
-            context.session_id if context and context.session_id else f"wf_{self.id}"
-        )
-        safe_context = context or RunContext(session_id=session_id)
-
-        if self.blackboard_schema and not safe_context.session.blackboard:
-            safe_context.session.blackboard = BlackboardManager(
-                schema=self.blackboard_schema,
-                initial_state=self.initial_blackboard_state,
-            )
-
-        logger.debug(f"🏭 **工作流 [{self.name}] 启动**")
-
-        initial_input = StepInput(input=prompt)
+        initial_input = StepInput(input=intent.original_input, intent=intent)
         if kwargs:
             initial_input.additional_data.update(kwargs)
 
         try:
             final_output = None
-            async for event in self.root_steps.aexecute_stream(
-                initial_input, safe_context
-            ):
+            async for event in self.root_steps.aexecute_stream(initial_input, context):
                 if isinstance(event, StepOutput):
                     final_output = event
                 else:
@@ -274,17 +214,26 @@ class Workflow(BaseRunnable[WorkflowRunResult]):
             if final_output:
                 logger.debug(f"🏭 **工作流 [{self.name}] 运行结束**")
 
-                wf_result = self._build_result(
-                    initial_input, safe_context, final_output
-                )
+                wf_result = self._build_result(initial_input, context, final_output)
                 agent_res = AgentRunResult(
                     output=wf_result.last_step_content,
                     structured_data=wf_result,
                     usage=UsageInfo(),
                 )
                 yield AgentRunEnd(result=agent_res)
-        except Exception:
-            pass
+        except BaseException as e:
+            if isinstance(e, ControlFlowExit):
+                logger.debug(f"⏭️ 工作流执行被业务控制流安全中止: {e}")
+                dummy_output = StepOutput(content=str(e), success=False)
+                wf_result = self._build_result(initial_input, context, dummy_output)
+                agent_res = AgentRunResult(
+                    output=wf_result.last_step_content,
+                    structured_data=wf_result,
+                    usage=UsageInfo(),
+                )
+                yield AgentRunEnd(result=agent_res)
+            else:
+                raise e
 
     def as_tool(self, tool_name: str | None = None) -> FunctionTool:
         """将工作流封装并导出为可供 Agent 直接调用的 FunctionTool 实例"""

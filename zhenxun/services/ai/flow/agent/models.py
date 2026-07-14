@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from zhenxun.services.ai.capabilities import CapabilitySource, CombinedCapability
 from zhenxun.services.ai.context.memory.builder import MemoryBuilder
-from zhenxun.services.ai.context.memory.engine import MemoryReader, MemoryWriter
+from zhenxun.services.ai.context.memory.engine import SessionMemoryContext
 from zhenxun.services.ai.context.memory.models import MemoryConfig
 from zhenxun.services.ai.context.memory.types import SessionMetadata
 from zhenxun.services.ai.core.messages import (
@@ -19,7 +19,7 @@ from zhenxun.services.ai.core.messages import (
     UsageInfo,
 )
 from zhenxun.services.ai.core.options import GenerationConfig
-from zhenxun.services.ai.flow.base import BaseRuntimeConfig
+from zhenxun.services.ai.flow.core.models import BaseRuntimeConfig
 from zhenxun.services.ai.run import RunContext
 from zhenxun.services.ai.run.models import AgentRunResult, AgentTask, HandoffPayload
 from zhenxun.services.ai.tools.core.toolkit import BaseToolkit
@@ -43,7 +43,7 @@ class Persona(BaseModel):
 
 
 class AgentConfig(BaseRuntimeConfig):
-    """统一的智能体全局与单次运行配置 (Unification of Settings & Profile)"""
+    """统一的智能体全局与单次运行配置"""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -66,7 +66,7 @@ class AgentConfig(BaseRuntimeConfig):
     """初始化的底层对话历史记录。"""
 
     memory: MemoryConfig | MemoryBuilder | bool | None = Field(default=None)
-    """单次运行级别的记忆门面覆盖 (支持 bool, MemoryConfig, MemoryBuilder)。"""
+    """单次运行级别的记忆门面覆盖"""
     generation_config: GenerationConfig | None = Field(default=None)
     """单次运行覆盖的大模型生成配置。"""
     capabilities: list[CapabilitySource] | None = Field(default=None)
@@ -163,10 +163,8 @@ class AgentRunResources(BaseModel):
     """保留依赖注入(DI)与黑板引用的全局运行时上下文"""
     session_meta: SessionMetadata | None = None
     """隔离会话的元信息(Session ID, 命名空间, 权限等)"""
-    memory_reader: MemoryReader | None = None
-    """用于读取短/中/长期上下文记忆的读取器"""
-    memory_writer: MemoryWriter | None = None
-    """用于将对话历史安全落盘的写入器"""
+    memory_context: SessionMemoryContext | None = None
+    """统一处理对话历史读写、压缩与清洗的会话记忆门面"""
     run_scoped_cap: CombinedCapability | None = None
     """聚合了 Agent/AgentTask/全局 的复合能力拦截器 (CombinedCapability)"""
     task_obj: AgentTask | None = None

@@ -217,6 +217,14 @@ class BaseToolkit:
         )
         return f"<{tag_name}>\n{text}\n</{tag_name}>"
 
+    def clone_with(self, **kwargs: Any) -> "BaseToolkit":
+        """克隆当前工具箱原型，并透明注入新的运行时属性。"""
+        new_tk = copy.copy(self)
+        for k, v in kwargs.items():
+            setattr(new_tk, k, v)
+        new_tk._cached_tools = None
+        return new_tk
+
     def prefixed(self, prefix: str) -> "BaseToolkit":
         """克隆工具箱并为其中所有工具追加统一的前缀"""
         new_tk = copy.copy(self)

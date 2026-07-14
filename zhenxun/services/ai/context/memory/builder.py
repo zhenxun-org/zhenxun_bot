@@ -6,27 +6,19 @@ from typing_extensions import Self
 
 from pydantic import BaseModel
 
-from zhenxun.services.ai.context.memory.compression import MemoryPolicy
-from zhenxun.services.ai.context.memory.models import (
+from zhenxun.services.ai.utils.scope import ScopeBuilder
+
+from .compression import MemoryPolicy
+from .models import (
     ContextCompressionConfig,
     IngestionConfig,
-    LongTermConfig,
     MemoryConfig,
-    MemorySlot,
     ShortTermConfig,
-    SlotMemoryConfig,
 )
-from zhenxun.services.ai.context.memory.storage.interfaces import (
+from .storage.interfaces import (
     BaseChatContext,
     BaseMemoryIngestionMiddleware,
-    BaseSlotContext,
 )
-from zhenxun.services.ai.context.memory.types import (
-    AutoRecallPolicy,
-)
-from zhenxun.services.ai.context.rag.backends import Embedder, StorageBackend
-from zhenxun.services.ai.context.rag.engine import ScopedRAGClient
-from zhenxun.services.ai.utils.scope import ScopeBuilder
 
 
 class MemoryBuilder:
@@ -42,8 +34,6 @@ class MemoryBuilder:
         """
         self._config = MemoryConfig(
             short_term=ShortTermConfig(enable=False),
-            slots=SlotMemoryConfig(enable=False),
-            long_term=LongTermConfig(enable=False),
             compression=ContextCompressionConfig(),
             ingestion=IngestionConfig(),
         )
@@ -68,16 +58,9 @@ class MemoryBuilder:
         if isinstance(memory, bool):
             return MemoryConfig(
                 short_term=ShortTermConfig(enable=memory),
-                long_term=LongTermConfig(enable=memory),
             )
 
         return MemoryConfig(short_term=ShortTermConfig(enable=False))
-
-    def with_base_isolation(self, isolation: ScopeBuilder) -> Self:
-        """设置顶层基准隔离级别，短期/中期/长期记忆将默认继承此级别"""
-        self._config.base_isolation = isolation
-        self._config.short_term.isolation = isolation
-        return self
 
     def with_short_term(
         self,
@@ -95,75 +78,9 @@ class MemoryBuilder:
         """
         self._config.short_term.enable = enable
         if isolation is not None:
-            self._config.base_isolation = isolation
             self._config.short_term.isolation = isolation
         if backend is not None:
             self._config.short_term.backend = backend
-        return self
-
-    def with_slots(
-        self,
-        enable: bool = True,
-        scopes: dict[str, ScopeBuilder] | None = None,
-        default_slots: list[MemorySlot] | None = None,
-        backend: str | BaseSlotContext | None = None,
-        instructions: str | None = None,
-    ) -> Self:
-        """
-        配置核心槽位记忆 (Memory Slots)。
-
-        参数:
-            enable: 是否启用槽位记忆。
-            scopes: 语义化作用域映射字典。如果只有一个键值对，则大模型不可见该参数。
-            default_slots: 首次初始化时自动写入的默认槽位列表。
-            backend: 槽位记忆存储后端，如果为 None 则使用全局默认后端。
-            instructions: 覆写内置槽位管理工具箱的默认系统提示词规则。
-        """
-        self._config.slots.enable = enable
-        if scopes is not None:
-            self._config.slots.scopes = scopes
-        if default_slots is not None:
-            self._config.slots.default_slots = default_slots
-        if backend is not None:
-            self._config.slots.backend = backend
-        if instructions is not None:
-            self._config.slots.instructions = instructions
-        return self
-
-    def with_long_term(
-        self,
-        enable: bool = True,
-        scopes: dict[str, ScopeBuilder] | None = None,
-        engine: ScopedRAGClient | None = None,
-        backend: str | StorageBackend | None = None,
-        embedder: Embedder | str | None = None,
-        agentic: bool = True,
-        auto_recall: AutoRecallPolicy = False,
-        instructions: str | None = None,
-    ) -> Self:
-        """
-        配置长期向量记忆与 RAG 设定。
-
-        参数:
-            enable: 是否启用长期记忆。
-            scopes: 语义化作用域映射字典。如果只有一个键值对，则大模型不可见该参数。
-            engine: 高级 RAG 检索引擎实例 (推荐)。若提供，将接管记忆的底层检索、混合与重排。
-            backend: 长期记忆存储后端。
-            embedder: 用于向量化的文本嵌入模型实例。
-            agentic: 是否开启主动智能体记忆管理 (增删改查工具自动注入)。
-            auto_recall: 长期记忆的自动召回策略，支持 bool 或 Callable 函数。
-            instructions: 覆写内置长期记忆工具箱的默认系统提示词规则。
-        """  # noqa: E501
-        self._config.long_term.enable = enable
-        self._config.long_term.engine = engine
-        if scopes is not None:
-            self._config.long_term.scopes = scopes
-        self._config.long_term.backend = backend
-        self._config.long_term.embedder = embedder
-        self._config.long_term.agentic = agentic
-        self._config.long_term.auto_recall = auto_recall
-        if instructions is not None:
-            self._config.long_term.instructions = instructions
         return self
 
     def with_multimodal_window(self, window_size: int = 5) -> Self:
@@ -261,8 +178,4 @@ class MemoryBuilder:
         """
         生成最终构建好的 MemoryConfig 配置对象。
         """
-        if not self._config.slots.scopes:
-            self._config.slots.scopes = {"私有": self._config.base_isolation}
-        if not self._config.long_term.scopes:
-            self._config.long_term.scopes = {"私有": self._config.base_isolation}
         return self._config

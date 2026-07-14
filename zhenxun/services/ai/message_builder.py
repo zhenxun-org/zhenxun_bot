@@ -187,7 +187,7 @@ class MessageBuilder:
         allowed_modalities: set[str] | None = None,
     ) -> list[UserContentUnion]:
         """将 UniMessage 消息解析并转换为 LLM 内容部件列表"""
-        namespace = namespace or infer_plugin_namespace(default="global")
+        namespace = namespace or infer_plugin_namespace()
         parts: list[UserContentUnion] = []
         for seg in message:
             if allowed_modalities is not None:
@@ -237,7 +237,7 @@ class MessageBuilder:
         allowed_modalities: set[str] | None = None,
     ) -> list[LLMContentPart] | None:
         """获取并解析引用消息的内容片段"""
-        namespace = namespace or infer_plugin_namespace(default="global")
+        namespace = namespace or infer_plugin_namespace()
         try:
             orig_msg = await reply_fetch(event, bot)
             if not orig_msg or not orig_msg.msg:
@@ -277,7 +277,7 @@ class MessageBuilder:
         allowed_modalities: set[str] | None = None,
     ) -> list[LLMMessage]:
         """将任意类型的提示输入标准化为统一的 LLM 消息历史列表"""
-        namespace = namespace or infer_plugin_namespace(default="global")
+        namespace = namespace or infer_plugin_namespace()
         messages = []
         if instruction:
             messages.append(SystemMessage(content=[TextPart(text=instruction)]))
@@ -381,7 +381,7 @@ class MessageBuilder:
         config: LLMEmbeddingConfig | None = None,
     ) -> list[LLMContentPart]:
         """为 Embed 向量化提取纯粹的内容片段，忽略杂项"""
-        namespace = namespace or infer_plugin_namespace(default="global")
+        namespace = namespace or infer_plugin_namespace()
         allowed_modalities = {"text"}
         if config:
             if config.multimodal is True:
@@ -418,7 +418,7 @@ class MessageBuilder:
         config: LLMEmbeddingConfig | None = None,
     ) -> "EmbedBatch":
         """将任意输入标准化为嵌入向量批处理对象"""
-        namespace = namespace or infer_plugin_namespace(default="global")
+        namespace = namespace or infer_plugin_namespace()
 
         if isinstance(inputs, list) and not isinstance(inputs, UniMessage):
             if not inputs:
