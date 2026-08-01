@@ -46,6 +46,8 @@ class VirtualEnvPackageManager:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             logger.debug(
                 f"安装虚拟环境包指令执行完成: {result.stdout}",
@@ -77,6 +79,8 @@ class VirtualEnvPackageManager:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             logger.debug(
                 f"卸载虚拟环境包指令执行完成: {result.stdout}",
@@ -109,6 +113,8 @@ class VirtualEnvPackageManager:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             logger.debug(f"更新虚拟环境包指令执行完成: {result.stdout}", LOG_COMMAND)
             return result.stdout
@@ -177,6 +183,8 @@ class VirtualEnvPackageManager:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             logger.debug(
                 f"安装虚拟环境依赖文件指令执行完成: {result.stdout}",
@@ -209,6 +217,8 @@ class VirtualEnvPackageManager:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             logger.debug(
                 f"列出虚拟环境包指令执行完成: {result.stdout}",
