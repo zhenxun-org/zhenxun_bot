@@ -74,7 +74,7 @@
 
 <img width="100%" src="https://starify.komoridevs.icu/api/starify?owner=HibiKier&repo=zhenxun_bot" alt="starify" />
 
-<img src="https://api.star-history.com/svg?repos=HibiKier/zhenxun_bot&type=Timeline" alt="Star Trend" width="800" />
+<img src="https://star-history.dera.page/svg?repos=HibiKier/zhenxun_bot&type=Timeline" alt="Star Trend" width="800" />
 
 </div>
 
