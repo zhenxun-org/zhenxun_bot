@@ -1,0 +1,27 @@
+{
+  "id": "development/withdraw",
+  "title": "消息撤回",
+  "description": "消息撤回",
+  "source": "@site/docs/development/withdraw.md",
+  "sourceDirName": "development",
+  "slug": "/development/withdraw",
+  "permalink": "/zhenxun_bot/development/withdraw",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/development/withdraw.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "消息撤回",
+    "subSidebar": false
+  },
+  "sidebar": "devSidebar",
+  "previous": {
+    "title": "消息发送",
+    "permalink": "/zhenxun_bot/development/message"
+  },
+  "next": {
+    "title": "便捷方法",
+    "permalink": "/zhenxun_bot/development/utility_methods"
+  }
+}

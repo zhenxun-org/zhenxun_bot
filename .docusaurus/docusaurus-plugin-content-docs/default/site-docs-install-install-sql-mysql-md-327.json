@@ -1,0 +1,28 @@
+{
+  "id": "install/install-sql/mysql",
+  "title": "Mysql",
+  "description": "没写，建议用Sqlite",
+  "source": "@site/docs/install/install-sql/mysql.md",
+  "sourceDirName": "install/install-sql",
+  "slug": "/install/install-sql/mysql",
+  "permalink": "/zhenxun_bot/install/install-sql/mysql",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/install/install-sql/mysql.md",
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 3,
+  "frontMatter": {
+    "title": "Mysql",
+    "sidebar_position": 3
+  },
+  "sidebar": "installSidebar",
+  "previous": {
+    "title": "Windows",
+    "permalink": "/zhenxun_bot/install/install-sql/postgresql/windows"
+  },
+  "next": {
+    "title": "安装QQ",
+    "permalink": "/zhenxun_bot/install/install-qq"
+  }
+}

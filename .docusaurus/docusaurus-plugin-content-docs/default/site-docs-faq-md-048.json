@@ -1,0 +1,18 @@
+{
+  "id": "faq",
+  "title": "FAQ",
+  "description": "这里会解释一些真寻使用中的问题与概念",
+  "source": "@site/docs/faq.md",
+  "sourceDirName": ".",
+  "slug": "/faq",
+  "permalink": "/zhenxun_bot/faq",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/faq.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "FAQ"
+  },
+  "sidebar": "faqSidebar"
+}

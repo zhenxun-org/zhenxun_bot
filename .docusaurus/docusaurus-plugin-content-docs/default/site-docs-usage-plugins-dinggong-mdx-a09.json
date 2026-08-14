@@ -1,0 +1,27 @@
+{
+  "id": "usage/plugins/dinggong",
+  "title": "钉宫骂我(dinggong)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/dinggong.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/dinggong",
+  "permalink": "/zhenxun_bot/usage/plugins/dinggong",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/dinggong.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "钉宫骂我(dinggong)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "网易云热评(comments_163)",
+    "permalink": "/zhenxun_bot/usage/plugins/comments_163"
+  },
+  "next": {
+    "title": "复读(fudu)",
+    "permalink": "/zhenxun_bot/usage/plugins/fudu"
+  }
+}

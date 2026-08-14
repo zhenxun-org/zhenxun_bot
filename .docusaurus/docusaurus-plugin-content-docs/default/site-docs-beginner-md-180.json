@@ -1,0 +1,19 @@
+{
+  "id": "beginner",
+  "title": "整合包文档",
+  "description": "该整合包仅支持Windows,整合包内已内置GIT",
+  "source": "@site/docs/beginner.md",
+  "sourceDirName": ".",
+  "slug": "/beginner",
+  "permalink": "/zhenxun_bot/beginner",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/beginner.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "整合包文档",
+    "subSidebar": false
+  },
+  "sidebar": "beginnerSidebar"
+}

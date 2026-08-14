@@ -1,0 +1,23 @@
+{
+  "id": "usage/card/card",
+  "title": "西幻世界",
+  "description": "- 插件类型：NORMAL",
+  "source": "@site/docs/usage/card/card.mdx",
+  "sourceDirName": "usage/card",
+  "slug": "/usage/card/",
+  "permalink": "/zhenxun_bot/usage/card/",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/card/card.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "西幻世界",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "词云(word_clouds)",
+    "permalink": "/zhenxun_bot/usage/plugins/word_clouds"
+  }
+}

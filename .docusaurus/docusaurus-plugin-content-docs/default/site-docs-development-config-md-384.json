@@ -1,0 +1,27 @@
+{
+  "id": "development/config",
+  "title": "配置管理",
+  "description": "介绍",
+  "source": "@site/docs/development/config.md",
+  "sourceDirName": "development",
+  "slug": "/development/config",
+  "permalink": "/zhenxun_bot/development/config",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/development/config.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "配置管理",
+    "subSidebar": false
+  },
+  "sidebar": "devSidebar",
+  "previous": {
+    "title": "基础数据",
+    "permalink": "/zhenxun_bot/development/base_data"
+  },
+  "next": {
+    "title": "商店配置",
+    "permalink": "/zhenxun_bot/development/shop"
+  }
+}

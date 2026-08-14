@@ -1,0 +1,27 @@
+{
+  "id": "usage/plugins/quotations",
+  "title": "一言二次元语录(quotations)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/quotations.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/quotations",
+  "permalink": "/zhenxun_bot/usage/plugins/quotations",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/quotations.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "一言二次元语录(quotations)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "戳一戳(poke)",
+    "permalink": "/zhenxun_bot/usage/plugins/poke"
+  },
+  "next": {
+    "title": "Roll(roll)",
+    "permalink": "/zhenxun_bot/usage/plugins/roll"
+  }
+}

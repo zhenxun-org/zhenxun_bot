@@ -1,0 +1,27 @@
+{
+  "id": "usage/builtin_plugins/withdraw",
+  "title": "消息撤回(withdraw)",
+  "description": "说明",
+  "source": "@site/docs/usage/builtin_plugins/withdraw.mdx",
+  "sourceDirName": "usage/builtin_plugins",
+  "slug": "/usage/builtin_plugins/withdraw",
+  "permalink": "/zhenxun_bot/usage/builtin_plugins/withdraw",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/builtin_plugins/withdraw.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "消息撤回(withdraw)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "WebUI(web_ui)",
+    "permalink": "/zhenxun_bot/usage/builtin_plugins/web_ui"
+  },
+  "next": {
+    "title": "伪人AI(BYM_AI)",
+    "permalink": "/zhenxun_bot/usage/plugins/BYM_AI"
+  }
+}

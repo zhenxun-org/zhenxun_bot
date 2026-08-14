@@ -1,0 +1,23 @@
+{
+  "id": "development/base_data",
+  "title": "基础数据",
+  "description": "基础数据",
+  "source": "@site/docs/development/base_data.md",
+  "sourceDirName": "development",
+  "slug": "/development/base_data",
+  "permalink": "/zhenxun_bot/development/base_data",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/development/base_data.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "基础数据",
+    "subSidebar": false
+  },
+  "sidebar": "devSidebar",
+  "next": {
+    "title": "配置管理",
+    "permalink": "/zhenxun_bot/development/config"
+  }
+}

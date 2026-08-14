@@ -1,0 +1,28 @@
+{
+  "id": "usage/plugins/word_clouds",
+  "title": "词云(word_clouds)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/word_clouds.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/word_clouds",
+  "permalink": "/zhenxun_bot/usage/plugins/word_clouds",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/word_clouds.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "词云(word_clouds)",
+    "sidebarDepth": 0,
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "群欢迎消息(welcome_message)",
+    "permalink": "/zhenxun_bot/usage/plugins/welcome"
+  },
+  "next": {
+    "title": "西幻世界",
+    "permalink": "/zhenxun_bot/usage/card/"
+  }
+}

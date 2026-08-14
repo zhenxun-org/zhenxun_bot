@@ -1,0 +1,27 @@
+{
+  "id": "development/message",
+  "title": "消息发送",
+  "description": "插件内消息发送",
+  "source": "@site/docs/development/message.md",
+  "sourceDirName": "development",
+  "slug": "/development/message",
+  "permalink": "/zhenxun_bot/development/message",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/development/message.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "消息发送",
+    "subSidebar": false
+  },
+  "sidebar": "devSidebar",
+  "previous": {
+    "title": "商店配置",
+    "permalink": "/zhenxun_bot/development/shop"
+  },
+  "next": {
+    "title": "消息撤回",
+    "permalink": "/zhenxun_bot/development/withdraw"
+  }
+}

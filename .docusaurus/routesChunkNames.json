@@ -1,0 +1,371 @@
+{
+  "/zhenxun_bot/markdown-page-a11": {
+    "__comp": "1f391b9e",
+    "__context": {
+      "plugin": "a7456010"
+    },
+    "content": "393be207"
+  },
+  "/zhenxun_bot/search-b23": {
+    "__comp": "1a4e3797",
+    "__context": {
+      "plugin": "138e0e15"
+    }
+  },
+  "/zhenxun_bot/-8b4": {
+    "__comp": "c4f5d8e4",
+    "__context": {
+      "plugin": "a7456010"
+    },
+    "config": "5e9f5e1a"
+  },
+  "/zhenxun_bot/-575": {
+    "__comp": "5e95c892",
+    "__context": {
+      "plugin": "aba21aa0"
+    }
+  },
+  "/zhenxun_bot/-2fe": {
+    "__comp": "a7bd4aaa",
+    "__props": "d4859edd"
+  },
+  "/zhenxun_bot/-518": {
+    "__comp": "a94703ab"
+  },
+  "/zhenxun_bot/about-dc6": {
+    "__comp": "17896441",
+    "content": "3d8d21df"
+  },
+  "/zhenxun_bot/beginner-10b": {
+    "__comp": "17896441",
+    "content": "180e05f7"
+  },
+  "/zhenxun_bot/development/base_data-1bb": {
+    "__comp": "17896441",
+    "content": "12996309"
+  },
+  "/zhenxun_bot/development/config-ef7": {
+    "__comp": "17896441",
+    "content": "384a188e"
+  },
+  "/zhenxun_bot/development/message-829": {
+    "__comp": "17896441",
+    "content": "a21cdbc4"
+  },
+  "/zhenxun_bot/development/shop-e53": {
+    "__comp": "17896441",
+    "content": "d6b8e154"
+  },
+  "/zhenxun_bot/development/utility_methods-e33": {
+    "__comp": "17896441",
+    "content": "2219bf5a"
+  },
+  "/zhenxun_bot/development/withdraw-568": {
+    "__comp": "17896441",
+    "content": "e646e2c0"
+  },
+  "/zhenxun_bot/faq-cea": {
+    "__comp": "17896441",
+    "content": "0480b142"
+  },
+  "/zhenxun_bot/install_xiaobai-ade": {
+    "__comp": "17896441",
+    "content": "96cb57fd"
+  },
+  "/zhenxun_bot/install/install-qq-e5b": {
+    "__comp": "17896441",
+    "content": "d050f8d1"
+  },
+  "/zhenxun_bot/install/install-sql/mysql-96b": {
+    "__comp": "17896441",
+    "content": "32764257"
+  },
+  "/zhenxun_bot/install/install-sql/postgresql/linux-549": {
+    "__comp": "17896441",
+    "content": "c459bd47"
+  },
+  "/zhenxun_bot/install/install-sql/postgresql/windows-215": {
+    "__comp": "17896441",
+    "content": "c85236c2"
+  },
+  "/zhenxun_bot/install/install-sql/sqlite-d06": {
+    "__comp": "17896441",
+    "content": "990df35f"
+  },
+  "/zhenxun_bot/install/intro-bf9": {
+    "__comp": "17896441",
+    "content": "18c0a3cd"
+  },
+  "/zhenxun_bot/install/webui/install-webui-default-a0e": {
+    "__comp": "17896441",
+    "content": "918fff5a"
+  },
+  "/zhenxun_bot/install/webui/install-webui-nginx-b0c": {
+    "__comp": "17896441",
+    "content": "2d16583c"
+  },
+  "/zhenxun_bot/install/zhenxun/-75b": {
+    "__comp": "17896441",
+    "content": "59b0f7e3"
+  },
+  "/zhenxun_bot/install/zhenxun/nb-install-zhenxun-576": {
+    "__comp": "17896441",
+    "content": "45130645"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/about-82b": {
+    "__comp": "17896441",
+    "content": "d0c79cd8"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/admin/admin_help-739": {
+    "__comp": "17896441",
+    "content": "19df1b0b"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/admin/admin_watch-795": {
+    "__comp": "17896441",
+    "content": "414783aa"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/admin/ban-0e7": {
+    "__comp": "17896441",
+    "content": "d129b1b1"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/admin/gm_update-be6": {
+    "__comp": "17896441",
+    "content": "8ca0850c"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/admin/group_update-fd3": {
+    "__comp": "17896441",
+    "content": "ab963b42"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/admin/plugin_switch-634": {
+    "__comp": "17896441",
+    "content": "8bce3d3d"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/admin/welcome_message-a4c": {
+    "__comp": "17896441",
+    "content": "f83b7a52"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/auto_update-808": {
+    "__comp": "17896441",
+    "content": "dcb41f83"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/catchphrase-c97": {
+    "__comp": "17896441",
+    "content": "214ef331"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/chat_history-2c9": {
+    "__comp": "17896441",
+    "content": "d0960311"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/check-39d": {
+    "__comp": "17896441",
+    "content": "c33144e9"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/group_handle-f73": {
+    "__comp": "17896441",
+    "content": "0b9d8e41"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/help-ef9": {
+    "__comp": "17896441",
+    "content": "12ff49b7"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/help_help-404": {
+    "__comp": "17896441",
+    "content": "3b3856a9"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/hooks-4a7": {
+    "__comp": "17896441",
+    "content": "d8f829f5"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/info-e39": {
+    "__comp": "17896441",
+    "content": "6f6dd6d2"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/init-921": {
+    "__comp": "17896441",
+    "content": "a0b84602"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/nickname-692": {
+    "__comp": "17896441",
+    "content": "0841d1e9"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/plugin_store-b0e": {
+    "__comp": "17896441",
+    "content": "a9ff33a5"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/record_request-50e": {
+    "__comp": "17896441",
+    "content": "8b06b169"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/restart-d3d": {
+    "__comp": "17896441",
+    "content": "903de174"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/scheduler/auto_backup-b42": {
+    "__comp": "17896441",
+    "content": "6c590b7e"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/scheduler/auto_update_group-e6d": {
+    "__comp": "17896441",
+    "content": "13157b3b"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/scheduler/chat_check-44f": {
+    "__comp": "17896441",
+    "content": "7bcf45f1"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/scheduler/morning-cfa": {
+    "__comp": "17896441",
+    "content": "2d8570e6"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/shop-3e8": {
+    "__comp": "17896441",
+    "content": "790a0d50"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/sign_in-343": {
+    "__comp": "17896441",
+    "content": "dc07c1fd"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/statistics_handle-c88": {
+    "__comp": "17896441",
+    "content": "e374a26a"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/broadcast-58a": {
+    "__comp": "17896441",
+    "content": "33373a6c"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/clear_data-548": {
+    "__comp": "17896441",
+    "content": "bdecc167"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/exec_sql-106": {
+    "__comp": "17896441",
+    "content": "714da20c"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/fg_manage-19a": {
+    "__comp": "17896441",
+    "content": "9b1a5917"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/group_manage-bdd": {
+    "__comp": "17896441",
+    "content": "0dcd631f"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/reload_setting-fce": {
+    "__comp": "17896441",
+    "content": "a6ce3531"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/request_manage-8b9": {
+    "__comp": "17896441",
+    "content": "2c7f2581"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/set_admin-c18": {
+    "__comp": "17896441",
+    "content": "7ca8dcf5"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/super_help-398": {
+    "__comp": "17896441",
+    "content": "70fd093c"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/superuser/update_fg_info-e1e": {
+    "__comp": "17896441",
+    "content": "e232b628"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/web_ui-144": {
+    "__comp": "17896441",
+    "content": "1c8894ce"
+  },
+  "/zhenxun_bot/usage/builtin_plugins/withdraw-a5d": {
+    "__comp": "17896441",
+    "content": "0bacbbaf"
+  },
+  "/zhenxun_bot/usage/card/-c5f": {
+    "__comp": "17896441",
+    "content": "495d25ca"
+  },
+  "/zhenxun_bot/usage/plugins/bilibili_sub-f2b": {
+    "__comp": "17896441",
+    "content": "75238c77"
+  },
+  "/zhenxun_bot/usage/plugins/BYM_AI-eb8": {
+    "__comp": "17896441",
+    "content": "7d60797d"
+  },
+  "/zhenxun_bot/usage/plugins/comments_163-d60": {
+    "__comp": "17896441",
+    "content": "4dbbfe77"
+  },
+  "/zhenxun_bot/usage/plugins/dinggong-384": {
+    "__comp": "17896441",
+    "content": "a0915203"
+  },
+  "/zhenxun_bot/usage/plugins/fudu-843": {
+    "__comp": "17896441",
+    "content": "19ffaef5"
+  },
+  "/zhenxun_bot/usage/plugins/jitang-900": {
+    "__comp": "17896441",
+    "content": "747f6c52"
+  },
+  "/zhenxun_bot/usage/plugins/luxun-153": {
+    "__comp": "17896441",
+    "content": "e1ffeb1b"
+  },
+  "/zhenxun_bot/usage/plugins/mahiro_bank-832": {
+    "__comp": "17896441",
+    "content": "7f092a90"
+  },
+  "/zhenxun_bot/usage/plugins/mahiro_report-442": {
+    "__comp": "17896441",
+    "content": "858ec5ba"
+  },
+  "/zhenxun_bot/usage/plugins/music-142": {
+    "__comp": "17896441",
+    "content": "988b3e8d"
+  },
+  "/zhenxun_bot/usage/plugins/one_friend-f32": {
+    "__comp": "17896441",
+    "content": "8b1c4655"
+  },
+  "/zhenxun_bot/usage/plugins/pa-fb2": {
+    "__comp": "17896441",
+    "content": "c49ea844"
+  },
+  "/zhenxun_bot/usage/plugins/parse_bilibili-f8b": {
+    "__comp": "17896441",
+    "content": "9b18db10"
+  },
+  "/zhenxun_bot/usage/plugins/poetry-506": {
+    "__comp": "17896441",
+    "content": "a8aad905"
+  },
+  "/zhenxun_bot/usage/plugins/poke-ab8": {
+    "__comp": "17896441",
+    "content": "fb6ff4e1"
+  },
+  "/zhenxun_bot/usage/plugins/quotations-2b8": {
+    "__comp": "17896441",
+    "content": "a18ba8d0"
+  },
+  "/zhenxun_bot/usage/plugins/roll-d66": {
+    "__comp": "17896441",
+    "content": "464dcb4d"
+  },
+  "/zhenxun_bot/usage/plugins/search_anime-367": {
+    "__comp": "17896441",
+    "content": "65c3c8a7"
+  },
+  "/zhenxun_bot/usage/plugins/search_image-3c3": {
+    "__comp": "17896441",
+    "content": "b0500da0"
+  },
+  "/zhenxun_bot/usage/plugins/translator-a27": {
+    "__comp": "17896441",
+    "content": "98527c3b"
+  },
+  "/zhenxun_bot/usage/plugins/welcome-0c2": {
+    "__comp": "17896441",
+    "content": "f4dc453e"
+  },
+  "/zhenxun_bot/usage/plugins/word_clouds-115": {
+    "__comp": "17896441",
+    "content": "43aeaf21"
+  }
+}

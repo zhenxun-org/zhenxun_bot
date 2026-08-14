@@ -1,0 +1,28 @@
+{
+  "id": "install/install-sql/postgresql/windows",
+  "title": "Windows",
+  "description": "1.下载",
+  "source": "@site/docs/install/install-sql/postgresql/windows.md",
+  "sourceDirName": "install/install-sql/postgresql",
+  "slug": "/install/install-sql/postgresql/windows",
+  "permalink": "/zhenxun_bot/install/install-sql/postgresql/windows",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/install/install-sql/postgresql/windows.md",
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 1,
+  "frontMatter": {
+    "title": "Windows",
+    "sidebar_position": 1
+  },
+  "sidebar": "installSidebar",
+  "previous": {
+    "title": "Linux",
+    "permalink": "/zhenxun_bot/install/install-sql/postgresql/linux"
+  },
+  "next": {
+    "title": "Mysql",
+    "permalink": "/zhenxun_bot/install/install-sql/mysql"
+  }
+}

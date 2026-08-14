@@ -1,0 +1,27 @@
+{
+  "id": "usage/builtin_plugins/hooks",
+  "title": "权限控制(hooks)",
+  "description": "说明",
+  "source": "@site/docs/usage/builtin_plugins/hooks.md",
+  "sourceDirName": "usage/builtin_plugins",
+  "slug": "/usage/builtin_plugins/hooks",
+  "permalink": "/zhenxun_bot/usage/builtin_plugins/hooks",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/builtin_plugins/hooks.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "权限控制(hooks)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "笨蛋检测(help_help)",
+    "permalink": "/zhenxun_bot/usage/builtin_plugins/help_help"
+  },
+  "next": {
+    "title": "我的信息(info)",
+    "permalink": "/zhenxun_bot/usage/builtin_plugins/info"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "install/webui/install-webui-nginx",
+  "title": "NGINX安装",
+  "description": "这一步并不是必须的！只是为了可视化方便管理",
+  "source": "@site/docs/install/webui/nginx.md",
+  "sourceDirName": "install/webui",
+  "slug": "/install/webui/install-webui-nginx",
+  "permalink": "/zhenxun_bot/install/webui/install-webui-nginx",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/install/webui/nginx.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "NGINX安装",
+    "subSidebar": false,
+    "id": "install-webui-nginx"
+  },
+  "sidebar": "installSidebar",
+  "previous": {
+    "title": "默认安装",
+    "permalink": "/zhenxun_bot/install/webui/install-webui-default"
+  }
+}

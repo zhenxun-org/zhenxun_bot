@@ -1,0 +1,28 @@
+{
+  "id": "install/webui/install-webui-default",
+  "title": "默认安装",
+  "description": "真寻的WebUI已内置，在启动时会自动进行下载，无需手动安装。",
+  "source": "@site/docs/install/webui/default.md",
+  "sourceDirName": "install/webui",
+  "slug": "/install/webui/install-webui-default",
+  "permalink": "/zhenxun_bot/install/webui/install-webui-default",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/install/webui/default.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "默认安装",
+    "subSidebar": false,
+    "id": "install-webui-default"
+  },
+  "sidebar": "installSidebar",
+  "previous": {
+    "title": "安装小真寻(手动 - uv 部署)",
+    "permalink": "/zhenxun_bot/install/zhenxun/"
+  },
+  "next": {
+    "title": "NGINX安装",
+    "permalink": "/zhenxun_bot/install/webui/install-webui-nginx"
+  }
+}

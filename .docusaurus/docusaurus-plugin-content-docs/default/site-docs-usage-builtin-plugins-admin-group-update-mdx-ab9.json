@@ -1,0 +1,27 @@
+{
+  "id": "usage/builtin_plugins/admin/group_update",
+  "title": "更新群组列表(gm_update)",
+  "description": "说明",
+  "source": "@site/docs/usage/builtin_plugins/admin/group_update.mdx",
+  "sourceDirName": "usage/builtin_plugins/admin",
+  "slug": "/usage/builtin_plugins/admin/group_update",
+  "permalink": "/zhenxun_bot/usage/builtin_plugins/admin/group_update",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/builtin_plugins/admin/group_update.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "更新群组列表(gm_update)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "更新群组成员(gm_update)",
+    "permalink": "/zhenxun_bot/usage/builtin_plugins/admin/gm_update"
+  },
+  "next": {
+    "title": "功能开关(plugin_switch)",
+    "permalink": "/zhenxun_bot/usage/builtin_plugins/admin/plugin_switch"
+  }
+}

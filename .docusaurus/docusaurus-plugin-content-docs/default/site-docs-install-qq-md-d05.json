@@ -1,0 +1,28 @@
+{
+  "id": "install/install-qq",
+  "title": "安装QQ",
+  "description": "挑一个喜欢的",
+  "source": "@site/docs/install/qq.md",
+  "sourceDirName": "install",
+  "slug": "/install/install-qq",
+  "permalink": "/zhenxun_bot/install/install-qq",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/install/qq.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "安装QQ",
+    "subSidebar": false,
+    "id": "install-qq"
+  },
+  "sidebar": "installSidebar",
+  "previous": {
+    "title": "Mysql",
+    "permalink": "/zhenxun_bot/install/install-sql/mysql"
+  },
+  "next": {
+    "title": "安装小真寻(nb-cli)",
+    "permalink": "/zhenxun_bot/install/zhenxun/nb-install-zhenxun"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "usage/plugins/welcome",
+  "title": "群欢迎消息(welcome_message)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/welcome.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/welcome",
+  "permalink": "/zhenxun_bot/usage/plugins/welcome",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/welcome.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "群欢迎消息(welcome_message)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "翻译(translate)",
+    "permalink": "/zhenxun_bot/usage/plugins/translator"
+  },
+  "next": {
+    "title": "词云(word_clouds)",
+    "permalink": "/zhenxun_bot/usage/plugins/word_clouds"
+  }
+}

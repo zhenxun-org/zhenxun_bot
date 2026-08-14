@@ -1,0 +1,28 @@
+{
+  "id": "install/zhenxun/nb-install-zhenxun",
+  "title": "安装小真寻(nb-cli)",
+  "description": "真寻Bot需要python版本为 >=3.10",
+  "source": "@site/docs/install/zhenxun/nb-cli.md",
+  "sourceDirName": "install/zhenxun",
+  "slug": "/install/zhenxun/nb-install-zhenxun",
+  "permalink": "/zhenxun_bot/install/zhenxun/nb-install-zhenxun",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/install/zhenxun/nb-cli.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "安装小真寻(nb-cli)",
+    "subSidebar": false,
+    "id": "nb-install-zhenxun"
+  },
+  "sidebar": "installSidebar",
+  "previous": {
+    "title": "安装QQ",
+    "permalink": "/zhenxun_bot/install/install-qq"
+  },
+  "next": {
+    "title": "安装小真寻(手动 - uv 部署)",
+    "permalink": "/zhenxun_bot/install/zhenxun/"
+  }
+}

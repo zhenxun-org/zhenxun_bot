@@ -1,0 +1,27 @@
+{
+  "id": "usage/plugins/translator",
+  "title": "翻译(translate)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/translator.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/translator",
+  "permalink": "/zhenxun_bot/usage/plugins/translator",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/translator.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "翻译(translate)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "搜图(search_image)",
+    "permalink": "/zhenxun_bot/usage/plugins/search_image"
+  },
+  "next": {
+    "title": "群欢迎消息(welcome_message)",
+    "permalink": "/zhenxun_bot/usage/plugins/welcome"
+  }
+}

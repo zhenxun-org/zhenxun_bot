@@ -1,0 +1,28 @@
+{
+  "id": "install/install-sql/postgresql/linux",
+  "title": "Linux",
+  "description": "1.安装",
+  "source": "@site/docs/install/install-sql/postgresql/linux.md",
+  "sourceDirName": "install/install-sql/postgresql",
+  "slug": "/install/install-sql/postgresql/linux",
+  "permalink": "/zhenxun_bot/install/install-sql/postgresql/linux",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/install/install-sql/postgresql/linux.md",
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 1,
+  "frontMatter": {
+    "title": "Linux",
+    "sidebar_position": 1
+  },
+  "sidebar": "installSidebar",
+  "previous": {
+    "title": "Sqlite",
+    "permalink": "/zhenxun_bot/install/install-sql/sqlite"
+  },
+  "next": {
+    "title": "Windows",
+    "permalink": "/zhenxun_bot/install/install-sql/postgresql/windows"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "usage/plugins/search_anime",
+  "title": "搜番(search_anime)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/search_anime.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/search_anime",
+  "permalink": "/zhenxun_bot/usage/plugins/search_anime",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/search_anime.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "搜番(search_anime)",
+    "sidebarDepth": 0,
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "Roll(roll)",
+    "permalink": "/zhenxun_bot/usage/plugins/roll"
+  },
+  "next": {
+    "title": "搜图(search_image)",
+    "permalink": "/zhenxun_bot/usage/plugins/search_image"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "usage/builtin_plugins/superuser/exec_sql",
+  "title": "数据库操作(exec_sql)",
+  "description": "说明",
+  "source": "@site/docs/usage/builtin_plugins/superuser/exec_sql.mdx",
+  "sourceDirName": "usage/builtin_plugins/superuser",
+  "slug": "/usage/builtin_plugins/superuser/exec_sql",
+  "permalink": "/zhenxun_bot/usage/builtin_plugins/superuser/exec_sql",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/builtin_plugins/superuser/exec_sql.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "数据库操作(exec_sql)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "清理数据(clear_data)",
+    "permalink": "/zhenxun_bot/usage/builtin_plugins/superuser/clear_data"
+  },
+  "next": {
+    "title": "好友群组列表(fg_manage)",
+    "permalink": "/zhenxun_bot/usage/builtin_plugins/superuser/fg_manage"
+  }
+}

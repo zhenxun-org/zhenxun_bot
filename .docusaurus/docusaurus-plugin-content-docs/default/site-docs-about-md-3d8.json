@@ -1,0 +1,19 @@
+{
+  "id": "about",
+  "title": "你好，这里是绪山真寻",
+  "description": "嗨嗨，这里是可爱的小真寻",
+  "source": "@site/docs/about.md",
+  "sourceDirName": ".",
+  "slug": "/about",
+  "permalink": "/zhenxun_bot/about",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/about.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "你好，这里是绪山真寻",
+    "subSidebar": false
+  },
+  "sidebar": "aboutSidebar"
+}

@@ -1,0 +1,484 @@
+{
+  "docusaurus-plugin-content-docs": {
+    "default": {
+      "path": "/zhenxun_bot/",
+      "versions": [
+        {
+          "name": "current",
+          "label": "Next",
+          "isLast": true,
+          "path": "/zhenxun_bot/",
+          "mainDocId": "about",
+          "docs": [
+            {
+              "id": "about",
+              "path": "/zhenxun_bot/about",
+              "sidebar": "aboutSidebar"
+            },
+            {
+              "id": "beginner",
+              "path": "/zhenxun_bot/beginner",
+              "sidebar": "beginnerSidebar"
+            },
+            {
+              "id": "development/base_data",
+              "path": "/zhenxun_bot/development/base_data",
+              "sidebar": "devSidebar"
+            },
+            {
+              "id": "development/config",
+              "path": "/zhenxun_bot/development/config",
+              "sidebar": "devSidebar"
+            },
+            {
+              "id": "development/message",
+              "path": "/zhenxun_bot/development/message",
+              "sidebar": "devSidebar"
+            },
+            {
+              "id": "development/shop",
+              "path": "/zhenxun_bot/development/shop",
+              "sidebar": "devSidebar"
+            },
+            {
+              "id": "development/utility_methods",
+              "path": "/zhenxun_bot/development/utility_methods",
+              "sidebar": "devSidebar"
+            },
+            {
+              "id": "development/withdraw",
+              "path": "/zhenxun_bot/development/withdraw",
+              "sidebar": "devSidebar"
+            },
+            {
+              "id": "faq",
+              "path": "/zhenxun_bot/faq",
+              "sidebar": "faqSidebar"
+            },
+            {
+              "id": "install_xiaobai",
+              "path": "/zhenxun_bot/install_xiaobai",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "install/install-qq",
+              "path": "/zhenxun_bot/install/install-qq",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "install/install-sql/mysql",
+              "path": "/zhenxun_bot/install/install-sql/mysql",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "install/install-sql/postgresql/linux",
+              "path": "/zhenxun_bot/install/install-sql/postgresql/linux",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "install/install-sql/postgresql/windows",
+              "path": "/zhenxun_bot/install/install-sql/postgresql/windows",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "install/install-sql/sqlite",
+              "path": "/zhenxun_bot/install/install-sql/sqlite",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "install/intro",
+              "path": "/zhenxun_bot/install/intro",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "install/webui/install-webui-default",
+              "path": "/zhenxun_bot/install/webui/install-webui-default",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "install/webui/install-webui-nginx",
+              "path": "/zhenxun_bot/install/webui/install-webui-nginx",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "install/zhenxun/install-zhenxun",
+              "path": "/zhenxun_bot/install/zhenxun/",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "install/zhenxun/nb-install-zhenxun",
+              "path": "/zhenxun_bot/install/zhenxun/nb-install-zhenxun",
+              "sidebar": "installSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/about",
+              "path": "/zhenxun_bot/usage/builtin_plugins/about",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/admin/admin_help",
+              "path": "/zhenxun_bot/usage/builtin_plugins/admin/admin_help",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/admin/admin_watch",
+              "path": "/zhenxun_bot/usage/builtin_plugins/admin/admin_watch",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/admin/ban",
+              "path": "/zhenxun_bot/usage/builtin_plugins/admin/ban",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/admin/gm_update",
+              "path": "/zhenxun_bot/usage/builtin_plugins/admin/gm_update",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/admin/group_update",
+              "path": "/zhenxun_bot/usage/builtin_plugins/admin/group_update",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/admin/plugin_switch",
+              "path": "/zhenxun_bot/usage/builtin_plugins/admin/plugin_switch",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/admin/welcome_message",
+              "path": "/zhenxun_bot/usage/builtin_plugins/admin/welcome_message",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/auto_update",
+              "path": "/zhenxun_bot/usage/builtin_plugins/auto_update",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/catchphrase",
+              "path": "/zhenxun_bot/usage/builtin_plugins/catchphrase",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/chat_history",
+              "path": "/zhenxun_bot/usage/builtin_plugins/chat_history",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/check",
+              "path": "/zhenxun_bot/usage/builtin_plugins/check",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/group_handle",
+              "path": "/zhenxun_bot/usage/builtin_plugins/group_handle",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/help",
+              "path": "/zhenxun_bot/usage/builtin_plugins/help",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/help_help",
+              "path": "/zhenxun_bot/usage/builtin_plugins/help_help",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/hooks",
+              "path": "/zhenxun_bot/usage/builtin_plugins/hooks",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/info",
+              "path": "/zhenxun_bot/usage/builtin_plugins/info",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/init",
+              "path": "/zhenxun_bot/usage/builtin_plugins/init",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/nickname",
+              "path": "/zhenxun_bot/usage/builtin_plugins/nickname",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/plugin_store",
+              "path": "/zhenxun_bot/usage/builtin_plugins/plugin_store",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/record_request",
+              "path": "/zhenxun_bot/usage/builtin_plugins/record_request",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/restart",
+              "path": "/zhenxun_bot/usage/builtin_plugins/restart",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/scheduler/auto_backup",
+              "path": "/zhenxun_bot/usage/builtin_plugins/scheduler/auto_backup",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/scheduler/auto_update_group",
+              "path": "/zhenxun_bot/usage/builtin_plugins/scheduler/auto_update_group",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/scheduler/chat_check",
+              "path": "/zhenxun_bot/usage/builtin_plugins/scheduler/chat_check",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/scheduler/morning",
+              "path": "/zhenxun_bot/usage/builtin_plugins/scheduler/morning",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/shop",
+              "path": "/zhenxun_bot/usage/builtin_plugins/shop",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/sign_in",
+              "path": "/zhenxun_bot/usage/builtin_plugins/sign_in",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/statistics_handle",
+              "path": "/zhenxun_bot/usage/builtin_plugins/statistics_handle",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/broadcast",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/broadcast",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/clear_data",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/clear_data",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/exec_sql",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/exec_sql",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/fg_manage",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/fg_manage",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/group_manage",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/group_manage",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/reload_setting",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/reload_setting",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/request_manage",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/request_manage",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/set_admin",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/set_admin",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/super_help",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/super_help",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/superuser/update_fg_info",
+              "path": "/zhenxun_bot/usage/builtin_plugins/superuser/update_fg_info",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/web_ui",
+              "path": "/zhenxun_bot/usage/builtin_plugins/web_ui",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/builtin_plugins/withdraw",
+              "path": "/zhenxun_bot/usage/builtin_plugins/withdraw",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/card/card",
+              "path": "/zhenxun_bot/usage/card/",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/bilibili_sub",
+              "path": "/zhenxun_bot/usage/plugins/bilibili_sub",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/BYM_AI",
+              "path": "/zhenxun_bot/usage/plugins/BYM_AI",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/comments_163",
+              "path": "/zhenxun_bot/usage/plugins/comments_163",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/dinggong",
+              "path": "/zhenxun_bot/usage/plugins/dinggong",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/fudu",
+              "path": "/zhenxun_bot/usage/plugins/fudu",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/jitang",
+              "path": "/zhenxun_bot/usage/plugins/jitang",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/luxun",
+              "path": "/zhenxun_bot/usage/plugins/luxun",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/mahiro_bank",
+              "path": "/zhenxun_bot/usage/plugins/mahiro_bank",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/mahiro_report",
+              "path": "/zhenxun_bot/usage/plugins/mahiro_report",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/music",
+              "path": "/zhenxun_bot/usage/plugins/music",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/one_friend",
+              "path": "/zhenxun_bot/usage/plugins/one_friend",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/pa",
+              "path": "/zhenxun_bot/usage/plugins/pa",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/parse_bilibili",
+              "path": "/zhenxun_bot/usage/plugins/parse_bilibili",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/poetry",
+              "path": "/zhenxun_bot/usage/plugins/poetry",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/poke",
+              "path": "/zhenxun_bot/usage/plugins/poke",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/quotations",
+              "path": "/zhenxun_bot/usage/plugins/quotations",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/roll",
+              "path": "/zhenxun_bot/usage/plugins/roll",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/search_anime",
+              "path": "/zhenxun_bot/usage/plugins/search_anime",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/search_image",
+              "path": "/zhenxun_bot/usage/plugins/search_image",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/translator",
+              "path": "/zhenxun_bot/usage/plugins/translator",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/welcome",
+              "path": "/zhenxun_bot/usage/plugins/welcome",
+              "sidebar": "usageSidebar"
+            },
+            {
+              "id": "usage/plugins/word_clouds",
+              "path": "/zhenxun_bot/usage/plugins/word_clouds",
+              "sidebar": "usageSidebar"
+            }
+          ],
+          "draftIds": [],
+          "sidebars": {
+            "tutorialSidebar": {
+              "link": {
+                "path": "/zhenxun_bot/about",
+                "label": "about"
+              }
+            },
+            "aboutSidebar": {
+              "link": {
+                "path": "/zhenxun_bot/about",
+                "label": "about"
+              }
+            },
+            "faqSidebar": {
+              "link": {
+                "path": "/zhenxun_bot/faq",
+                "label": "faq"
+              }
+            },
+            "beginnerSidebar": {
+              "link": {
+                "path": "/zhenxun_bot/beginner",
+                "label": "beginner"
+              }
+            },
+            "installSidebar": {
+              "link": {
+                "path": "/zhenxun_bot/install/intro",
+                "label": "install/intro"
+              }
+            },
+            "devSidebar": {
+              "link": {
+                "path": "/zhenxun_bot/development/base_data",
+                "label": "development/base_data"
+              }
+            },
+            "usageSidebar": {
+              "link": {
+                "path": "/zhenxun_bot/usage/builtin_plugins/about",
+                "label": "usage/builtin_plugins/about"
+              }
+            }
+          }
+        }
+      ],
+      "breadcrumbs": true
+    }
+  }
+}

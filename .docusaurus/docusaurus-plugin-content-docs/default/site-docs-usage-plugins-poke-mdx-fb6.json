@@ -1,0 +1,28 @@
+{
+  "id": "usage/plugins/poke",
+  "title": "戳一戳(poke)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/poke.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/poke",
+  "permalink": "/zhenxun_bot/usage/plugins/poke",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/poke.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "戳一戳(poke)",
+    "sidebarDepth": 0,
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "古诗(poetry)",
+    "permalink": "/zhenxun_bot/usage/plugins/poetry"
+  },
+  "next": {
+    "title": "一言二次元语录(quotations)",
+    "permalink": "/zhenxun_bot/usage/plugins/quotations"
+  }
+}

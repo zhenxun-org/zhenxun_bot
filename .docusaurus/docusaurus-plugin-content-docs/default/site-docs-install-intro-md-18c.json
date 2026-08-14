@@ -1,0 +1,24 @@
+{
+  "id": "install/intro",
+  "title": "准备工作",
+  "description": "真寻bot非常可爱，嗯，这是我要提醒你的",
+  "source": "@site/docs/install/intro.md",
+  "sourceDirName": "install",
+  "slug": "/install/intro",
+  "permalink": "/zhenxun_bot/install/intro",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/install/intro.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "准备工作",
+    "subSidebar": false,
+    "id": "intro"
+  },
+  "sidebar": "installSidebar",
+  "next": {
+    "title": "Sqlite",
+    "permalink": "/zhenxun_bot/install/install-sql/sqlite"
+  }
+}

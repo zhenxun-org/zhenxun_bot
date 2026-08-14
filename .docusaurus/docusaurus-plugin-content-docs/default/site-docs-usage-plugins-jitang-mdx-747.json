@@ -1,0 +1,27 @@
+{
+  "id": "usage/plugins/jitang",
+  "title": "鸡汤(jitang)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/jitang.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/jitang",
+  "permalink": "/zhenxun_bot/usage/plugins/jitang",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/jitang.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "鸡汤(jitang)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "复读(fudu)",
+    "permalink": "/zhenxun_bot/usage/plugins/fudu"
+  },
+  "next": {
+    "title": "鲁迅说(luxun)",
+    "permalink": "/zhenxun_bot/usage/plugins/luxun"
+  }
+}

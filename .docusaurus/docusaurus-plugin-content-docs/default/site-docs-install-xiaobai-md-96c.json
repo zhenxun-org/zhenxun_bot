@@ -1,0 +1,28 @@
+{
+  "id": "install_xiaobai",
+  "title": "Linux小白安装教程",
+  "description": "教程环境为全新未开封的 Ubuntu 24.04.1 LTS 版，请注意系统版本是否一致，使用的为桌面版，与服务器版本并无太大差别，如遇到教程外的情况请添加 真寻酱的技术群 进行求助",
+  "source": "@site/docs/install_xiaobai.md",
+  "sourceDirName": ".",
+  "slug": "/install_xiaobai",
+  "permalink": "/zhenxun_bot/install_xiaobai",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/install_xiaobai.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "Linux小白安装教程",
+    "subSidebar": false,
+    "id": "install_xiaobai"
+  },
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "安装小真寻(nb-cli)",
+    "permalink": "/zhenxun_bot/install/zhenxun/nb-install-zhenxun"
+  },
+  "next": {
+    "title": "关于(about)",
+    "permalink": "/zhenxun_bot/usage/builtin_plugins/about"
+  }
+}

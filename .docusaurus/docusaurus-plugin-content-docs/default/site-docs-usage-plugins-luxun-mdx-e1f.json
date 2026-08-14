@@ -1,0 +1,28 @@
+{
+  "id": "usage/plugins/luxun",
+  "title": "鲁迅说(luxun)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/luxun.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/luxun",
+  "permalink": "/zhenxun_bot/usage/plugins/luxun",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/luxun.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "鲁迅说(luxun)",
+    "sidebarDepth": 0,
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "鸡汤(jitang)",
+    "permalink": "/zhenxun_bot/usage/plugins/jitang"
+  },
+  "next": {
+    "title": "小真寻银行(mahiro_report)",
+    "permalink": "/zhenxun_bot/usage/plugins/mahiro_bank"
+  }
+}

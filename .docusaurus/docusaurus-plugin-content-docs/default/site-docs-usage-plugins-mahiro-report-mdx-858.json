@@ -1,0 +1,27 @@
+{
+  "id": "usage/plugins/mahiro_report",
+  "title": "真寻日报(mahiro_report)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/mahiro_report.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/mahiro_report",
+  "permalink": "/zhenxun_bot/usage/plugins/mahiro_report",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/mahiro_report.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "真寻日报(mahiro_report)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "小真寻银行(mahiro_report)",
+    "permalink": "/zhenxun_bot/usage/plugins/mahiro_bank"
+  },
+  "next": {
+    "title": "点歌(music)",
+    "permalink": "/zhenxun_bot/usage/plugins/music"
+  }
+}

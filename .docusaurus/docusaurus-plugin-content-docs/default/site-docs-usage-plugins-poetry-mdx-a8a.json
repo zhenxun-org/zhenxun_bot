@@ -1,0 +1,28 @@
+{
+  "id": "usage/plugins/poetry",
+  "title": "古诗(poetry)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/poetry.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/poetry",
+  "permalink": "/zhenxun_bot/usage/plugins/poetry",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/poetry.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "古诗(poetry)",
+    "sidebarDepth": 0,
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "B站内容解析插件 (parse_bilibili)",
+    "permalink": "/zhenxun_bot/usage/plugins/parse_bilibili"
+  },
+  "next": {
+    "title": "戳一戳(poke)",
+    "permalink": "/zhenxun_bot/usage/plugins/poke"
+  }
+}

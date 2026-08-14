@@ -1,0 +1,27 @@
+{
+  "id": "usage/plugins/mahiro_bank",
+  "title": "小真寻银行(mahiro_report)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/mahiro_bank.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/mahiro_bank",
+  "permalink": "/zhenxun_bot/usage/plugins/mahiro_bank",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/mahiro_bank.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "小真寻银行(mahiro_report)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "鲁迅说(luxun)",
+    "permalink": "/zhenxun_bot/usage/plugins/luxun"
+  },
+  "next": {
+    "title": "真寻日报(mahiro_report)",
+    "permalink": "/zhenxun_bot/usage/plugins/mahiro_report"
+  }
+}

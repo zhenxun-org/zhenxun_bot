@@ -1,0 +1,27 @@
+{
+  "id": "usage/plugins/roll",
+  "title": "Roll(roll)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/roll.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/roll",
+  "permalink": "/zhenxun_bot/usage/plugins/roll",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/roll.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "Roll(roll)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "一言二次元语录(quotations)",
+    "permalink": "/zhenxun_bot/usage/plugins/quotations"
+  },
+  "next": {
+    "title": "搜番(search_anime)",
+    "permalink": "/zhenxun_bot/usage/plugins/search_anime"
+  }
+}

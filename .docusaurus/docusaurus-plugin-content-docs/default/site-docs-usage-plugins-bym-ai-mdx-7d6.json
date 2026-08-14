@@ -1,0 +1,27 @@
+{
+  "id": "usage/plugins/BYM_AI",
+  "title": "伪人AI(BYM_AI)",
+  "description": "说明",
+  "source": "@site/docs/usage/plugins/BYM_AI.mdx",
+  "sourceDirName": "usage/plugins",
+  "slug": "/usage/plugins/BYM_AI",
+  "permalink": "/zhenxun_bot/usage/plugins/BYM_AI",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/docs/usage/plugins/BYM_AI.mdx",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "伪人AI(BYM_AI)",
+    "subSidebar": false
+  },
+  "sidebar": "usageSidebar",
+  "previous": {
+    "title": "消息撤回(withdraw)",
+    "permalink": "/zhenxun_bot/usage/builtin_plugins/withdraw"
+  },
+  "next": {
+    "title": "B站订阅(bilibili_sub)",
+    "permalink": "/zhenxun_bot/usage/plugins/bilibili_sub"
+  }
+}
