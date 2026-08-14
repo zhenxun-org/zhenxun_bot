@@ -128,8 +128,11 @@ AccessToken: PUBLIC_ZHENXUN_TEST
 
 ## 🐣 小白整合
 
-如果你系统是 **Windows** 且不想下载 Python  
-可以使用整合包（Python3.10+zhenxun+webui）
+如果你系统是 **Windows** 且对于指令一类不熟  
+可以使用整合包  
+### 注意 
+```***Python需要自行安装且版本大于等于3.11***```
+
 
 文档地址：[整合包文档](https://zhenxun-org.github.io/zhenxun_bot/beginner)
 
@@ -152,7 +155,7 @@ AccessToken: PUBLIC_ZHENXUN_TEST
 
 ```bash
 # 获取代码
-git clone https://github.com/HibiKier/zhenxun_bot.git
+git clone https://github.com/zhenxun-org/zhenxun_bot.git
 
 # 进入目录
 cd zhenxun_bot
