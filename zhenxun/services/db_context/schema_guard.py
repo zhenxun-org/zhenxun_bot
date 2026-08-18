@@ -339,9 +339,7 @@ def _index_sql(table: str, columns: tuple[str, ...], dialect: Dialect) -> str | 
     index_sql = _quote_identifier(_index_name(table, columns), dialect)
     columns_sql = ", ".join(_quote_identifier(column, dialect) for column in columns)
     if dialect in {"sqlite", "postgres"}:
-        return (
-            f"CREATE INDEX IF NOT EXISTS {index_sql} " f"ON {table_sql}({columns_sql})"
-        )
+        return f"CREATE INDEX IF NOT EXISTS {index_sql} ON {table_sql}({columns_sql})"
     if dialect == "mysql":
         return f"CREATE INDEX {index_sql} ON {table_sql}({columns_sql})"
     return None
