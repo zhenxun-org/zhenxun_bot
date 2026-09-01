@@ -207,11 +207,7 @@ def _run_worker() -> None:
             f"使用 {htmlrender_browser_channel} 作为 htmlrender 驱动启动..."
         )
 
-    nonebot.init(
-        htmlrender_browser_channel=htmlrender_browser_channel,
-        render_backend="playwright",
-        render_playwright={"channel": htmlrender_browser_channel},
-    )
+    nonebot.init(htmlrender_browser_channel=htmlrender_browser_channel)
 
     from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
