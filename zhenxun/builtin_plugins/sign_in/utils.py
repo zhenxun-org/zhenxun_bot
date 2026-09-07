@@ -23,9 +23,9 @@ from .config import (
     lik2relation,
 )
 
-assert (
-    len(level2attitude) == len(lik2level) == len(lik2relation)
-), "好感度态度、等级、关系长度不匹配！"
+assert len(level2attitude) == len(lik2level) == len(lik2relation), (
+    "好感度态度、等级、关系长度不匹配！"
+)
 
 AVA_URL = "http://q1.qlogo.cn/g?b=qq&nk={}&s=160"
 

@@ -181,8 +181,7 @@ def event_cache_key(
     channel_id = entity.channel_id or ""
     scope = platform_scope or platform
     return (
-        f"{scope}:{platform}:{bot_id}:{entity.user_id}:"
-        f"{group_id}:{channel_id}:{msg_id}"
+        f"{scope}:{platform}:{bot_id}:{entity.user_id}:{group_id}:{channel_id}:{msg_id}"
     )
 
 
