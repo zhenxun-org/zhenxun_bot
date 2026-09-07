@@ -88,8 +88,7 @@ class FallbackRouter(BaseModelRouter):
                     )
                     raise e
                 logger.warning(
-                    f"⚠️ 节点 '{m_name}' "
-                    f"错误 ({e.__class__.__name__})，触发故障转移..."
+                    f"⚠️ 节点 '{m_name}' 错误 ({e.__class__.__name__})，触发故障转移..."
                 )
                 errors.append(f"{m_name}({e.__class__.__name__})")
             except Exception as e:
@@ -99,7 +98,7 @@ class FallbackRouter(BaseModelRouter):
         if all_nodes_bypassed and len(model_names) > 1:
             fallback_model = health_manager.get_best_fallback_route(model_names)
             logger.warning(
-                f"⚠️ 路由组所有节点均已宕机！" f"强制放行 '{fallback_model}' 探活..."
+                f"⚠️ 路由组所有节点均已宕机！强制放行 '{fallback_model}' 探活..."
             )
             try:
                 async with await get_model_instance(
