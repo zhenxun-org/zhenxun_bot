@@ -595,9 +595,7 @@ class ResponsesMessageConverter(MessageConverter):
                         {
                             "type": "reasoning",
                             "content": [],
-                            "summary": [
-                                {"type": "summary_text", "text": thought_text}
-                            ],
+                            "summary": [{"type": "summary_text", "text": thought_text}],
                         }
                     )
 
