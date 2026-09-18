@@ -301,7 +301,7 @@ class LoggingMiddleware:
 
             smart_adapter = cast(SmartAdapter, self.adapter)
             delegate_adapter = smart_adapter._get_delegate_adapter(self.identity)
-            sanitizer_req_context = f"{delegate_adapter.api_type}_request"
+            sanitizer_req_context = delegate_adapter.log_sanitization_context
         else:
             sanitizer_req_context = self.adapter.log_sanitization_context
 

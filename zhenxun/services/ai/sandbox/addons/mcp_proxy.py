@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import json
 from typing import Any
 
+import anyio
 from anyio import create_memory_object_stream, create_task_group
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
@@ -61,16 +62,25 @@ class UniversalMcpExtension(BaseMcpProxyExtension):
                                 if not line.strip():
                                     continue
                                 try:
-                                    msg = model_validate(
+                                    msg_obj = model_validate(
                                         JSONRPCMessage, json.loads(line)
                                     )
-                                    await read_prod.send(SessionMessage(message=msg))
+                                    await read_prod.send(
+                                        SessionMessage(message=msg_obj)
+                                    )
                                 except Exception as exc:
                                     await read_prod.send(exc)
-                except Exception:
+                except anyio.ClosedResourceError:
                     pass
+                except BaseException as e:
+                    logger.debug(
+                        f"🔇 [MCP Universal] 读流异常: {type(e).__name__}: {e}"
+                    )
                 finally:
-                    await read_prod.aclose()
+                    try:
+                        await read_prod.aclose()
+                    except Exception:
+                        pass
 
             async def stream_writer():
                 try:
@@ -82,8 +92,12 @@ class UniversalMcpExtension(BaseMcpProxyExtension):
                             + b"\n"
                         )
                         await process_stream.write(data)
-                except Exception:
+                except anyio.ClosedResourceError:
                     pass
+                except BaseException as e:
+                    logger.debug(
+                        f"🔇 [MCP Universal] 写流异常: {type(e).__name__}: {e}"
+                    )
 
             async with create_task_group() as tg:
                 tg.start_soon(stream_reader)

@@ -64,8 +64,10 @@ class MCPServerConfig(BaseModel):
             values["transport"] = values.pop("type")
 
         transport_val = values.get("transport")
-        if isinstance(transport_val, str) and transport_val.lower() == "streamablehttp":
-            values["transport"] = "streamable-http"
+        if isinstance(transport_val, str):
+            t_lower = transport_val.lower()
+            if t_lower in ("streamablehttp", "http"):
+                values["transport"] = "streamable-http"
 
         headers = values.get("headers")
         if isinstance(headers, dict):
