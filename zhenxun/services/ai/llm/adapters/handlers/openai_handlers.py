@@ -521,6 +521,9 @@ class ResponsesConfigMapper(OpenAIConfigMapper):
 class ResponsesMessageConverter(MessageConverter):
     """针对 OpenAI Responses API 的消息转换器"""
 
+    def __init__(self, api_type: str = "openai_responses"):
+        self.api_type = api_type
+
     async def convert_messages_async(
         self, messages: list[LLMMessage]
     ) -> list[dict[str, Any]]:
@@ -543,11 +546,14 @@ class ResponsesMessageConverter(MessageConverter):
                     continue
 
             content_list: list[dict[str, Any]] = []
+            thought_text = ""
             for part in msg.content:
                 if part is None:
                     continue
 
-                if isinstance(part, TextPart):
+                if isinstance(part, ThoughtPart):
+                    thought_text += part.thought_text
+                elif isinstance(part, TextPart):
                     c_type = "output_text" if role == "assistant" else "input_text"
                     content_list.append({"type": c_type, "text": part.text})
                 elif isinstance(part, ImagePart):
@@ -572,6 +578,26 @@ class ResponsesMessageConverter(MessageConverter):
                         content_list.append(
                             {"type": "input_image", "image_url": image_src}
                         )
+
+            if role == "assistant" and thought_text:
+                if self.api_type == "deepseek":
+                    input_items.append(
+                        {
+                            "type": "reasoning",
+                            "content": [
+                                {"type": "reasoning_text", "text": thought_text}
+                            ],
+                            "summary": [],
+                        }
+                    )
+                else:
+                    input_items.append(
+                        {
+                            "type": "reasoning",
+                            "content": [],
+                            "summary": [{"type": "summary_text", "text": thought_text}],
+                        }
+                    )
 
             if content_list:
                 input_items.append({"role": role, "content": content_list})
@@ -661,6 +687,10 @@ class ResponsesResponseParser(OpenAIResponseParser):
                     )
                 )
             elif item.get("type") == "reasoning":
+                for r_content in item.get("content", []):
+                    if r_content.get("type") == "reasoning_text":
+                        thought_content += r_content.get("text", "")
+
                 for summary_item in item.get("summary", []):
                     if summary_item.get("type") == "summary_text":
                         thought_content += summary_item.get("text", "")
@@ -868,7 +898,7 @@ class OpenAIResponsesTextHandler(OpenAITextHandler):
 
     def __init__(self, api_type: str = "openai_responses"):
         super().__init__(api_type=api_type)
-        self.converter = ResponsesMessageConverter()
+        self.converter = ResponsesMessageConverter(api_type=api_type)
         self.serializer = ResponsesToolSerializer(api_type=api_type)
         self.mapper = ResponsesConfigMapper(api_type=api_type)
         self.parser = ResponsesResponseParser()

@@ -44,6 +44,11 @@ __plugin_meta__ = PluginMetadata(
     llm keys <ProviderName>
       - 查看指定提供商的所有API Key状态。
 
+    llm reset [ProviderName]
+      - 重置 API Key 的熔断与冷却状态。
+      - 带参数: 仅重置指定提供商的所有 Key。
+      - 不带参数: 全局重置所有提供商的所有 Key。
+
     llm mcp [action] [targets...]
       - 管理 MCP (Model Context Protocol) 服务。
       - 不带参数: 查看当前配置的 MCP 服务列表及序号。
@@ -74,6 +79,9 @@ llm_cmd = on_alconna(
             "test", Args["model_name", str], alias=["ping"], help_text="测试模型连通性"
         ),
         Subcommand("keys", Args["provider_name", str], help_text="查看API密钥状态"),
+        Subcommand(
+            "reset", Args["provider_name", str, ""], help_text="重置API密钥状态"
+        ),
         Subcommand(
             "mcp",
             Option("添加", Args["json_strs", MultiVar(str)], alias=["add"]),
@@ -171,6 +179,22 @@ async def handle_keys(arp: Arparma, provider_name: Match[str]):
         provider_name.result, sorted_stats
     )
     await llm_cmd.finish(MessageUtils.build_message(image))
+
+
+@llm_cmd.assign("reset")
+async def handle_reset(arp: Arparma):
+    """处理 'llm reset' 命令"""
+    provider_name = arp.query("reset.provider_name", "").strip()
+    target_log = provider_name if provider_name else "ALL"
+    logger.info(
+        f"执行 API Key 重置操作: {target_log}",
+        command="LLM Manage",
+        session=arp.header_result,
+    )
+    _success, msg = await DataSource.reset_keys(
+        provider_name if provider_name else None
+    )
+    await llm_cmd.finish(msg)
 
 
 @llm_cmd.assign("mcp")

@@ -6,8 +6,10 @@ from zhenxun.configs.path_config import DATA_PATH
 from zhenxun.services.ai.core.exceptions import LLMException
 from zhenxun.services.ai.llm.api import chat
 from zhenxun.services.ai.llm.manager import (
+    get_configured_providers,
     get_model_instance,
     list_available_models,
+    reset_key_status,
 )
 from zhenxun.services.ai.tools.providers.mcp.provider import mcp_provider
 
@@ -104,6 +106,34 @@ class DataSource:
         sorted_stats_list = sorted(stats_list, key=sort_key)
 
         return sorted_stats_list
+
+    @staticmethod
+    async def reset_keys(provider_name: str | None = None) -> tuple[bool, str]:
+        """重置指定或所有提供商的 API Key 状态"""
+        providers = get_configured_providers()
+
+        if provider_name:
+            target = next(
+                (p for p in providers if p.name.lower() == provider_name.lower()), None
+            )
+            if not target:
+                return False, f"❌ 未找到提供商 '{provider_name}'，请检查名称是否正确。"
+            await reset_key_status(target.name)
+            return (
+                True,
+                f"✅ 已成功重置提供商 '{target.name}'"
+                "的所有 API Key 状态为健康 (HEALTHY)。",
+            )
+        else:
+            count = 0
+            for p in providers:
+                await reset_key_status(p.name)
+                count += 1
+            return (
+                True,
+                f"✅ 已成功重置所有提供商 (共 {count} 个) "
+                "的 API Key 状态为健康 (HEALTHY)。",
+            )
 
     @staticmethod
     async def get_mcp_list() -> list[dict[str, Any]]:

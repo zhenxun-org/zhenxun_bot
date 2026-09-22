@@ -30,6 +30,23 @@ class CodeExecutionTool(ServerSideTool):
         self.timeout = timeout
 
 
+class XSearchTool(ServerSideTool):
+    """原生 X (推特) 搜索工具 (Grok独占)"""
+
+    type_id = "x_search"
+
+    def __init__(
+        self,
+        allowed_x_handles: list[str] | None = None,
+        excluded_x_handles: list[str] | None = None,
+    ):
+        super().__init__(
+            name="x_search", description="在 X (Twitter) 上搜索推文、用户资料和时间线。"
+        )
+        self.allowed_x_handles = allowed_x_handles
+        self.excluded_x_handles = excluded_x_handles
+
+
 class ComputerUseTool(ServerSideTool):
     """原生的桌面环境控制工具"""
 
@@ -70,10 +87,7 @@ class UrlContextTool(ServerSideTool):
 
 class Native:
     """
-    云端原生工具命名空间工厂 (Namespace Factory)。
-
-    为开发者提供统一的云端内置工具调用入口，享受顶级 IDE 补全体验。
-    此类工具仅会向大模型提供描述，物理执行发生在各大模型厂商的服务端。
+    云端原生工具命名空间工厂
     """
 
     @classmethod
@@ -88,6 +102,17 @@ class Native:
         原生网页搜索引擎工具 (如 Google Search, Bing)。
         """
         return WebSearchTool(name, description, dynamic_threshold, domain_filters)
+
+    @classmethod
+    def x_search(
+        cls,
+        allowed_x_handles: list[str] | None = None,
+        excluded_x_handles: list[str] | None = None,
+    ) -> XSearchTool:
+        """
+        原生 X (Twitter) 检索工具 (Grok 独占)。
+        """
+        return XSearchTool(allowed_x_handles, excluded_x_handles)
 
     @classmethod
     def code_execution(

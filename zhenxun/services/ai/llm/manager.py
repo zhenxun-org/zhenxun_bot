@@ -58,6 +58,7 @@ def get_default_api_base_for_type(api_type: str) -> str | None:
         "glm": "https://open.bigmodel.cn",
         "gemini": "https://generativelanguage.googleapis.com",
         "openrouter": "https://openrouter.ai/api",
+        "grok": "https://api.x.ai/v1",
         "smart": None,
         "openai_responses": None,
     }

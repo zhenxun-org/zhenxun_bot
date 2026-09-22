@@ -98,8 +98,15 @@ async def filtered_stdio_client(
                         await filtered_send.send(item)
             except anyio.ClosedResourceError:
                 pass
+            except BaseException as e:
+                logger.debug(
+                    f"🔇 [MCP Stdout Filter] 捕获到底层流异常: {type(e).__name__}: {e}"
+                )
             finally:
-                await filtered_send.aclose()
+                try:
+                    await filtered_send.aclose()
+                except Exception:
+                    pass
 
         async with anyio.create_task_group() as tg:
             tg.start_soon(_forward_stdout)
@@ -540,7 +547,12 @@ class MCPToolkit(BaseToolkit):
                         await self._stop_event.wait()
                         return
 
-                except Exception as e:
+                except BaseException as e:
+                    if isinstance(
+                        e, asyncio.CancelledError | KeyboardInterrupt | SystemExit
+                    ):
+                        raise e
+
                     from zhenxun.services.ai.core.exceptions import SandboxFatalError
 
                     if isinstance(e, SandboxFatalError):
@@ -548,23 +560,30 @@ class MCPToolkit(BaseToolkit):
 
                     if attempt < max_attempts:
                         logger.warning(
-                            f"⚠️ [{self.server_name}] 进程启动或运行异常崩溃，"
+                            f"⚠️ [{self.server_name}] 进程启动或"
+                            f"底层流异常崩溃 ({type(e).__name__})，"
                             "疑似环境损坏。触发自愈机制 (准备重试)..."
                         )
-                        self._init_exception = e
+                        self._init_exception = (
+                            e if isinstance(e, Exception) else Exception(str(e))
+                        )
                         self._shared_session = None
                         if not self._is_initialized:
                             self._is_initialized = False
                         continue
 
+                    if not isinstance(e, Exception):
+                        raise Exception(f"底层致命异常: {e}") from e
                     raise e
 
-        except Exception as e:
-            self._init_exception = e
+        except BaseException as e:
+            if isinstance(e, asyncio.CancelledError | KeyboardInterrupt | SystemExit):
+                raise e
+            self._init_exception = e if isinstance(e, Exception) else Exception(str(e))
             logger.error(
                 f"MCP 服务器 '{self.server_name}' "
-                f"初始化连接失败（模式: {self.transport}）。"
-                f"错误原因: {e}"
+                f"初始化连接或运行期间发生底层故障（模式: {self.transport}）。"
+                f"错误类型: {type(e).__name__}, 原因: {e}"
             )
             if "Connection closed" in str(e):
                 logger.error(

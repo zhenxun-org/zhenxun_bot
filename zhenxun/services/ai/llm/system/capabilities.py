@@ -9,6 +9,7 @@ from zhenxun.utils.pydantic_compat import model_copy
 
 CTX_1_05M = 1_050_000
 CTX_1M = 1_000_000
+CTX_500K = 500_000
 CTX_400K = 400_000
 CTX_256K = 256_000
 CTX_200K = 204_800
@@ -122,7 +123,16 @@ CAP_OPENAI_MULTIMODAL = ModelCapabilities(
     },
     reasoning_effort_map={"max": "xhigh", "minimal": "none"},
 )
-CAP_DEEPSEEK_V4 = ModelCapabilities(
+CAP_GROK = ModelCapabilities(
+    input_modalities={ModelModality.TEXT, ModelModality.IMAGE},
+    output_modalities={ModelModality.TEXT},
+    supports_tool_calling=True,
+    reasoning_mode=ReasoningMode.EFFORT,
+    reasoning_visibility="visible",
+    supported_native_tools={"web_search", "x_search", "code_execution", "file_search"},
+)
+
+CAP_DEEPSEEK_PRO = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
     output_modalities={ModelModality.TEXT},
     supports_tool_calling=True,
@@ -130,6 +140,14 @@ CAP_DEEPSEEK_V4 = ModelCapabilities(
     reasoning_mode=ReasoningMode.EFFORT,
     reasoning_visibility="visible",
     reasoning_effort_map={"minimal": "low"},
+    supported_native_tools={"web_search"},
+)
+
+CAP_DEEPSEEK_FLASH = model_copy(
+    CAP_DEEPSEEK_PRO,
+    update={
+        "input_modalities": {ModelModality.TEXT, ModelModality.IMAGE},
+    },
 )
 CAP_MINIMAX_REASONING = ModelCapabilities(
     input_modalities={ModelModality.TEXT},
@@ -279,7 +297,10 @@ _ROUTING_TABLE: list[tuple[list[str], ModelCapabilities, int]] = [
     (["*gemini*image*", "*nano-banana*"], CAP_GEMINI_IMAGE, CTX_128K),
     (["glm-4.6v*"], CAP_GLM_MULTIMODAL, CTX_128K),
     (["glm-4.7-flash*"], STANDARD_TEXT_TOOL_CAPABILITIES, CTX_128K),
-    (["deepseek-v4-pro*", "deepseek-v4-flash*"], CAP_DEEPSEEK_V4, CTX_1M),
+    (["*grok-4.3*", "*grok-4.20*"], CAP_GROK, CTX_1M),
+    (["*grok*"], CAP_GROK, CTX_500K),
+    (["*deepseek*pro*"], CAP_DEEPSEEK_PRO, CTX_1M),
+    (["*deepseek*flash*"], CAP_DEEPSEEK_FLASH, CTX_1M),
     (["glm-4-long*"], STANDARD_TEXT_TOOL_CAPABILITIES, CTX_1M),
     (["*MiniMax-M3*"], CAP_MINIMAX_MULTIMODAL, CTX_1M),
     (["mimo-v2.5-pro*", "mimo-v2-pro*", "mimo-v2-flash*"], CAP_MIMO_TEXT, CTX_1M),

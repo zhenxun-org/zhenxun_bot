@@ -31,6 +31,7 @@ class LLMAdapterFactory:
         from .doubao import DoubaoAdapter
         from .gemini import GeminiAdapter
         from .glm import GLMAdapter
+        from .grok import GrokAdapter
         from .jina import JinaAdapter
         from .mimo import MiMoAdapter
         from .minimax import MiniMaxAdapter
@@ -48,6 +49,7 @@ class LLMAdapterFactory:
         cls.register_adapter(MiMoAdapter())
         cls.register_adapter(MiniMaxAdapter())
         cls.register_adapter(DoubaoAdapter())
+        cls.register_adapter(GrokAdapter())
 
     @classmethod
     def register_adapter(cls, adapter: BaseAdapter) -> None:
@@ -114,6 +116,7 @@ class SmartAdapter(BaseAdapter):
         ("*gemini*", "gemini"),
         ("*deepseek*", "deepseek"),
         ("*minimax*", "minimax"),
+        ("*grok*", "grok"),
         ("*gpt*", "openai_responses"),
     ]
     _DEFAULT_API_TYPE: ClassVar[str] = "openai"
