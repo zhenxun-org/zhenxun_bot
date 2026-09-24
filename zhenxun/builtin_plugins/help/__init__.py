@@ -77,12 +77,18 @@ _matcher = on_alconna(
         Args["name?", str],
         Option("-d|--detail", action=store_true, help_text="详细帮助"),
     ),
-    aliases={"help", "帮助", "菜单"},
+    aliases={"help", "菜单"},
     rule=to_me(),
     priority=1,
     block=True,
 )
 
+_matcher.shortcut(
+    r"帮助(?P<name>.*?)",
+    command="功能",
+    arguments=["{name}"],
+    prefix=True,
+)
 
 _matcher.shortcut(
     r"详细帮助",
