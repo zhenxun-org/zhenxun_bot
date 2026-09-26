@@ -152,7 +152,7 @@ async def _(session: Uninfo, arparma: Arparma, nickname: str = UserName()):
 
 @_sign_matcher.assign("my")
 async def _(session: Uninfo, arparma: Arparma, nickname: str = UserName()):
-    path = await SignManage.sign(session, nickname, True)
+    path = await SignManage.sign(session, nickname)
     logger.info("查看我的签到", arparma.header_result, session=session)
     await MessageUtils.build_message(path).finish()
 
