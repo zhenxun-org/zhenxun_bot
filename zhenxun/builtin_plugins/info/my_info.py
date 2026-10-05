@@ -121,14 +121,16 @@ async def get_chat_history(
     now = datetime.now()
     filter_date = now - timedelta(days=7)
     date_list = await _read_db(
-        lambda: ChatHistory.filter(
-            user_id=user_id,
-            group_id=group_id,
-            create_time__gte=filter_date,
-        )
-        .annotate(date=RawSQL("DATE(create_time)"), count=Count("id"))
-        .group_by("date")
-        .values("date", "count"),
+        lambda: (
+            ChatHistory.filter(
+                user_id=user_id,
+                group_id=group_id,
+                create_time__gte=filter_date,
+            )
+            .annotate(date=RawSQL("DATE(create_time)"), count=Count("id"))
+            .group_by("date")
+            .values("date", "count")
+        ),
         "MyInfo.chat_history_chart",
         [],
     )
