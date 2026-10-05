@@ -59,7 +59,7 @@ async def _prune_stale_tags():
     deleted_count = await tag_manager.prune_stale_group_links()
     if deleted_count > 0:
         logger.info(
-            f"定时任务：成功清理了 {deleted_count} 个无效的群组标签" f"关联。",
+            f"定时任务：成功清理了 {deleted_count} 个无效的群组标签关联。",
             "群组标签管理",
         )
     else:
