@@ -133,7 +133,7 @@ async def _repair_missing_qq_client_group(
                 "group_name": "",
                 "max_member_count": 0,
                 "member_count": 0,
-                "group_flag": 1,
+                "group_flag": 0,
                 "platform": context.platform,
             }
             group, _ = await with_db_timeout(
