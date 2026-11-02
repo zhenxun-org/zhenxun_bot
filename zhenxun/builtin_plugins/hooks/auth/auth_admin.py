@@ -76,8 +76,7 @@ async def auth_admin(
                 raise SkipPluginException(
                     f"{plugin.name}({plugin.module}) 管理员权限不足...",
                     tip_message=(
-                        f"你的权限不足喔，该功能需要的权限等级: "
-                        f"{plugin.admin_level}"
+                        f"你的权限不足喔，该功能需要的权限等级: {plugin.admin_level}"
                     ),
                     tip_background=True,
                 )
